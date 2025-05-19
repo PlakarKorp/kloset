@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/resources"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/resources"
 	"github.com/google/uuid"
 )
 

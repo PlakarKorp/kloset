@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/resources"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/resources"
 )
 
 type ScanCache struct {

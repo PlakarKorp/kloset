@@ -9,7 +9,7 @@ import (
 	"iter"
 	"syscall"
 
-	"github.com/PlakarKorp/plakar/objects"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/cockroachdb/pebble/v2"
 )
 

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/PlakarKorp/plakar/objects"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/google/uuid"
 )
 
