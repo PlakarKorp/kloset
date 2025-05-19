@@ -1,4 +1,4 @@
-module github.com/PlakarKorp/plakar
+module github.com/PlakarKorp/kloset
 
 go 1.23.3
 
