@@ -4,14 +4,12 @@ go 1.23.3
 
 require (
 	github.com/PlakarKorp/go-cdc-chunkers v0.0.10
-	github.com/anacrolix/fuse v0.3.1
 	github.com/charmbracelet/log v0.4.1
 	github.com/cockroachdb/pebble/v2 v2.0.3
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gabriel-vasile/mimetype v1.4.8
 	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
-	github.com/kevinburke/ssh_config v1.2.0
 	github.com/nickball/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5
 	github.com/pierrec/lz4/v4 v4.1.22
 	github.com/pkg/sftp v1.13.9
@@ -21,7 +19,6 @@ require (
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.36.0
 	golang.org/x/sync v0.12.0
-	golang.org/x/term v0.30.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
