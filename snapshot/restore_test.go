@@ -9,7 +9,6 @@ import (
 	"github.com/PlakarKorp/plakar/appcontext"
 	"github.com/PlakarKorp/plakar/snapshot"
 	"github.com/PlakarKorp/plakar/snapshot/exporter"
-	_ "github.com/PlakarKorp/plakar/snapshot/exporter/fs"
 	"github.com/stretchr/testify/require"
 )
 

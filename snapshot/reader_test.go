@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	_ "github.com/PlakarKorp/plakar/snapshot/exporter/fs"
 	"github.com/stretchr/testify/require"
 )
 
