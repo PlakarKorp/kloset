@@ -1,7 +1,7 @@
 package btree
 
 import (
-	"github.com/PlakarKorp/plakar/caching/lru"
+	"github.com/PlakarKorp/kloset/caching/lru"
 )
 
 type cacheitem[K any, P comparable, V any] struct {

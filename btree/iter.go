@@ -1,6 +1,6 @@
 package btree
 
-import "github.com/PlakarKorp/plakar/iterator"
+import "github.com/PlakarKorp/kloset/iterator"
 
 type forwardIter[K any, P comparable, V any] struct {
 	b       *BTree[K, P, V]
