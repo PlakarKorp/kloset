@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/plakar/snapshot"
-	_ "github.com/PlakarKorp/plakar/snapshot/exporter/fs"
 	"github.com/stretchr/testify/require"
 )
 
