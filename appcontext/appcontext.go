@@ -6,12 +6,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/PlakarKorp/plakar/caching"
-	"github.com/PlakarKorp/plakar/config"
-	"github.com/PlakarKorp/plakar/cookies"
-	"github.com/PlakarKorp/plakar/encryption/keypair"
-	"github.com/PlakarKorp/plakar/events"
-	"github.com/PlakarKorp/plakar/logging"
+	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/config"
+	"github.com/PlakarKorp/kloset/cookies"
+	"github.com/PlakarKorp/kloset/encryption/keypair"
+	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/logging"
 	"github.com/google/uuid"
 )
 

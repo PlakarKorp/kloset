@@ -3,9 +3,9 @@ package appcontext
 import (
 	"testing"
 
-	"github.com/PlakarKorp/plakar/caching"
-	"github.com/PlakarKorp/plakar/encryption/keypair"
-	"github.com/PlakarKorp/plakar/logging"
+	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/encryption/keypair"
+	"github.com/PlakarKorp/kloset/logging"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
