@@ -55,14 +55,6 @@ import (
 	_ "github.com/PlakarKorp/plakar/cmd/plakar/subcommands/ui"
 	_ "github.com/PlakarKorp/plakar/cmd/plakar/subcommands/version"
 
-	_ "github.com/PlakarKorp/plakar/storage/backends/fs"
-	_ "github.com/PlakarKorp/plakar/storage/backends/http"
-	_ "github.com/PlakarKorp/plakar/storage/backends/null"
-	_ "github.com/PlakarKorp/plakar/storage/backends/ptar"
-	_ "github.com/PlakarKorp/plakar/storage/backends/s3"
-	_ "github.com/PlakarKorp/plakar/storage/backends/sftp"
-	_ "github.com/PlakarKorp/plakar/storage/backends/sqlite"
-
 	_ "github.com/PlakarKorp/plakar/snapshot/importer/fs"
 	_ "github.com/PlakarKorp/plakar/snapshot/importer/ftp"
 	_ "github.com/PlakarKorp/plakar/snapshot/importer/s3"

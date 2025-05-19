@@ -8,7 +8,6 @@ import (
 	"github.com/PlakarKorp/plakar/appcontext"
 	"github.com/PlakarKorp/plakar/logging"
 	"github.com/PlakarKorp/plakar/storage"
-	_ "github.com/PlakarKorp/plakar/storage/backends/fs"
 	ptesting "github.com/PlakarKorp/plakar/testing"
 	"github.com/stretchr/testify/require"
 )

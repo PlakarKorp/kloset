@@ -17,7 +17,6 @@ import (
 	"github.com/PlakarKorp/plakar/resources"
 	_ "github.com/PlakarKorp/plakar/snapshot/importer/fs"
 	"github.com/PlakarKorp/plakar/storage"
-	bfs "github.com/PlakarKorp/plakar/storage/backends/fs"
 	"github.com/PlakarKorp/plakar/versioning"
 	"github.com/stretchr/testify/require"
 )
