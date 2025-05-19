@@ -6,8 +6,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/snapshot/importer"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/snapshot/importer"
 )
 
 type MockImporter struct {

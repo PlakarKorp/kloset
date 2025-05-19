@@ -3,7 +3,7 @@ package snapshot_test
 import (
 	"testing"
 
-	"github.com/PlakarKorp/plakar/encryption/keypair"
+	"github.com/PlakarKorp/kloset/encryption/keypair"
 	"github.com/stretchr/testify/require"
 )
 

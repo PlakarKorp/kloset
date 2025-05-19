@@ -11,7 +11,7 @@ import (
 	"path"
 	"strings"
 
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 type ArchiveFormat = string

@@ -6,8 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/PlakarKorp/plakar/resources"
-	"github.com/PlakarKorp/plakar/versioning"
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/vmihailenco/msgpack/v5"
 )
 

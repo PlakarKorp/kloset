@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/PlakarKorp/plakar/events"
-	"github.com/PlakarKorp/plakar/snapshot/exporter"
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/snapshot/exporter"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 type RestoreOptions struct {

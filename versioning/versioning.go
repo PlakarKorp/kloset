@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/PlakarKorp/plakar/resources"
+	"github.com/PlakarKorp/kloset/resources"
 )
 
 type Version uint32

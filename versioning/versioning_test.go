@@ -3,7 +3,7 @@ package versioning
 import (
 	"testing"
 
-	"github.com/PlakarKorp/plakar/resources"
+	"github.com/PlakarKorp/kloset/resources"
 )
 
 func TestNewVersion(t *testing.T) {

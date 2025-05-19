@@ -3,9 +3,9 @@ package repository
 import (
 	"errors"
 
-	"github.com/PlakarKorp/plakar/btree"
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/resources"
+	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/resources"
 	"github.com/vmihailenco/msgpack/v5"
 )
 

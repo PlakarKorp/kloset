@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/compression"
+	"github.com/PlakarKorp/kloset/compression"
 )
 
 func TestDeriveKey(t *testing.T) {

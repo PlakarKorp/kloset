@@ -7,7 +7,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 type SearchOpts struct {

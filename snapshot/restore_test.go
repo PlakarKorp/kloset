@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/snapshot"
-	"github.com/PlakarKorp/plakar/snapshot/exporter"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/snapshot"
+	"github.com/PlakarKorp/kloset/snapshot/exporter"
 	"github.com/stretchr/testify/require"
 )
 

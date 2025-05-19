@@ -4,8 +4,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/objects"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/stretchr/testify/require"
 )
 

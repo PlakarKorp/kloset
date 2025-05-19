@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/versioning"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/stretchr/testify/require"
 )
 

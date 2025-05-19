@@ -7,10 +7,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/network"
-	"github.com/PlakarKorp/plakar/repository"
-	"github.com/PlakarKorp/plakar/storage"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/network"
+	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/storage"
 )
 
 var store storage.Store

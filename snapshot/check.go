@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"hash"
 
-	"github.com/PlakarKorp/plakar/events"
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/resources"
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"golang.org/x/sync/errgroup"
 )
 

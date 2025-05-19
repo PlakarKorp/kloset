@@ -7,9 +7,9 @@ import (
 	"hash"
 	"io"
 
-	"github.com/PlakarKorp/plakar/hashing"
-	"github.com/PlakarKorp/plakar/resources"
-	"github.com/PlakarKorp/plakar/versioning"
+	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/versioning"
 )
 
 const (

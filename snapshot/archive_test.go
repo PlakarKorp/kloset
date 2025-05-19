@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/snapshot"
+	"github.com/PlakarKorp/kloset/snapshot"
 	"github.com/stretchr/testify/require"
 )
 

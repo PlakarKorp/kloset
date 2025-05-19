@@ -3,8 +3,8 @@ package snapshot
 import (
 	"crypto/ed25519"
 
-	"github.com/PlakarKorp/plakar/resources"
-	"github.com/PlakarKorp/plakar/versioning"
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
 )
 

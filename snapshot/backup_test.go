@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/snapshot/importer"
-	ptesting "github.com/PlakarKorp/plakar/testing"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/snapshot/importer"
+	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
 

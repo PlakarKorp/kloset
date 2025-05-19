@@ -22,9 +22,9 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/location"
-	"github.com/PlakarKorp/plakar/objects"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/location"
+	"github.com/PlakarKorp/kloset/objects"
 )
 
 type ScanResult struct {

@@ -1,7 +1,7 @@
 package network
 
 import (
-	"github.com/PlakarKorp/plakar/objects"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/google/uuid"
 )
 

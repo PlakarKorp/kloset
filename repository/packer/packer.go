@@ -14,12 +14,12 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/packfile"
-	"github.com/PlakarKorp/plakar/resources"
-	"github.com/PlakarKorp/plakar/storage"
-	"github.com/PlakarKorp/plakar/versioning"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/packfile"
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/storage"
+	"github.com/PlakarKorp/kloset/versioning"
 )
 
 func init() {

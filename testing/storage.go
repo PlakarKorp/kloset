@@ -3,13 +3,13 @@ package testing
 import (
 	"time"
 
-	"github.com/PlakarKorp/plakar/chunking"
-	"github.com/PlakarKorp/plakar/compression"
-	"github.com/PlakarKorp/plakar/encryption"
-	"github.com/PlakarKorp/plakar/hashing"
-	"github.com/PlakarKorp/plakar/packfile"
-	"github.com/PlakarKorp/plakar/storage"
-	"github.com/PlakarKorp/plakar/versioning"
+	"github.com/PlakarKorp/kloset/chunking"
+	"github.com/PlakarKorp/kloset/compression"
+	"github.com/PlakarKorp/kloset/encryption"
+	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/packfile"
+	"github.com/PlakarKorp/kloset/storage"
+	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
 )
 

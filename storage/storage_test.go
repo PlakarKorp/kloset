@@ -5,10 +5,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/logging"
-	"github.com/PlakarKorp/plakar/storage"
-	ptesting "github.com/PlakarKorp/plakar/testing"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/storage"
+	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
 

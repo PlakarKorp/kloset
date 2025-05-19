@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/PlakarKorp/plakar/btree"
-	"github.com/PlakarKorp/plakar/objects"
-	"github.com/PlakarKorp/plakar/resources"
-	"github.com/PlakarKorp/plakar/snapshot/header"
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/snapshot/header"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
 )
 

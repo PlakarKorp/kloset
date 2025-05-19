@@ -9,7 +9,7 @@ import (
 	"hash"
 	"io"
 
-	"github.com/PlakarKorp/plakar/hashing"
+	"github.com/PlakarKorp/kloset/hashing"
 	aeskw "github.com/nickball/go-aes-key-wrap"
 	"github.com/tink-crypto/tink-go/v2/aead/subtle"
 	"golang.org/x/crypto/argon2"

@@ -21,8 +21,8 @@ import (
 	"log"
 	"sync"
 
-	"github.com/PlakarKorp/plakar/appcontext"
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 const VERSION string = "0.6.0"

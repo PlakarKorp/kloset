@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/plakar/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/stretchr/testify/require"
 )
 

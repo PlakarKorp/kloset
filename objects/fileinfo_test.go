@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	mocked_fileinfo "github.com/PlakarKorp/plakar/testing/fileinfo"
+	mocked_fileinfo "github.com/PlakarKorp/kloset/testing/fileinfo"
 )
 
 func TestParseFileInfoSortKeys(t *testing.T) {

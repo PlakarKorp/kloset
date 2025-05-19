@@ -3,7 +3,7 @@
 package plakarfs
 
 import (
-	"github.com/PlakarKorp/plakar/repository"
+	"github.com/PlakarKorp/kloset/repository"
 	"github.com/anacrolix/fuse/fs"
 )
 
