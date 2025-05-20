@@ -41,10 +41,13 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 	ctx.Client = "plakar-test/1.0.0"
 
 	// create a storage
-	r, err := bfs.NewStore(ctx, "fs", map[string]string{"location": "fs://" + tmpRepoDir})
+
+	r, err := storage.New(ctx, map[string]string{"location": "mock://" + tmpRepoDir})
 	require.NotNil(t, r)
 	require.NoError(t, err)
+
 	config := storage.NewConfiguration()
+	config.Compression = nil
 	hasher := hashing.GetHasher(hashing.DEFAULT_HASHING_ALGORITHM)
 
 	var key []byte
@@ -73,7 +76,7 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 	require.NoError(t, err)
 
 	// open the storage to load the configuration
-	r, serializedConfig, err := storage.Open(ctx, map[string]string{"location": tmpRepoDir})
+	serializedConfig, err := r.Open(ctx)
 	require.NoError(t, err)
 
 	// create a repository
@@ -131,9 +134,10 @@ func GenerateRepositoryWithoutConfig(t *testing.T, bufout *bytes.Buffer, buferr 
 	ctx.MaxConcurrency = 1
 
 	// create a storage
-	r, err := bfs.NewStore(ctx, "fs", map[string]string{"location": tmpRepoDir})
+	r, err := storage.New(ctx, map[string]string{"location": "mock://" + tmpRepoDir})
 	require.NotNil(t, r)
 	require.NoError(t, err)
+
 	config := storage.NewConfiguration()
 
 	var key []byte
