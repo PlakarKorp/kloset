@@ -288,13 +288,6 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	snap.Event(events.StartEvent())
 	defer snap.Event(events.DoneEvent())
 
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-	defer snap.Unlock(done)
-
 	snap.Header.GetSource(0).Importer.Origin = imp.Origin()
 	snap.Header.GetSource(0).Importer.Type = imp.Type()
 	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
