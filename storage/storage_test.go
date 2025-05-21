@@ -98,7 +98,7 @@ func TestBackends(t *testing.T) {
 		return &ptesting.MockBackend{}, nil
 	}, "test")
 
-	expected := []string{"fs", "mock", "test"}
+	expected := []string{"mock", "test"}
 	actual := storage.Backends()
 	require.Equal(t, expected, actual)
 }
@@ -153,12 +153,7 @@ func TestNew(t *testing.T) {
 
 		// storage.Register("unknown", func(location string) storage.Store { return ptesting.NewMockBackend(location) })
 		store, err := storage.New(ctx, map[string]string{"location": "dummy"})
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
-
-		if store.Location() != "fs://dummy" {
-			t.Errorf("expected location to be '%s', got %v", "dummy", store.Location())
-		}
+		require.Nil(t, store)
+		require.ErrorContains(t, err, "backend 'fs' does not exist")
 	})
 }

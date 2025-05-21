@@ -9,6 +9,7 @@ import (
 	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/snapshot"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
+	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -23,7 +24,8 @@ func TestRestore(t *testing.T) {
 	})
 	var exporterInstance exporter.Exporter
 	appCtx := appcontext.NewAppContext()
-	exporterInstance, err = exporter.NewExporter(appCtx, map[string]string{"location": tmpRestoreDir})
+
+	exporterInstance, err = ptesting.NewMockExporter(appCtx, "mock", map[string]string{"location": "mock://" + tmpRestoreDir})
 	require.NoError(t, err)
 	defer exporterInstance.Close()
 
@@ -47,12 +49,13 @@ func TestRestore(t *testing.T) {
 	err = snap.Restore(exporterInstance, exporterInstance.Root(), filepath, opts)
 	require.NoError(t, err)
 
-	files, err := os.ReadDir(exporterInstance.Root())
-	fmt.Println(files)
-	require.NoError(t, err)
+	mockExporter, ok := exporterInstance.(*ptesting.MockExporter)
+	require.True(t, ok)
+
+	files := mockExporter.Files()
 	require.Equal(t, 1, len(files))
 
-	contents, err := os.ReadFile(fmt.Sprintf("%s/dummy.txt", exporterInstance.Root()))
-	require.NoError(t, err)
+	contents, ok := files[fmt.Sprintf("%s/dummy.txt", exporterInstance.Root())]
+	require.True(t, ok)
 	require.Equal(t, "hello", string(contents))
 }
