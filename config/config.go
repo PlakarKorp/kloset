@@ -13,7 +13,7 @@ import (
 )
 
 type Config struct {
-	pathname          string
+	Pathname          string
 	DefaultRepository string                      `yaml:"default-repo"`
 	Repositories      map[string]RepositoryConfig `yaml:"repositories"`
 	Remotes           map[string]RemoteConfig     `yaml:"remotes"`
@@ -27,7 +27,7 @@ func LoadOrCreate(configFile string) (*Config, error) {
 	if err != nil {
 		if os.IsNotExist(err) {
 			cfg := &Config{
-				pathname:     configFile,
+				Pathname:     configFile,
 				Repositories: make(map[string]RepositoryConfig),
 				Remotes:      make(map[string]RemoteConfig),
 			}
@@ -40,7 +40,7 @@ func LoadOrCreate(configFile string) (*Config, error) {
 	if err := yaml.NewDecoder(f).Decode(&config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
-	config.pathname = configFile
+	config.Pathname = configFile
 	if config.Repositories == nil {
 		config.Repositories = make(map[string]RepositoryConfig)
 	}
@@ -55,7 +55,7 @@ func (c *Config) Render(w io.Writer) error {
 }
 
 func (c *Config) Save() error {
-	dir := filepath.Dir(c.pathname)
+	dir := filepath.Dir(c.Pathname)
 	tmpFile, err := os.CreateTemp(dir, "config.*.yaml")
 	if err != nil {
 		return err
@@ -67,7 +67,7 @@ func (c *Config) Save() error {
 		os.Remove(tmpFile.Name())
 		return err
 	}
-	return os.Rename(tmpFile.Name(), c.pathname)
+	return os.Rename(tmpFile.Name(), c.Pathname)
 }
 
 func (c *Config) HasRepository(name string) bool {

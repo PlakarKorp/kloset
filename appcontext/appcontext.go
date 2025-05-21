@@ -2,8 +2,10 @@ package appcontext
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -16,12 +18,13 @@ import (
 )
 
 type AppContext struct {
-	events  *events.Receiver `msgpack:"-"`
-	cache   *caching.Manager `msgpack:"-"`
-	cookies *cookies.Manager `msgpack:"-"`
-	logger  *logging.Logger  `msgpack:"-"`
-	secret  []byte           `msgpack:"-"`
-	Config  *config.Config   `msgpack:"-"`
+	events    *events.Receiver `msgpack:"-"`
+	cache     *caching.Manager `msgpack:"-"`
+	cookies   *cookies.Manager `msgpack:"-"`
+	logger    *logging.Logger  `msgpack:"-"`
+	secret    []byte           `msgpack:"-"`
+	configMtx *sync.Mutex      `msgpack:"-"`
+	config    *config.Config   `msgpack:"-"`
 
 	Context context.Context    `msgpack:"-"`
 	Cancel  context.CancelFunc `msgpack:"-"`
@@ -57,17 +60,19 @@ func NewAppContext() *AppContext {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &AppContext{
-		events:  events.New(),
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
-		Context: ctx,
-		Cancel:  cancel,
+		events:    events.New(),
+		configMtx: &sync.Mutex{},
+		Stdout:    os.Stdout,
+		Stderr:    os.Stderr,
+		Context:   ctx,
+		Cancel:    cancel,
 	}
 }
 
 func NewAppContextFrom(template *AppContext) *AppContext {
 	ctx := *template
 	ctx.events = events.New()
+	ctx.configMtx = &sync.Mutex{}
 	ctx.Context, ctx.Cancel = context.WithCancel(template.Context)
 	return &ctx
 }
@@ -135,4 +140,146 @@ func (c *AppContext) GetAuthToken(repository uuid.UUID) (string, error) {
 	} else {
 		return authToken, nil
 	}
+}
+
+func (c *AppContext) SetConfig(cfg *config.Config) {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+	c.config = cfg
+}
+
+// All methods after this point are simple boilerplate around config, this is a
+// transition until we get appcontext out of kloset and into plakar
+// You don't want to use the config methods directly because you need this to
+// be locked as the pointer can be changed by another thread.
+func (c *AppContext) RenderConfig(w io.Writer) error {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	return c.config.Render(w)
+}
+
+func (c *AppContext) SaveConfig() error {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	return c.config.Save()
+}
+
+func (c *AppContext) HasRepositoryConfig(name string) bool {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	return c.config.HasRepository(name)
+}
+
+// GetRepositoryConfig returns a copy of the config for the `name` repository,
+// meaning once you get it it's safe to rely on it and it won't get changed
+// under your feet. For long lived task most of the time what you want is to
+// resolve the config at the start and then use this copy so that you are not
+// affected by possible config reloads and changes.
+func (c *AppContext) GetRepositoryConfig(name string) (map[string]string, error) {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+	return c.config.GetRepository(name)
+}
+
+func (c *AppContext) HasRemoteConfig(name string) bool {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+	return c.config.HasRemote(name)
+}
+
+func (c *AppContext) GetRemoteConfig(name string) (map[string]string, bool) {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+	return c.config.GetRemote(name)
+}
+
+func (c *AppContext) CreateRemoteConfig(name string) error {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	if c.config.HasRemote(name) {
+		return fmt.Errorf("remote %q doesn't exist", name)
+	}
+
+	c.config.Remotes[name] = make(map[string]string)
+	return c.config.Save()
+}
+
+// Set an option with value, or unset it if value is an empty string
+// Returns an error if the Remote `name` doesn't exist
+func (c *AppContext) SetRemoteConfig(name, option, value string) error {
+	if !c.config.HasRemote(name) {
+		return fmt.Errorf("remote %q doesn't exist", name)
+	}
+
+	if value == "" {
+		delete(c.config.Remotes[name], option)
+	} else {
+		c.config.Remotes[name][option] = value
+	}
+
+	return c.config.Save()
+}
+
+func (c *AppContext) CreateRepositoryConfig(name string) error {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	if c.config.HasRepository(name) {
+		return fmt.Errorf("repository %q doesn't exist", name)
+	}
+
+	c.config.Repositories[name] = make(map[string]string)
+	return c.config.Save()
+}
+
+func (c *AppContext) SetRepositoryConfig(name, option, value string) error {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	if !c.config.HasRepository(name) {
+		return fmt.Errorf("repository %q doesn't exist", name)
+	}
+
+	if value == "" {
+		delete(c.config.Repositories[name], option)
+	} else {
+		c.config.Repositories[name][option] = value
+	}
+
+	return c.config.Save()
+}
+
+func (c *AppContext) SetDefaultRepositoryConfig(name string) error {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	if !c.config.HasRepository(name) {
+		return fmt.Errorf("repository %q doesn't exist", name)
+	}
+
+	if _, ok := c.config.Repositories[name]["location"]; !ok {
+		return fmt.Errorf("repository %q doesn't have a location set", name)
+	}
+
+	c.config.DefaultRepository = name
+
+	return c.config.Save()
+}
+
+func (c *AppContext) GetDefaultRepositoryName() string {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	return c.config.DefaultRepository
+}
+
+func (c *AppContext) GetConfigPath() string {
+	c.configMtx.Lock()
+	defer c.configMtx.Unlock()
+
+	return c.config.Pathname
 }
