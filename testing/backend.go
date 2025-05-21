@@ -3,22 +3,21 @@ package testing
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/storage"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 func init() {
 	storage.Register(func(ctx *appcontext.AppContext, proto string, storeConfig map[string]string) (storage.Store, error) {
-		return &MockBackend{location: storeConfig["location"]}, nil
+		return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}, nil
 	}, "mock")
 }
 
@@ -67,13 +66,17 @@ var behaviors = map[string]mockedBackendBehavior{
 type MockBackend struct {
 	configuration []byte
 	location      string
+	locks         map[objects.MAC][]byte
+	stateMACs     map[objects.MAC][]byte
+	packfileMACs  map[objects.MAC][]byte
 
+	packfileMutex sync.Mutex
 	// used to trigger different behaviors during tests
 	behavior string
 }
 
 func NewMockBackend(storeConfig map[string]string) *MockBackend {
-	return &MockBackend{location: storeConfig["location"]}
+	return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}
 }
 
 func (mb *MockBackend) Create(ctx *appcontext.AppContext, configuration []byte) error {
@@ -81,7 +84,6 @@ func (mb *MockBackend) Create(ctx *appcontext.AppContext, configuration []byte) 
 		return errors.New("creating error")
 	}
 	mb.configuration = configuration
-	fmt.Println("CONFIG", mb.configuration)
 
 	mb.behavior = "default"
 
@@ -103,7 +105,6 @@ func (mb *MockBackend) Open(ctx *appcontext.AppContext) ([]byte, error) {
 	if strings.Contains(mb.location, "musterror") {
 		return nil, errors.New("opening error")
 	}
-	fmt.Println("CONFIG", mb.configuration)
 	return mb.configuration, nil
 }
 
@@ -121,72 +122,60 @@ func (mb *MockBackend) Size() int64 {
 
 func (mb *MockBackend) GetStates() ([]objects.MAC, error) {
 	ret := make([]objects.MAC, 0)
-	if mb.behavior == "brokenState" {
-		return ret, errors.New("broken state")
+	for MAC := range mb.stateMACs {
+		ret = append(ret, MAC)
 	}
-	return behaviors[mb.behavior].statesMACs, nil
+	return ret, nil
 }
 
 func (mb *MockBackend) PutState(MAC objects.MAC, rd io.Reader) (int64, error) {
-	return 0, nil
+	var buffer bytes.Buffer
+	io.Copy(&buffer, rd)
+	mb.stateMACs[MAC] = buffer.Bytes()
+	return int64(buffer.Len()), nil
 }
 
 func (mb *MockBackend) GetState(MAC objects.MAC) (io.Reader, error) {
-	if mb.behavior == "brokenGetState" {
-		return nil, errors.New("broken get state")
-	}
-
 	var buffer bytes.Buffer
+	buffer.Write(mb.stateMACs[MAC])
 	return &buffer, nil
 }
 
 func (mb *MockBackend) DeleteState(MAC objects.MAC) error {
+	delete(mb.stateMACs, MAC)
 	return nil
 }
 
 func (mb *MockBackend) GetPackfiles() ([]objects.MAC, error) {
-	if mb.behavior == "brokenGetPackfiles" {
-		return nil, errors.New("broken get packfiles")
+	ret := make([]objects.MAC, 0)
+	for MAC := range mb.packfileMACs {
+		ret = append(ret, MAC)
 	}
-
-	packfiles := behaviors[mb.behavior].packfilesMACs
-	return packfiles, nil
+	return ret, nil
 }
 
 func (mb *MockBackend) PutPackfile(MAC objects.MAC, rd io.Reader) (int64, error) {
-	return 0, nil
+	mb.packfileMutex.Lock()
+	defer mb.packfileMutex.Unlock()
+
+	var buffer bytes.Buffer
+	io.Copy(&buffer, rd)
+	mb.packfileMACs[MAC] = buffer.Bytes()
+	return int64(buffer.Len()), nil
 }
 
 func (mb *MockBackend) GetPackfile(MAC objects.MAC) (io.Reader, error) {
-	if mb.behavior == "brokenGetPackfile" {
-		return nil, errors.New("broken get packfile")
-	}
-
-	packfile := behaviors[mb.behavior].packfile
-	if packfile == "" {
-		return bytes.NewReader([]byte("packfile data")), nil
-	}
-
-	return bytes.NewReader([]byte(packfile)), nil
+	buffer := bytes.NewReader(mb.packfileMACs[MAC])
+	return buffer, nil
 }
 
 func (mb *MockBackend) GetPackfileBlob(MAC objects.MAC, offset uint64, length uint32) (io.Reader, error) {
-	if mb.behavior == "brokenGetPackfileBlob" {
-		return nil, errors.New("broken get packfile blob")
-	}
-
-	header := behaviors[mb.behavior].header
-	if header == nil {
-		return bytes.NewReader([]byte("blob data")), nil
-	}
-	data, err := msgpack.Marshal(header)
-	if err != nil {
-		panic(err)
-	}
-	return bytes.NewReader(data), nil
+	buffer := bytes.NewReader(mb.packfileMACs[MAC])
+	return io.NewSectionReader(buffer, int64(offset), int64(length)), nil
 }
 
 func (mb *MockBackend) DeletePackfile(MAC objects.MAC) error {
+	delete(mb.packfileMACs, MAC)
 	return nil
 }
 
@@ -196,17 +185,25 @@ func (mb *MockBackend) Close() error {
 
 /* Locks */
 func (mb *MockBackend) GetLocks() ([]objects.MAC, error) {
-	panic("Not implemented yet")
+	locks := make([]objects.MAC, 0)
+	for lock := range mb.locks {
+		locks = append(locks, lock)
+	}
+	return locks, nil
 }
 
 func (mb *MockBackend) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
-	panic("Not implemented yet")
+	var buffer bytes.Buffer
+	io.Copy(&buffer, rd)
+	mb.locks[lockID] = buffer.Bytes()
+	return int64(buffer.Len()), nil
 }
 
 func (mb *MockBackend) GetLock(lockID objects.MAC) (io.Reader, error) {
-	panic("Not implemented yet")
+	return bytes.NewReader(mb.locks[lockID]), nil
 }
 
 func (mb *MockBackend) DeleteLock(lockID objects.MAC) error {
-	panic("Not implemented yet")
+	delete(mb.locks, lockID)
+	return nil
 }

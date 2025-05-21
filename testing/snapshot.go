@@ -137,7 +137,8 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 		imp.(*MockImporter).SetFiles(files)
 	}
 
-	builder.Backup(imp, &snapshot.BackupOptions{Name: o.name, MaxConcurrency: 1})
+	err = builder.Backup(imp, &snapshot.BackupOptions{Name: o.name, MaxConcurrency: 1})
+	require.NoError(t, err)
 
 	err = builder.Repository().RebuildState()
 	require.NoError(t, err)
