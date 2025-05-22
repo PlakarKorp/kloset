@@ -1,6 +1,7 @@
 package exporter
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -19,7 +20,7 @@ type Exporter interface {
 	Close() error
 }
 
-type ExporterFn func(*kcontext.KContext, string, map[string]string) (Exporter, error)
+type ExporterFn func(context.Context, string, map[string]string) (Exporter, error)
 
 var backends = location.New[ExporterFn]("fs")
 
