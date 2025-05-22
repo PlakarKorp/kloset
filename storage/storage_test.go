@@ -1,6 +1,7 @@
 package storage_test
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"testing"
@@ -94,7 +95,7 @@ func TestBackends(t *testing.T) {
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-	storage.Register(func(ctx *kcontext.KContext, proto string, storeConfig map[string]string) (storage.Store, error) {
+	storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 		return &ptesting.MockBackend{}, nil
 	}, "test")
 
@@ -117,7 +118,7 @@ func TestNew(t *testing.T) {
 			ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 			ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-			storage.Register(func(ctx *kcontext.KContext, proto string, storeConfig map[string]string) (storage.Store, error) {
+			storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 				return ptesting.NewMockBackend(storeConfig), nil
 			}, name)
 

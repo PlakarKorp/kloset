@@ -17,6 +17,7 @@
 package storage
 
 import (
+	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -117,8 +118,8 @@ const (
 )
 
 type Store interface {
-	Create(ctx *kcontext.KContext, config []byte) error
-	Open(ctx *kcontext.KContext) ([]byte, error)
+	Create(ctx context.Context, config []byte) error
+	Open(ctx context.Context) ([]byte, error)
 	Location() string
 	Mode() Mode
 	Size() int64 // this can be costly, call with caution
@@ -142,7 +143,7 @@ type Store interface {
 	Close() error
 }
 
-type StoreFn func(*kcontext.KContext, string, map[string]string) (Store, error)
+type StoreFn func(context.Context, string, map[string]string) (Store, error)
 
 var backends = location.New[StoreFn]("fs")
 

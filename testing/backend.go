@@ -2,6 +2,7 @@ package testing
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"net/url"
@@ -9,14 +10,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/storage"
 )
 
 func init() {
-	storage.Register(func(ctx *kcontext.KContext, proto string, storeConfig map[string]string) (storage.Store, error) {
+	storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 		return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}, nil
 	}, "mock")
 }
@@ -79,7 +79,7 @@ func NewMockBackend(storeConfig map[string]string) *MockBackend {
 	return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}
 }
 
-func (mb *MockBackend) Create(ctx *kcontext.KContext, configuration []byte) error {
+func (mb *MockBackend) Create(ctx context.Context, configuration []byte) error {
 	if strings.Contains(mb.location, "musterror") {
 		return errors.New("creating error")
 	}
@@ -101,7 +101,7 @@ func (mb *MockBackend) Create(ctx *kcontext.KContext, configuration []byte) erro
 	return nil
 }
 
-func (mb *MockBackend) Open(ctx *kcontext.KContext) ([]byte, error) {
+func (mb *MockBackend) Open(ctx context.Context) ([]byte, error) {
 	if strings.Contains(mb.location, "musterror") {
 		return nil, errors.New("opening error")
 	}
