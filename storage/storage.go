@@ -26,11 +26,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/chunking"
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
@@ -117,8 +117,8 @@ const (
 )
 
 type Store interface {
-	Create(ctx *appcontext.AppContext, config []byte) error
-	Open(ctx *appcontext.AppContext) ([]byte, error)
+	Create(ctx *kcontext.KContext, config []byte) error
+	Open(ctx *kcontext.KContext) ([]byte, error)
 	Location() string
 	Mode() Mode
 	Size() int64 // this can be costly, call with caution
@@ -142,7 +142,7 @@ type Store interface {
 	Close() error
 }
 
-type StoreFn func(*appcontext.AppContext, string, map[string]string) (Store, error)
+type StoreFn func(*kcontext.KContext, string, map[string]string) (Store, error)
 
 var backends = location.New[StoreFn]("fs")
 
@@ -158,7 +158,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func New(ctx *appcontext.AppContext, storeConfig map[string]string) (Store, error) {
+func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
 	location, ok := storeConfig["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
@@ -178,7 +178,7 @@ func New(ctx *appcontext.AppContext, storeConfig map[string]string) (Store, erro
 	return backend(ctx, proto, storeConfig)
 }
 
-func Open(ctx *appcontext.AppContext, storeConfig map[string]string) (Store, []byte, error) {
+func Open(ctx *kcontext.KContext, storeConfig map[string]string) (Store, []byte, error) {
 	store, err := New(ctx, storeConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", flag.CommandLine.Name(), err)
@@ -193,7 +193,7 @@ func Open(ctx *appcontext.AppContext, storeConfig map[string]string) (Store, []b
 	return store, serializedConfig, nil
 }
 
-func Create(ctx *appcontext.AppContext, storeConfig map[string]string, configuration []byte) (Store, error) {
+func Create(ctx *kcontext.KContext, storeConfig map[string]string, configuration []byte) (Store, error) {
 	store, err := New(ctx, storeConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", flag.CommandLine.Name(), err)

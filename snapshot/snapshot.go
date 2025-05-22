@@ -7,10 +7,10 @@ import (
 	"iter"
 	"strings"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -68,7 +68,7 @@ func (snap *Snapshot) Close() error {
 	return nil
 }
 
-func (snap *Snapshot) AppContext() *appcontext.AppContext {
+func (snap *Snapshot) AppContext() *kcontext.KContext {
 	return snap.repository.AppContext()
 }
 
