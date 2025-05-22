@@ -17,6 +17,7 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -63,7 +64,7 @@ type Importer interface {
 	Close() error
 }
 
-type ImporterFn func(*kcontext.KContext, string, map[string]string) (Importer, error)
+type ImporterFn func(context.Context, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
 
