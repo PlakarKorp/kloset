@@ -17,12 +17,9 @@
 package importer
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
-	"net"
-	"os"
 	"path/filepath"
 	"regexp"
 	"syscall"
@@ -30,7 +27,6 @@ import (
 	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
-	"google.golang.org/grpc"
 )
 
 type ScanResult struct {
@@ -99,62 +95,6 @@ func forkChild(ctx *appcontext.AppContext, name string) (int, int, error) {
 	}
 
 	return pid, sp[1], nil
-}
-
-func LoadBackends(ctx *appcontext.AppContext) error {
-	dirEntries, err := os.ReadDir(ctx.PluginsDir)
-	if err != nil {
-		return fmt.Errorf("failed to read plugins directory: %w", err)
-	}
-
-	for _, entry := range dirEntries {
-
-		// foo-v1.0.0.ptar
-		re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
-		matches := re.FindStringSubmatch(entry.Name())
-		if matches == nil {
-			panic("invalid plugin name")
-		}
-		name := matches[1]
-
-		Register(name, func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
-			pluginFileName := entry.Name()
-
-			_, connFd, err := forkChild(appCtx, pluginFileName)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fork child: %w", err)
-			}
-
-			connFp := os.NewFile(uintptr(connFd), "grpc-conn")
-			conn, err := net.FileConn(connFp)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create file conn: %w", err)
-			}
-
-			dialer := func(ctx context.Context, addr string) (net.Conn, error) {
-				// ignore addr, always return your pre-made conn
-				return conn, nil
-			}
-
-			cc, err := grpc.DialContext(
-				ctx,
-				"unused-target",
-				grpc.WithInsecure(),
-				grpc.WithContextDialer(dialer),
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to dial context: %w", err)
-			}
-
-			client := NewImporterClient(cc)
-			return &grpc_importer{
-				grpcClient: client,
-			}, nil
-
-			// instantiate the grpc importer and set cc as the connection
-		})
-	}
-	return nil
 }
 
 func Register(name string, backend ImporterFn) {
