@@ -1,6 +1,7 @@
 package testing
 
 import (
+	"bytes"
 	"io"
 	"os"
 	"path"
@@ -53,27 +54,29 @@ func (m *MockFile) ScanResult() *importer.ScanResult {
 			},
 		}
 	default:
-		return &importer.ScanResult{
-			Record: &importer.ScanRecord{
-				Pathname: m.Path,
-				FileInfo: objects.FileInfo{
-					Lname:      path.Base(m.Path),
-					Lsize:      int64(len(m.Content)),
-					Lmode:      m.Mode,
-					Lnlink:     1,
-					Lusername:  "flan",
-					Lgroupname: "hacker",
-				},
-			},
+		info := objects.FileInfo{
+			Lname:      path.Base(m.Path),
+			Lsize:      int64(len(m.Content)),
+			Lmode:      m.Mode,
+			Lnlink:     1,
+			Lusername:  "flan",
+			Lgroupname: "hacker",
 		}
+		return importer.NewScanRecord(m.Path, "", info, nil, func() (io.ReadCloser, error) {
+			if m.IsDir {
+				return nil, os.ErrNotExist
+			}
+			if m.Mode&0400 == 0 {
+				return nil, os.ErrPermission
+			}
+			return io.NopCloser(bytes.NewReader(m.Content)), nil
+		})
 	}
 }
 
 type testingOptions struct {
 	name string
-
 	gen  func(chan<- *importer.ScanResult)
-	open func(string) (io.ReadCloser, error)
 }
 
 func newTestingOptions() *testingOptions {
@@ -109,10 +112,9 @@ func GenerateFiles(t *testing.T, files []MockFile) string {
 	return tmpBackupDir
 }
 
-func WithGenerator(gen func(chan<- *importer.ScanResult), open func(string) (io.ReadCloser, error)) TestingOptions {
+func WithGenerator(gen func(chan<- *importer.ScanResult)) TestingOptions {
 	return func(o *testingOptions) {
 		o.gen = gen
-		o.open = open
 	}
 }
 
@@ -132,7 +134,7 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	require.NotNil(t, imp)
 
 	if o.gen != nil {
-		imp.(*MockImporter).SetGenerator(o.gen, o.open)
+		imp.(*MockImporter).SetGenerator(o.gen)
 	} else {
 		imp.(*MockImporter).SetFiles(files)
 	}
