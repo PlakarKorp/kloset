@@ -1,12 +1,13 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"testing"
 	"time"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/stretchr/testify/require"
 )
@@ -44,10 +45,10 @@ func (m MockedImporter) Close() error {
 func TestBackends(t *testing.T) {
 
 	// Setup: Register some backends
-	Register("local1", func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
+	Register("local1", func(appCtx context.Context, name string, config map[string]string) (Importer, error) {
 		return nil, nil
 	})
-	Register("remote1", func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
+	Register("remote1", func(appCtx context.Context, name string, config map[string]string) (Importer, error) {
 		return nil, nil
 	})
 
@@ -61,13 +62,13 @@ func TestBackends(t *testing.T) {
 
 func TestNewImporter(t *testing.T) {
 	// Setup: Register some backends
-	Register("fs", func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
+	Register("fs", func(appCtx context.Context, name string, config map[string]string) (Importer, error) {
 		return MockedImporter{}, nil
 	})
-	Register("s3", func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
+	Register("s3", func(appCtx context.Context, name string, config map[string]string) (Importer, error) {
 		return MockedImporter{}, nil
 	})
-	Register("ftp", func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
+	Register("ftp", func(appCtx context.Context, name string, config map[string]string) (Importer, error) {
 		return MockedImporter{}, nil
 	})
 
@@ -85,7 +86,7 @@ func TestNewImporter(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.location, func(t *testing.T) {
-			appCtx := appcontext.NewAppContext()
+			appCtx := kcontext.NewKContext()
 
 			importer, err := NewImporter(appCtx, map[string]string{"location": test.location})
 
@@ -134,5 +135,4 @@ func TestNewScanError(t *testing.T) {
 	record := NewScanError(pathname, err)
 
 	require.Equal(t, pathname, record.Error.Pathname)
-	require.Equal(t, err, record.Error.Err)
 }

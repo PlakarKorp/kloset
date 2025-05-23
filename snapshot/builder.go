@@ -9,9 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -117,7 +117,7 @@ func (snap *Builder) Logger() *logging.Logger {
 	return snap.AppContext().GetLogger()
 }
 
-func (snap *Builder) AppContext() *appcontext.AppContext {
+func (snap *Builder) AppContext() *kcontext.KContext {
 	return snap.repository.AppContext()
 }
 

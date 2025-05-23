@@ -2,9 +2,9 @@ package testing
 
 import (
 	"bytes"
+	"context"
 	"io"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
 )
@@ -18,7 +18,7 @@ func init() {
 	exporter.Register("mock", NewMockExporter)
 }
 
-func NewMockExporter(appCtx *appcontext.AppContext, name string, config map[string]string) (exporter.Exporter, error) {
+func NewMockExporter(appCtx context.Context, name string, config map[string]string) (exporter.Exporter, error) {
 	rootDir := config["location"]
 	if len(rootDir) > 7 && rootDir[:7] == "mock://" {
 		rootDir = rootDir[7:]

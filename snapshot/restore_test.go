@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/snapshot"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
 	ptesting "github.com/PlakarKorp/kloset/testing"
@@ -23,7 +23,7 @@ func TestRestore(t *testing.T) {
 		os.RemoveAll(tmpRestoreDir)
 	})
 	var exporterInstance exporter.Exporter
-	appCtx := appcontext.NewAppContext()
+	appCtx := kcontext.NewKContext()
 
 	exporterInstance, err = ptesting.NewMockExporter(appCtx, "mock", map[string]string{"location": "mock://" + tmpRestoreDir})
 	require.NoError(t, err)

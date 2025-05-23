@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/cookies"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
@@ -35,7 +35,7 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 
 	cookies := cookies.NewManager(tmpCacheDir)
 
-	ctx := appcontext.NewAppContext()
+	ctx := kcontext.NewKContext()
 	ctx.SetCookies(cookies)
 
 	ctx.Client = "plakar-test/1.0.0"
@@ -128,7 +128,7 @@ func GenerateRepositoryWithoutConfig(t *testing.T, bufout *bytes.Buffer, buferr 
 
 	cookies := cookies.NewManager(tmpCacheDir)
 
-	ctx := appcontext.NewAppContext()
+	ctx := kcontext.NewKContext()
 	ctx.SetCookies(cookies)
 	ctx.Client = "plakar-test/1.0.0"
 	ctx.MaxConcurrency = 1

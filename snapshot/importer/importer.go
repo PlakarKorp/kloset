@@ -17,12 +17,13 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"path/filepath"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 )
@@ -63,7 +64,7 @@ type Importer interface {
 	Close() error
 }
 
-type ImporterFn func(*appcontext.AppContext, string, map[string]string) (Importer, error)
+type ImporterFn func(context.Context, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
 
@@ -77,7 +78,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewImporter(ctx *appcontext.AppContext, config map[string]string) (Importer, error) {
+func NewImporter(ctx *kcontext.KContext, config map[string]string) (Importer, error) {
 	location, ok := config["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")

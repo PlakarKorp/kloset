@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/resources"
@@ -43,14 +43,14 @@ type packerManager struct {
 	storageConf  *storage.Configuration
 	encodingFunc func(io.Reader) (io.Reader, error)
 	hashFactory  func() hash.Hash
-	appCtx       *appcontext.AppContext
+	appCtx       *kcontext.KContext
 
 	// XXX: Temporary hack callback-based to ease the transition diff.
 	// To be revisited with either an interface or moving this file inside repository/
 	flush func(*packfile.PackFile) error
 }
 
-func NewPackerManager(ctx *appcontext.AppContext, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), hashFactory func() hash.Hash, flusher func(*packfile.PackFile) error) PackerManagerInt {
+func NewPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), hashFactory func() hash.Hash, flusher func(*packfile.PackFile) error) PackerManagerInt {
 	inflightsMACs := make(map[resources.Type]*sync.Map)
 	for _, Type := range resources.Types() {
 		inflightsMACs[Type] = &sync.Map{}

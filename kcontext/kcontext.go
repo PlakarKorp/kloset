@@ -1,4 +1,4 @@
-package appcontext
+package kcontext
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	"github.com/google/uuid"
 )
 
-type AppContext struct {
+type KContext struct {
 	events  *events.Receiver `msgpack:"-"`
 	cache   *caching.Manager `msgpack:"-"`
 	cookies *cookies.Manager `msgpack:"-"`
@@ -53,10 +53,10 @@ type AppContext struct {
 	Keypair  *keypair.KeyPair
 }
 
-func NewAppContext() *AppContext {
+func NewKContext() *KContext {
 	ctx, cancel := context.WithCancel(context.Background())
 
-	return &AppContext{
+	return &KContext{
 		events:  events.New(),
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
@@ -65,71 +65,71 @@ func NewAppContext() *AppContext {
 	}
 }
 
-func NewAppContextFrom(template *AppContext) *AppContext {
+func NewKContextFrom(template *KContext) *KContext {
 	ctx := *template
 	ctx.events = events.New()
 	ctx.Context, ctx.Cancel = context.WithCancel(template.Context)
 	return &ctx
 }
 
-func (c *AppContext) Deadline() (time.Time, bool) {
+func (c *KContext) Deadline() (time.Time, bool) {
 	return c.Context.Deadline()
 }
 
-func (c *AppContext) Done() <-chan struct{} {
+func (c *KContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (c *AppContext) Err() error {
+func (c *KContext) Err() error {
 	return c.Context.Err()
 }
 
-func (c *AppContext) Value(key any) any {
+func (c *KContext) Value(key any) any {
 	return c.Context.Value(key)
 }
 
-func (c *AppContext) Close() {
+func (c *KContext) Close() {
 	c.events.Close()
 	c.Cancel()
 }
 
-func (c *AppContext) Events() *events.Receiver {
+func (c *KContext) Events() *events.Receiver {
 	return c.events
 }
 
-func (c *AppContext) SetCache(cacheManager *caching.Manager) {
+func (c *KContext) SetCache(cacheManager *caching.Manager) {
 	c.cache = cacheManager
 }
 
-func (c *AppContext) GetCache() *caching.Manager {
+func (c *KContext) GetCache() *caching.Manager {
 	return c.cache
 }
 
-func (c *AppContext) SetCookies(cacheManager *cookies.Manager) {
+func (c *KContext) SetCookies(cacheManager *cookies.Manager) {
 	c.cookies = cacheManager
 }
 
-func (c *AppContext) GetCookies() *cookies.Manager {
+func (c *KContext) GetCookies() *cookies.Manager {
 	return c.cookies
 }
 
-func (c *AppContext) SetLogger(logger *logging.Logger) {
+func (c *KContext) SetLogger(logger *logging.Logger) {
 	c.logger = logger
 }
 
-func (c *AppContext) GetLogger() *logging.Logger {
+func (c *KContext) GetLogger() *logging.Logger {
 	return c.logger
 }
 
-func (c *AppContext) SetSecret(secret []byte) {
+func (c *KContext) SetSecret(secret []byte) {
 	c.secret = secret
 }
 
-func (c *AppContext) GetSecret() []byte {
+func (c *KContext) GetSecret() []byte {
 	return c.secret
 }
 
-func (c *AppContext) GetAuthToken(repository uuid.UUID) (string, error) {
+func (c *KContext) GetAuthToken(repository uuid.UUID) (string, error) {
 	if authToken, err := c.cookies.GetAuthToken(); err != nil {
 		return "", err
 	} else {
