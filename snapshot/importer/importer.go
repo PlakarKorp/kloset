@@ -17,14 +17,20 @@
 package importer
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
+	"net"
+	"os"
 	"path/filepath"
+	"regexp"
+	"syscall"
 
 	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
+	"google.golang.org/grpc"
 )
 
 type ScanResult struct {
@@ -66,6 +72,90 @@ type Importer interface {
 type ImporterFn func(*appcontext.AppContext, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
+var pluginsRegexp = regexp.MustCompile(`^[a-zA-Z0-9]+[a-zA-Z0-9-_]*-v[0-9]+\.[0-9]+\.[0-9]+\.ptar$`)
+
+func forkChild(ctx *appcontext.AppContext, name string) (int, int, error) {
+	sp, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, syscall.AF_UNSPEC)
+	if err != nil {
+		return -1, -1, fmt.Errorf("failed to create socketpair: %w", err)
+	}
+
+	procAttr := syscall.ProcAttr{}
+	procAttr.Files = []uintptr{
+		uintptr(sp[0]),
+		uintptr(sp[0]),
+		uintptr(sp[0]),
+	}
+
+	var pid int
+
+	pid, err = syscall.ForkExec(filepath.Join(ctx.PluginsDir, name), []string{name}, &procAttr)
+	if err != nil {
+		return -1, -1, fmt.Errorf("failed to ForkExec: %w", err)
+	}
+
+	if syscall.Close(sp[0]) != nil {
+		return -1, -1, fmt.Errorf("failed to close socket: %w", err)
+	}
+
+	return pid, sp[1], nil
+}
+
+func LoadBackends(ctx *appcontext.AppContext) error {
+	dirEntries, err := os.ReadDir(ctx.PluginsDir)
+	if err != nil {
+		return fmt.Errorf("failed to read plugins directory: %w", err)
+	}
+
+	for _, entry := range dirEntries {
+
+		// foo-v1.0.0.ptar
+		re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
+		matches := re.FindStringSubmatch(entry.Name())
+		if matches == nil {
+			panic("invalid plugin name")
+		}
+		name := matches[1]
+
+		Register(name, func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
+			pluginFileName := entry.Name()
+
+			_, connFd, err := forkChild(appCtx, pluginFileName)
+			if err != nil {
+				return nil, fmt.Errorf("failed to fork child: %w", err)
+			}
+
+			connFp := os.NewFile(uintptr(connFd), "grpc-conn")
+			conn, err := net.FileConn(connFp)
+			if err != nil {
+				return nil, fmt.Errorf("failed to create file conn: %w", err)
+			}
+
+			dialer := func(ctx context.Context, addr string) (net.Conn, error) {
+				// ignore addr, always return your pre-made conn
+				return conn, nil
+			}
+
+			cc, err := grpc.DialContext(
+				ctx,
+				"unused-target",
+				grpc.WithInsecure(),
+				grpc.WithContextDialer(dialer),
+			)
+			if err != nil {
+				return nil, fmt.Errorf("failed to dial context: %w", err)
+			}
+
+			client := NewImporterClient(cc)
+			return &grpc_importer{
+				grpcClient: client,
+			}, nil
+
+			// instantiate the grpc importer and set cc as the connection
+		})
+	}
+	return nil
+}
 
 func Register(name string, backend ImporterFn) {
 	if !backends.Register(name, backend) {
@@ -94,6 +184,7 @@ func NewImporter(ctx *appcontext.AppContext, config map[string]string) (Importer
 	} else {
 		config["location"] = proto + "://" + location
 	}
+
 	return backend(ctx, proto, config)
 }
 
