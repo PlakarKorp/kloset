@@ -93,6 +93,9 @@ func errorGenerator(ch chan<- *importer.ScanResult) {
 								Lusername:  "flan",
 								Lgroupname: "hacker",
 							},
+							Reader: importer.NewLazyReader(func() (io.ReadCloser, error) {
+								return io.NopCloser(strings.NewReader("hello world")), nil
+							}),
 						},
 					}
 				} else {
@@ -109,13 +112,9 @@ func errorGenerator(ch chan<- *importer.ScanResult) {
 	close(ch)
 }
 
-func errorOpen(pathname string) (io.ReadCloser, error) {
-	return io.NopCloser(strings.NewReader("hello world")), nil
-}
-
 func TestBackupManyError(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	snap := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(errorGenerator, errorOpen))
+	snap := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(errorGenerator))
 
 	summary := snap.Header.GetSource(0).Summary
 	require.Equal(t, summary.Below.Files, uint64(180))

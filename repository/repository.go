@@ -441,7 +441,7 @@ func (r *Repository) ComputeMAC(data []byte) objects.MAC {
 	return mac
 }
 
-func (r *Repository) Chunker(rd io.ReadCloser) (*chunkers.Chunker, error) {
+func (r *Repository) Chunker(rd io.Reader) (*chunkers.Chunker, error) {
 	chunkingAlgorithm := r.configuration.Chunking.Algorithm
 	chunkingMinSize := r.configuration.Chunking.MinSize
 	chunkingNormalSize := r.configuration.Chunking.NormalSize
