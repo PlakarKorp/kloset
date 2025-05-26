@@ -71,7 +71,7 @@ type ImporterFn func(context.Context, string, map[string]string) (Importer, erro
 var backends = location.New[ImporterFn]("fs")
 var pluginsRegexp = regexp.MustCompile(`^[a-zA-Z0-9]+[a-zA-Z0-9-_]*-v[0-9]+\.[0-9]+\.[0-9]+\.ptar$`)
 
-func forkChild(ctx *appcontext.AppContext, name string) (int, int, error) {
+func forkChild(ctx *kcontext.KContext, name string) (int, int, error) {
 	sp, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, syscall.AF_UNSPEC)
 	if err != nil {
 		return -1, -1, fmt.Errorf("failed to create socketpair: %w", err)
