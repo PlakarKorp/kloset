@@ -85,6 +85,7 @@ func forkChild(ctx *appcontext.AppContext, name string) (int, int, error) {
 
 	var pid int
 
+	fmt.Printf("Forking child for plugin: %s\n", filepath.Join(ctx.PluginsDir, name))
 	pid, err = syscall.ForkExec(filepath.Join(ctx.PluginsDir, name), []string{name}, &procAttr)
 	if err != nil {
 		return -1, -1, fmt.Errorf("failed to ForkExec: %w", err)

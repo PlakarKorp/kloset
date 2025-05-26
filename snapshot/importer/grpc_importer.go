@@ -6,8 +6,9 @@ import (
 	"os"
 	"fmt"
 	"io"
-	"regexp"
+	// "regexp"
 	"io/fs"
+	"time"
 
 	"google.golang.org/grpc"
 	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/grpc/pkg"
@@ -129,12 +130,14 @@ func LoadBackends(ctx *appcontext.AppContext) error {
 	for _, entry := range dirEntries {
 
 		// foo-v1.0.0.ptar
-		re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
-		matches := re.FindStringSubmatch(entry.Name())
-		if matches == nil {
-			panic("invalid plugin name")
-		}
-		name := matches[1]
+		// re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
+		// matches := re.FindStringSubmatch(entry.Name())
+		// if matches == nil {
+		// 	panic("invalid plugin name")
+		// }
+		// name := matches[1]
+		name := entry.Name()
+		fmt.Printf("Loading plugin: %s\n", name)
 
 		Register(name, func(appCtx *appcontext.AppContext, name string, config map[string]string) (Importer, error) {
 			pluginFileName := entry.Name()
@@ -143,6 +146,8 @@ func LoadBackends(ctx *appcontext.AppContext) error {
 			if err != nil {
 				return nil, fmt.Errorf("failed to fork child: %w", err)
 			}
+
+			time.Sleep(100 * time.Millisecond)
 
 			connFp := os.NewFile(uintptr(connFd), "grpc-conn")
 			conn, err := net.FileConn(connFp)
