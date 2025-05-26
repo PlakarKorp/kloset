@@ -176,6 +176,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 
 					if strings.HasPrefix(record.Pathname, repoLocation+"/") {
 						snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
+						record.Close()
 						// skip repository directory
 						return
 					}
@@ -186,6 +187,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						if err := backupCtx.recordEntry(entry); err != nil {
 							backupCtx.recordError(record.Pathname, err)
 						}
+						record.Close()
 						return
 					}
 
@@ -369,21 +371,7 @@ func entropy(data []byte) (float64, [256]float64) {
 	return entropy, freq
 }
 
-func (snap *Builder) chunkify(imp importer.Importer, record *importer.ScanRecord) (*objects.Object, int64, error) {
-	var rd io.ReadCloser
-	var err error
-
-	if record.IsXattr {
-		rd, err = imp.NewExtendedAttributeReader(record.Pathname, record.XattrName)
-	} else {
-		rd, err = imp.NewReader(record.Pathname)
-	}
-
-	if err != nil {
-		return nil, -1, err
-	}
-	defer rd.Close()
-
+func (snap *Builder) chunkify(pathname string, rd io.Reader) (*objects.Object, int64, error) {
 	object := objects.NewObject()
 
 	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
@@ -477,7 +465,7 @@ func (snap *Builder) chunkify(imp importer.Importer, record *importer.ScanRecord
 	}
 
 	if object.ContentType == "" {
-		object.ContentType = mime.TypeByExtension(path.Ext(record.Pathname))
+		object.ContentType = mime.TypeByExtension(path.Ext(pathname))
 	}
 
 	copy(object_t32[:], objectHasher.Sum(nil))
@@ -622,6 +610,7 @@ loop:
 			go func(record *importer.ScanRecord) {
 				defer wg.Done()
 				defer func() { <-semaphore }()
+				defer record.Close()
 
 				snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
 				if err := snap.processFileRecord(backupCtx, record); err != nil {
@@ -687,9 +676,13 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 
 	// Chunkify the file if it is a regular file and we don't have a cached object
 	if record.FileInfo.Mode().IsRegular() {
+		if record.Reader == nil {
+			return fmt.Errorf("got a regular file without an associated reader: %s", record.Pathname)
+		}
+
 		if object == nil || !snap.repository.BlobExists(resources.RT_OBJECT, objectMAC) {
 			var dataSize int64
-			object, dataSize, err = snap.chunkify(backupCtx.imp, record)
+			object, dataSize, err = snap.chunkify(record.Pathname, record.Reader)
 			if err != nil {
 				return err
 			}

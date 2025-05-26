@@ -109,7 +109,7 @@ func TestNewScanRecord(t *testing.T) {
 	fileinfo := objects.NewFileInfo("file", 300000, 0644, now, 1, 2, 3, 4, 5)
 	xattr := []string{"attr1", "attr2"}
 
-	record := NewScanRecord(pathname, target, fileinfo, xattr)
+	record := NewScanRecord(pathname, target, fileinfo, xattr, nil)
 
 	require.Equal(t, pathname, record.Record.Pathname)
 	require.Equal(t, target, record.Record.Target)
@@ -121,7 +121,7 @@ func TestNewScanXattr(t *testing.T) {
 	pathname := "/path/to/file"
 	xattrname := "foo/bar"
 
-	record := NewScanXattr(pathname, xattrname, objects.AttributeExtended)
+	record := NewScanXattr(pathname, xattrname, objects.AttributeExtended, nil)
 
 	require.Equal(t, pathname, record.Record.Pathname)
 	require.Equal(t, xattrname, record.Record.XattrName)
