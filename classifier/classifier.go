@@ -21,7 +21,7 @@ import (
 	"log"
 	"sync"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
@@ -49,16 +49,16 @@ var muBackends sync.Mutex
 var backends map[string]func() Backend = make(map[string]func() Backend)
 
 type Classifier struct {
-	backend    []Backend
-	appcontext *appcontext.AppContext
+	backend  []Backend
+	kcontext *kcontext.KContext
 }
 
-func NewClassifier(ctx *appcontext.AppContext) (*Classifier, error) {
+func NewClassifier(ctx *kcontext.KContext) (*Classifier, error) {
 	muBackends.Lock()
 	defer muBackends.Unlock()
 
 	cf := &Classifier{}
-	cf.appcontext = ctx
+	cf.kcontext = ctx
 
 	for name, backend := range backends {
 		if inst := backend(); inst == nil {

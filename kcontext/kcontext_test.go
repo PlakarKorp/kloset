@@ -1,4 +1,4 @@
-package appcontext
+package kcontext
 
 import (
 	"testing"
@@ -11,7 +11,7 @@ import (
 )
 
 func TestContext_SettersAndGetters(t *testing.T) {
-	ctx := NewAppContext()
+	ctx := NewKContext()
 
 	defaultLogger := logging.NewLogger(nil, nil)
 	defaultCachingManager := caching.NewManager("/tmp/test_plakar")
@@ -189,7 +189,7 @@ func TestContext_SettersAndGetters(t *testing.T) {
 }
 
 func TestAppContextCloseEvents(t *testing.T) {
-	ctx := NewAppContext()
+	ctx := NewKContext()
 	events := ctx.Events()
 	if events == nil {
 		t.Errorf("events is nil")

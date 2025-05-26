@@ -1,12 +1,13 @@
 package exporter
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"path/filepath"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 )
@@ -19,7 +20,7 @@ type Exporter interface {
 	Close() error
 }
 
-type ExporterFn func(*appcontext.AppContext, string, map[string]string) (Exporter, error)
+type ExporterFn func(context.Context, string, map[string]string) (Exporter, error)
 
 var backends = location.New[ExporterFn]("fs")
 
@@ -33,7 +34,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewExporter(ctx *appcontext.AppContext, config map[string]string) (Exporter, error) {
+func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, error) {
 	location, ok := config["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")

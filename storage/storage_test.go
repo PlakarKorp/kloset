@@ -1,11 +1,12 @@
 package storage_test
 
 import (
+	"context"
 	"os"
 	"runtime"
 	"testing"
 
-	"github.com/PlakarKorp/kloset/appcontext"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/storage"
 	ptesting "github.com/PlakarKorp/kloset/testing"
@@ -13,7 +14,7 @@ import (
 )
 
 func TestNewStore(t *testing.T) {
-	ctx := appcontext.NewAppContext()
+	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
@@ -34,7 +35,7 @@ func TestNewStore(t *testing.T) {
 }
 
 func TestCreateStore(t *testing.T) {
-	ctx := appcontext.NewAppContext()
+	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
@@ -63,7 +64,7 @@ func TestCreateStore(t *testing.T) {
 }
 
 func TestOpenStore(t *testing.T) {
-	ctx := appcontext.NewAppContext()
+	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
@@ -90,15 +91,15 @@ func TestOpenStore(t *testing.T) {
 }
 
 func TestBackends(t *testing.T) {
-	ctx := appcontext.NewAppContext()
+	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-	storage.Register(func(ctx *appcontext.AppContext, proto string, storeConfig map[string]string) (storage.Store, error) {
+	storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 		return &ptesting.MockBackend{}, nil
 	}, "test")
 
-	expected := []string{"fs", "mock", "test"}
+	expected := []string{"mock", "test"}
 	actual := storage.Backends()
 	require.Equal(t, expected, actual)
 }
@@ -113,11 +114,11 @@ func TestNew(t *testing.T) {
 
 	for _, name := range locations {
 		t.Run(name, func(t *testing.T) {
-			ctx := appcontext.NewAppContext()
+			ctx := kcontext.NewKContext()
 			ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 			ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-			storage.Register(func(ctx *appcontext.AppContext, proto string, storeConfig map[string]string) (storage.Store, error) {
+			storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 				return ptesting.NewMockBackend(storeConfig), nil
 			}, name)
 
@@ -135,7 +136,7 @@ func TestNew(t *testing.T) {
 	}
 
 	t.Run("unknown backend", func(t *testing.T) {
-		ctx := appcontext.NewAppContext()
+		ctx := kcontext.NewKContext()
 		ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 		ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
@@ -147,18 +148,13 @@ func TestNew(t *testing.T) {
 	})
 
 	t.Run("absolute fs path", func(t *testing.T) {
-		ctx := appcontext.NewAppContext()
+		ctx := kcontext.NewKContext()
 		ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 		ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
 		// storage.Register("unknown", func(location string) storage.Store { return ptesting.NewMockBackend(location) })
 		store, err := storage.New(ctx, map[string]string{"location": "dummy"})
-		if err != nil {
-			t.Fatalf("expected no error, got %v", err)
-		}
-
-		if store.Location() != "fs://dummy" {
-			t.Errorf("expected location to be '%s', got %v", "dummy", store.Location())
-		}
+		require.Nil(t, store)
+		require.ErrorContains(t, err, "backend 'fs' does not exist")
 	})
 }

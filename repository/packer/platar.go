@@ -10,8 +10,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/storage"
@@ -27,14 +27,14 @@ type platarPackerManager struct {
 	storageConf  *storage.Configuration
 	encodingFunc func(io.Reader) (io.Reader, error)
 	hashFactory  func() hash.Hash
-	appCtx       *appcontext.AppContext
+	appCtx       *kcontext.KContext
 
 	// XXX: Temporary hack callback-based to ease the transition diff.
 	// To be revisited with either an interface or moving this file inside repository/
 	flush func(*PackWriter) error
 }
 
-func NewPlatarPackerManager(ctx *appcontext.AppContext, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), hashFactory func() hash.Hash, flusher func(*PackWriter) error) (PackerManagerInt, error) {
+func NewPlatarPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), hashFactory func() hash.Hash, flusher func(*PackWriter) error) (PackerManagerInt, error) {
 	cache, err := ctx.GetCache().Packing()
 	if err != nil {
 		return nil, err

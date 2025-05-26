@@ -2,11 +2,11 @@ package testing
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"os"
 	"strings"
 
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
 )
 
@@ -22,7 +22,7 @@ func init() {
 	importer.Register("mock", NewMockImporter)
 }
 
-func NewMockImporter(appCtx *appcontext.AppContext, name string, config map[string]string) (importer.Importer, error) {
+func NewMockImporter(appCtx context.Context, name string, config map[string]string) (importer.Importer, error) {
 	return &MockImporter{
 		location: config["location"],
 	}, nil

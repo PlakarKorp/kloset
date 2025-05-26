@@ -19,11 +19,11 @@ import (
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/fastcdc"
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/ultracdc"
-	"github.com/PlakarKorp/kloset/appcontext"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
@@ -74,7 +74,7 @@ type Repository struct {
 	store         storage.Store
 	state         *state.LocalState
 	configuration storage.Configuration
-	appContext    *appcontext.AppContext
+	appContext    *kcontext.KContext
 
 	wBytes atomic.Int64
 	rBytes atomic.Int64
@@ -85,7 +85,7 @@ type Repository struct {
 	macHasherPool *HasherPool
 }
 
-func Inexistent(ctx *appcontext.AppContext, storeConfig map[string]string) (*Repository, error) {
+func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
 	st, err := storage.New(ctx, storeConfig)
 	if err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func Inexistent(ctx *appcontext.AppContext, storeConfig map[string]string) (*Rep
 	}, nil
 }
 
-func New(ctx *appcontext.AppContext, store storage.Store, config []byte) (*Repository, error) {
+func New(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repository, error) {
 	t0 := time.Now()
 	defer func() {
 		ctx.GetLogger().Trace("repository", "New(store=%p): %s", store, time.Since(t0))
@@ -157,7 +157,7 @@ func New(ctx *appcontext.AppContext, store storage.Store, config []byte) (*Repos
 	return r, nil
 }
 
-func NewNoRebuild(ctx *appcontext.AppContext, store storage.Store, config []byte) (*Repository, error) {
+func NewNoRebuild(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repository, error) {
 	t0 := time.Now()
 	defer func() {
 		ctx.GetLogger().Trace("repository", "NewNoRebuild(store=%p): %s", store, time.Since(t0))
@@ -284,7 +284,7 @@ func (r *Repository) RebuildState() error {
 	return nil
 }
 
-func (r *Repository) AppContext() *appcontext.AppContext {
+func (r *Repository) AppContext() *kcontext.KContext {
 	return r.appContext
 }
 
