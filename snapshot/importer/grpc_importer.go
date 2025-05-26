@@ -9,10 +9,10 @@ import (
 	// "regexp"
 	"io/fs"
 	"time"
+	"path/filepath"
 
 	"google.golang.org/grpc"
 	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/grpc/pkg"
-	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/objects"
 )
 
@@ -121,8 +121,8 @@ func (g *grpcImporter) Close() error {
 	return nil
 }
 
-func LoadBackends(ctx *kcontext.KContext) error {
-	dirEntries, err := os.ReadDir(ctx.PluginsDir)
+func LoadBackends(ctx context.Context, pluginPath string) error {
+	dirEntries, err := os.ReadDir(pluginPath)
 	if err != nil {
 		return fmt.Errorf("failed to read plugins directory: %w", err)
 	}
@@ -139,10 +139,10 @@ func LoadBackends(ctx *kcontext.KContext) error {
 		name := entry.Name()
 		fmt.Printf("Loading plugin: %s\n", name)
 
-		Register(name, func(appCtx *kcontext.KContext, name string, config map[string]string) (Importer, error) {
+		Register(name, func(ctx context.Context, name string, config map[string]string) (Importer, error) {
 			pluginFileName := entry.Name()
 
-			_, connFd, err := forkChild(appCtx, pluginFileName)
+			_, connFd, err := forkChild(filepath.Join(pluginPath, name), pluginFileName)
 			if err != nil {
 				return nil, fmt.Errorf("failed to fork child: %w", err)
 			}
