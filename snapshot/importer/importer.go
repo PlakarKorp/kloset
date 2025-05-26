@@ -24,6 +24,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"syscall"
+	"os"
 
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
@@ -87,7 +88,8 @@ func forkChild(pluginPath string, name string) (int, int, error) {
 	var pid int
 
 	fmt.Printf("Forking child for plugin: %s\n", pluginPath)
-	pid, err = syscall.ForkExec(pluginPath, []string{name}, &procAttr)
+	downloadPath := os.Getenv("HOME") + "/Downloads"
+	pid, err = syscall.ForkExec(pluginPath, []string{downloadPath}, &procAttr)
 	if err != nil {
 		return -1, -1, fmt.Errorf("failed to ForkExec: %w", err)
 	}
