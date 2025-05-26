@@ -142,6 +142,8 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 		Register(name, func(ctx context.Context, name string, config map[string]string) (Importer, error) {
 			pluginFileName := entry.Name()
 
+			fmt.Printf("Name: %s, PluginFileName: %s\n", name, pluginFileName)
+
 			_, connFd, err := forkChild(filepath.Join(pluginPath, name), pluginFileName)
 			if err != nil {
 				return nil, fmt.Errorf("failed to fork child: %w", err)
