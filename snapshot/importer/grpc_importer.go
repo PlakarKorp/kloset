@@ -2,18 +2,19 @@ package importer
 
 import (
 	"context"
-	"net"
-	"os"
 	"fmt"
 	"io"
+	"net"
+	"os"
+
 	// "regexp"
 	"io/fs"
-	"time"
 	"path/filepath"
 
-	"google.golang.org/grpc"
-	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/grpc/pkg"
 	"github.com/PlakarKorp/kloset/objects"
+	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/grpc/pkg"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 )
 
 type grpcImporter struct {
@@ -51,13 +52,13 @@ func (g *grpcImporter) Scan() (<-chan *ScanResult, error) {
 	}
 
 	results := make(chan *ScanResult, 100)
-
 	go func() {
 		defer close(results)
 		for {
 			response, err := stream.Recv()
 			if err != nil {
 				if err == io.EOF {
+					fmt.Fprintf(os.Stderr, "Scan completed successfully.\n")
 					break
 				}
 				results <- NewScanError("", fmt.Errorf("failed to receive scan response: %w", err))
@@ -79,23 +80,23 @@ func (g *grpcImporter) Scan() (<-chan *ScanResult, error) {
 				Record: &ScanRecord{
 					Pathname: response.GetPathname(),
 					FileInfo: objects.FileInfo{
-						Lname:		response.GetRecord().GetFileinfo().GetName(),
-						Lsize:		response.GetRecord().GetFileinfo().GetSize(),
-						Lmode:		fs.FileMode(response.GetRecord().GetFileinfo().GetMode()),
-						LmodTime:	response.GetRecord().GetFileinfo().GetModTime().AsTime(),
-						Ldev:		response.GetRecord().GetFileinfo().GetDev(),
-						Lino:		response.GetRecord().GetFileinfo().GetIno(),
-						Luid:		response.GetRecord().GetFileinfo().GetUid(),
-						Lgid:		response.GetRecord().GetFileinfo().GetGid(),
-						Lnlink:		uint16(response.GetRecord().GetFileinfo().GetNlink()),
-						Lusername:	response.GetRecord().GetFileinfo().GetUsername(),
-						Lgroupname:	response.GetRecord().GetFileinfo().GetGroupname(),
+						Lname:      response.GetRecord().GetFileinfo().GetName(),
+						Lsize:      response.GetRecord().GetFileinfo().GetSize(),
+						Lmode:      fs.FileMode(response.GetRecord().GetFileinfo().GetMode()),
+						LmodTime:   response.GetRecord().GetFileinfo().GetModTime().AsTime(),
+						Ldev:       response.GetRecord().GetFileinfo().GetDev(),
+						Lino:       response.GetRecord().GetFileinfo().GetIno(),
+						Luid:       response.GetRecord().GetFileinfo().GetUid(),
+						Lgid:       response.GetRecord().GetFileinfo().GetGid(),
+						Lnlink:     uint16(response.GetRecord().GetFileinfo().GetNlink()),
+						Lusername:  response.GetRecord().GetFileinfo().GetUsername(),
+						Lgroupname: response.GetRecord().GetFileinfo().GetGroupname(),
 					},
-					Target:             response.GetRecord().Target,	
-					FileAttributes:     response.GetRecord().GetFileAttributes(),
-					IsXattr:            isXattr,
-					XattrName:          response.GetRecord().GetXattr().GetName(),
-					XattrType:          objects.Attribute(response.GetRecord().GetXattr().GetType()),
+					Target:         response.GetRecord().Target,
+					FileAttributes: response.GetRecord().GetFileAttributes(),
+					IsXattr:        isXattr,
+					XattrName:      response.GetRecord().GetXattr().GetName(),
+					XattrType:      objects.Attribute(response.GetRecord().GetXattr().GetType()),
 				},
 				Error: nil,
 			}
@@ -137,19 +138,14 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 		// }
 		// name := matches[1]
 		name := entry.Name()
-		fmt.Printf("Loading plugin: %s\n", name)
 
 		Register(name, func(ctx context.Context, name string, config map[string]string) (Importer, error) {
 			pluginFileName := entry.Name()
-
-			fmt.Printf("Name: %s, PluginFileName: %s\n", name, pluginFileName)
 
 			_, connFd, err := forkChild(filepath.Join(pluginPath, name), pluginFileName)
 			if err != nil {
 				return nil, fmt.Errorf("failed to fork child: %w", err)
 			}
-
-			time.Sleep(100 * time.Millisecond)
 
 			connFp := os.NewFile(uintptr(connFd), "grpc-conn")
 			conn, err := net.FileConn(connFp)
@@ -157,23 +153,19 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 				return nil, fmt.Errorf("failed to create file conn: %w", err)
 			}
 
-			dialer := func(ctx context.Context, addr string) (net.Conn, error) {
-				return conn, nil
-			}
-
-			cc, err := grpc.DialContext(
-				ctx,
-				"unused-target",
-				grpc.WithInsecure(),  // TODO: Use WithTransportCredentials because insecure is deprecated.
-				grpc.WithContextDialer(dialer),
+			client, err := grpc.NewClient("127.0.0.1:0",
+				grpc.WithTransportCredentials(insecure.NewCredentials()), // TODO: Use WithTransportCredentials because insecure is deprecated.
+				grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
+					return conn, nil
+				}),
 			)
 			if err != nil {
-				return nil, fmt.Errorf("failed to dial context: %w", err)
+				return nil, fmt.Errorf("failed to create client context: %w", err)
 			}
 
-			client := grpc_importer.NewImporterClient(cc)
+			importerClient := grpc_importer.NewImporterClient(client)
 			return &grpcImporter{
-				grpcClient: client,
+				grpcClient: importerClient,
 			}, nil
 		})
 	}

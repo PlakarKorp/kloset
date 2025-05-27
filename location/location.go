@@ -1,7 +1,6 @@
 package location
 
 import (
-	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -53,11 +52,8 @@ func (l *Location[T]) Lookup(uri string) (proto, location string, item T, ok boo
 
 	proto = uri
 	location = uri
-	fmt.Printf("Looking up URI: %s\n", uri)
-	fmt.Printf("proto: %s, location: %s\n\n\n", proto, location)
 
 	for i, c := range uri {
-		fmt.Printf("Checking character '%c' at position %d\n", c, i)
 		if !allowedInUri(c) {
 			if i != 0 && strings.HasPrefix(uri[i:], ":") {
 				proto = uri[:i]
