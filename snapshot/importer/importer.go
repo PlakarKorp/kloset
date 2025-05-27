@@ -23,7 +23,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"regexp"
 	"syscall"
 
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -70,9 +69,8 @@ type Importer interface {
 type ImporterFn func(context.Context, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
-var pluginsRegexp = regexp.MustCompile(`^[a-zA-Z0-9]+[a-zA-Z0-9-_]*-v[0-9]+\.[0-9]+\.[0-9]+\.ptar$`)
 
-func forkChild(pluginPath string, name string) (int, int, error) {
+func forkChild(pluginPath string, config map[string]string) (int, int, error) {
 	sp, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, syscall.AF_UNSPEC)
 	if err != nil {
 		return -1, -1, fmt.Errorf("failed to create socketpair: %w", err)
@@ -88,8 +86,8 @@ func forkChild(pluginPath string, name string) (int, int, error) {
 
 	var pid int
 
-	downloadPath := os.Getenv("HOME") + "/Downloads"
-	pid, err = syscall.ForkExec(pluginPath, []string{pluginPath, downloadPath}, &procAttr)
+	argv := []string{pluginPath, fmt.Sprintf("%v", config)}
+	pid, err = syscall.ForkExec(pluginPath, argv, &procAttr)
 	if err != nil {
 		return -1, -1, fmt.Errorf("failed to ForkExec: %w", err)
 	}

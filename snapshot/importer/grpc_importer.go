@@ -7,9 +7,9 @@ import (
 	"net"
 	"os"
 
-	// "regexp"
 	"io/fs"
 	"path/filepath"
+	"regexp"
 
 	"github.com/PlakarKorp/kloset/objects"
 	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/grpc/pkg"
@@ -159,20 +159,17 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 	}
 
 	for _, entry := range dirEntries {
+		re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
+		matches := re.FindStringSubmatch(entry.Name())
+		if matches == nil {
+			panic("invalid plugin name")
+		}
 
-		// foo-v1.0.0.ptar
-		// re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
-		// matches := re.FindStringSubmatch(entry.Name())
-		// if matches == nil {
-		// 	panic("invalid plugin name")
-		// }
-		// name := matches[1]
-		name := entry.Name()
+		key := matches[1] // foo
+		pluginFileName := matches[0] // foo-v1.0.0.ptar
 
-		Register(name, func(ctx context.Context, name string, config map[string]string) (Importer, error) {
-			pluginFileName := entry.Name()
-
-			_, connFd, err := forkChild(filepath.Join(pluginPath, name), pluginFileName)
+		Register(key, func(ctx context.Context, name string, config map[string]string) (Importer, error) {
+			_, connFd, err := forkChild(filepath.Join(pluginPath, pluginFileName), config)
 			if err != nil {
 				return nil, fmt.Errorf("failed to fork child: %w", err)
 			}
@@ -184,7 +181,7 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 			}
 
 			client, err := grpc.NewClient("127.0.0.1:0",
-				grpc.WithTransportCredentials(insecure.NewCredentials()), // TODO: Use WithTransportCredentials because insecure is deprecated.
+				grpc.WithTransportCredentials(insecure.NewCredentials()),
 				grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
 					return conn, nil
 				}),
