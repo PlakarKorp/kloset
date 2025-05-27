@@ -106,7 +106,37 @@ func (g *grpcImporter) Scan() (<-chan *ScanResult, error) {
 }
 
 func (g *grpcImporter) NewReader(path string) (io.ReadCloser, error) {
-	return nil, fmt.Errorf("not implemented")
+	stream, err := g.grpcClient.Read(context.Background(), &grpc_importer.ReadRequest{
+		Pathname: path,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to start read stream: %w", err)
+	}
+
+	pr, pw := io.Pipe()
+
+	go func() {
+		defer pw.Close()
+		for {
+			resp, err := stream.Recv()
+			if err != nil {
+				if err == io.EOF {
+					return
+				}
+				pw.CloseWithError(fmt.Errorf("failed to receive read response: %w", err))
+				return
+			}
+			if len(resp.GetData()) > 0 {
+				_, werr := pw.Write(resp.GetData())
+				if werr != nil {
+					pw.CloseWithError(fmt.Errorf("failed to write to pipe: %w", werr))
+					return
+				}
+			}
+		}
+	}()
+
+	return pr, nil
 }
 
 func (g *grpcImporter) NewExtendedAttributeReader(path string, xattr string) (io.ReadCloser, error) {
