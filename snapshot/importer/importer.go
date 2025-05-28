@@ -21,9 +21,7 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"os"
 	"path/filepath"
-	"syscall"
 
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
@@ -69,35 +67,6 @@ type Importer interface {
 type ImporterFn func(context.Context, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
-
-func forkChild(pluginPath string, config map[string]string) (int, int, error) {
-	sp, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, syscall.AF_UNSPEC)
-	if err != nil {
-		return -1, -1, fmt.Errorf("failed to create socketpair: %w", err)
-	}
-
-	procAttr := syscall.ProcAttr{}
-	procAttr.Files = []uintptr{
-		os.Stdin.Fd(),
-		os.Stdout.Fd(),
-		os.Stderr.Fd(),
-		uintptr(sp[0]),
-	}
-
-	var pid int
-
-	argv := []string{pluginPath, fmt.Sprintf("%v", config)}
-	pid, err = syscall.ForkExec(pluginPath, argv, &procAttr)
-	if err != nil {
-		return -1, -1, fmt.Errorf("failed to ForkExec: %w", err)
-	}
-
-	if syscall.Close(sp[0]) != nil {
-		return -1, -1, fmt.Errorf("failed to close socket: %w", err)
-	}
-
-	return pid, sp[1], nil
-}
 
 func Register(name string, backend ImporterFn) {
 	if !backends.Register(name, backend) {

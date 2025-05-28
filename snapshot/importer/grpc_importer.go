@@ -4,49 +4,44 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net"
 	"os"
 
 	"io/fs"
-	"path/filepath"
-	"regexp"
 
 	"github.com/PlakarKorp/kloset/objects"
-	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/grpc/pkg"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
+	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/pkg"
 )
 
-type grpcImporter struct {
-	grpcClient grpc_importer.ImporterClient
+type GrpcImporter struct {
+	GrpcClient grpc_importer.ImporterClient
 }
 
-func (g *grpcImporter) Origin() string {
-	info, err := g.grpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
+func (g *GrpcImporter) Origin() string {
+	info, err := g.GrpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
 	if err != nil {
 		return ""
 	}
 	return info.GetOrigin()
 }
 
-func (g *grpcImporter) Type() string {
-	info, err := g.grpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
+func (g *GrpcImporter) Type() string {
+	info, err := g.GrpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
 	if err != nil {
 		return ""
 	}
 	return info.GetType()
 }
 
-func (g *grpcImporter) Root() string {
-	info, err := g.grpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
+func (g *GrpcImporter) Root() string {
+	info, err := g.GrpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
 	if err != nil {
 		return ""
 	}
 	return info.GetRoot()
 }
 
-func (g *grpcImporter) Scan() (<-chan *ScanResult, error) {
-	stream, err := g.grpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
+func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
+	stream, err := g.GrpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start scan: %w", err)
 	}
@@ -105,8 +100,8 @@ func (g *grpcImporter) Scan() (<-chan *ScanResult, error) {
 	return results, nil
 }
 
-func (g *grpcImporter) NewReader(path string) (io.ReadCloser, error) {
-	stream, err := g.grpcClient.Read(context.Background(), &grpc_importer.ReadRequest{
+func (g *GrpcImporter) NewReader(path string) (io.ReadCloser, error) {
+	stream, err := g.GrpcClient.Read(context.Background(), &grpc_importer.ReadRequest{
 		Pathname: path,
 	})
 	if err != nil {
@@ -139,62 +134,15 @@ func (g *grpcImporter) NewReader(path string) (io.ReadCloser, error) {
 	return pr, nil
 }
 
-func (g *grpcImporter) NewExtendedAttributeReader(path string, xattr string) (io.ReadCloser, error) {
+func (g *GrpcImporter) NewExtendedAttributeReader(path string, xattr string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-func (g *grpcImporter) Close() error {
-	if g.grpcClient != nil {
-		if conn, ok := g.grpcClient.(interface{ Close() error }); ok {
+func (g *GrpcImporter) Close() error {
+	if g.GrpcClient != nil {
+		if conn, ok := g.GrpcClient.(interface{ Close() error }); ok {
 			return conn.Close()
 		}
-	}
-	return nil
-}
-
-func LoadBackends(ctx context.Context, pluginPath string) error {
-	dirEntries, err := os.ReadDir(pluginPath)
-	if err != nil {
-		return fmt.Errorf("failed to read plugins directory: %w", err)
-	}
-
-	for _, entry := range dirEntries {
-		re := regexp.MustCompile(`^([a-z0-9]+[a-zA0-9\+.-]*)-(v[0-9]+[a-z0\.[0-9]+\.[0-9]+)\.ptar$`)
-		matches := re.FindStringSubmatch(entry.Name())
-		if matches == nil {
-			panic("invalid plugin name")
-		}
-
-		key := matches[1] // foo
-		pluginFileName := matches[0] // foo-v1.0.0.ptar
-
-		Register(key, func(ctx context.Context, name string, config map[string]string) (Importer, error) {
-			_, connFd, err := forkChild(filepath.Join(pluginPath, pluginFileName), config)
-			if err != nil {
-				return nil, fmt.Errorf("failed to fork child: %w", err)
-			}
-
-			connFp := os.NewFile(uintptr(connFd), "grpc-conn")
-			conn, err := net.FileConn(connFp)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create file conn: %w", err)
-			}
-
-			client, err := grpc.NewClient("127.0.0.1:0",
-				grpc.WithTransportCredentials(insecure.NewCredentials()),
-				grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-					return conn, nil
-				}),
-			)
-			if err != nil {
-				return nil, fmt.Errorf("failed to create client context: %w", err)
-			}
-
-			importerClient := grpc_importer.NewImporterClient(client)
-			return &grpcImporter{
-				grpcClient: importerClient,
-			}, nil
-		})
 	}
 	return nil
 }
