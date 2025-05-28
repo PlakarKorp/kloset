@@ -314,9 +314,9 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	impList := []importer.Importer{imp} //this should be the list of all importers in the multiImporter
 
 	//try casting the imp to a metaImporter
-	//if metaImp, ok := imp.(*multi.MultiImporter); ok {
-	//	impList = append(impList, metaImp.Importers...)
-	//}
+	if multiImp, ok := imp.(*importer.MultiImporter); ok {
+		impList = append(impList, multiImp.Importers...)
+	}
 
 	for len(snap.Header.Sources) < len(impList) {
 		snap.Header.Sources = append(snap.Header.Sources, header.NewSource())
