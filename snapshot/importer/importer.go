@@ -18,7 +18,6 @@ package importer
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -50,13 +49,8 @@ type ScanRecord struct {
 	IsXattr            bool
 	XattrName          string
 	XattrType          objects.Attribute
-}
 
-func (s *ScanRecord) Close() error {
-	if s.Reader == nil {
-		return errors.ErrUnsupported
-	}
-	return s.Reader.Close()
+	Source int
 }
 
 type ScanError struct {
@@ -99,10 +93,9 @@ func NewImporter(ctx *kcontext.KContext, config map[string]string) (Importer, er
 
 	if proto == "fs" && !filepath.IsAbs(location) {
 		location = filepath.Join(ctx.CWD, location)
-		config["location"] = "fs://" + location
-	} else {
-		config["location"] = proto + "://" + location
 	}
+
+	config["location"] = location
 	return backend(ctx, proto, config)
 }
 

@@ -50,7 +50,7 @@ func visitmimes(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq
 		return nil, nil
 	}
 
-	fsp, err := snap.Filesystem()
+	fsp, err := snap.Filesystem(0) //TODO: support multiple filesystems
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func visitfiles(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq
 		// fallback
 	}
 
-	fsc, err := snap.Filesystem()
+	fsc, err := snap.Filesystem(0) //TODO: support multiple filesystems
 	if err != nil {
 		return nil, err
 	}

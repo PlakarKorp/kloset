@@ -176,7 +176,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 
 					if strings.HasPrefix(record.Pathname, repoLocation+"/") {
 						snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
-						record.Close()
+						record.Reader.Close()
 						// skip repository directory
 						return
 					}
@@ -187,7 +187,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						if err := backupCtx.recordEntry(entry); err != nil {
 							backupCtx.recordError(record.Pathname, err)
 						}
-						record.Close()
+						record.Reader.Close()
 						return
 					}
 
@@ -201,8 +201,10 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						atomic.AddUint64(&size, uint64(record.FileInfo.Size()))
 					}
 					// if snapshot root is a file, then reset to the parent directory
-					if snap.Header.GetSource(0).Importer.Directory == record.Pathname {
-						snap.Header.GetSource(0).Importer.Directory = filepath.Dir(record.Pathname)
+					for i := range snap.Header.Sources {
+						if snap.Header.GetSource(i).Importer.Directory == record.Pathname {
+							snap.Header.GetSource(i).Importer.Directory = filepath.Dir(record.Pathname)
+						}
 					}
 				}
 			}(_record)
@@ -297,16 +299,34 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	defer snap.Unlock(done)
 
-	snap.Header.GetSource(0).Importer.Origin = imp.Origin()
-	snap.Header.GetSource(0).Importer.Type = imp.Type()
+	//snap.Header.GetSource(0).Importer.Origin = imp.Origin()
+	//snap.Header.GetSource(0).Importer.Type = imp.Type()
+	//snap.Header.GetSource(0).Importer.Directory = imp.Root()
+
 	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
 
 	if options.Name == "" {
-		snap.Header.Name = imp.Root() + " @ " + snap.Header.GetSource(0).Importer.Origin
+		snap.Header.Name = imp.Root() + " @ " + imp.Origin()
 	} else {
 		snap.Header.Name = options.Name
 	}
-	snap.Header.GetSource(0).Importer.Directory = imp.Root()
+
+	impList := []importer.Importer{imp} //this should be the list of all importers in the multiImporter
+
+	//try casting the imp to a metaImporter
+	//if metaImp, ok := imp.(*multi.MultiImporter); ok {
+	//	impList = append(impList, metaImp.Importers...)
+	//}
+
+	for len(snap.Header.Sources) < len(impList) {
+		snap.Header.Sources = append(snap.Header.Sources, header.NewSource())
+	}
+
+	for i, tmpImp := range impList {
+		snap.Header.GetSource(i).Importer.Origin = tmpImp.Origin()
+		snap.Header.GetSource(i).Importer.Type = tmpImp.Type()
+		snap.Header.GetSource(i).Importer.Directory = tmpImp.Root()
+	}
 
 	backupCtx, err := snap.prepareBackup(imp, options)
 	if err != nil {
@@ -334,16 +354,34 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil
+	for i := range snap.Header.Sources {
+		backupCtx.imp = impList[i]
+		vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil
+		}
+		snap.Header.GetSource(i).VFS = *vfsHeader
+		snap.Header.GetSource(i).Summary = *rootSummary
+		snap.Header.GetSource(i).Indexes = indexes
+	}
+	//TODO: smart merging the vfs, summary and indexes in case of multiImporter with multiple sources of the same type and common root
+
+	//remove the first source, as it is the one that specifies the multiImporter
+	//without it, we would have: multi, fs, ftp
+	//with it, we would have: fs, ftp
+	//this is a workaround for the fact that we don't have a way to specify the
+	//multiImporter in the header
+	if len(snap.Header.Sources) > 1 {
+		snap.Header.Sources = snap.Header.Sources[1:]
 	}
 
+	//snap.persistTrees should return list of vfsHeader, rootSummary and indexes so for now
+	//we just use the first one, its hackish but it works
 	snap.Header.Duration = time.Since(beginTime)
-	snap.Header.GetSource(0).VFS = *vfsHeader
-	snap.Header.GetSource(0).Summary = *rootSummary
-	snap.Header.GetSource(0).Indexes = indexes
+	//snap.Header.GetSource(0).VFS = *vfsHeader
+	//snap.Header.GetSource(0).Summary = *rootSummary
+	//snap.Header.GetSource(0).Indexes = indexes
 
 	return snap.Commit(backupCtx, !options.NoCommit)
 }
@@ -610,7 +648,6 @@ loop:
 			go func(record *importer.ScanRecord) {
 				defer wg.Done()
 				defer func() { <-semaphore }()
-				defer record.Close()
 
 				snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
 				if err := snap.processFileRecord(backupCtx, record); err != nil {

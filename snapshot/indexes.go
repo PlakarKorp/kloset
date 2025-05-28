@@ -10,10 +10,12 @@ import (
 )
 
 func (snap *Snapshot) getidx(name, kind string) (objects.MAC, bool) {
-	source := snap.Header.GetSource(0)
-	for i := range source.Indexes {
-		if source.Indexes[i].Name == name && source.Indexes[i].Type == kind {
-			return source.Indexes[i].Value, true
+	for i := range snap.Header.Sources { // or maybe get i as a parameter of getidx
+		source := snap.Header.GetSource(i)
+		for i := range source.Indexes {
+			if source.Indexes[i].Name == name && source.Indexes[i].Type == kind {
+				return source.Indexes[i].Value, true
+			}
 		}
 	}
 	return objects.MAC{}, false

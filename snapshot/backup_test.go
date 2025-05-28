@@ -25,7 +25,7 @@ func TestSimpleBackup(t *testing.T) {
 	summary := snap.Header.GetSource(0).Summary
 	require.Equal(t, summary.Directory.Errors+summary.Below.Errors, uint64(1))
 
-	fs, err := snap.Filesystem()
+	fs, err := snap.Filesystem(0)
 	require.NoError(t, err)
 
 	fs, err = fs.Chroot(snap.Header.GetSource(0).Importer.Directory)

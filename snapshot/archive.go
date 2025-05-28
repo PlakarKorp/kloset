@@ -28,7 +28,7 @@ var (
 )
 
 func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string, rebase bool) error {
-	fsc, err := snap.Filesystem()
+	fsc, err := snap.Filesystem(0) //TODO: support multiple filesystems
 	if err != nil {
 		return err
 	}

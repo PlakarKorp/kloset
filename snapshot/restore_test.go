@@ -36,7 +36,7 @@ func TestRestore(t *testing.T) {
 
 	// search for the correct filepath as the path was mkdir temp we cannot hardcode it
 	var filepath string
-	fs, err := snap.Filesystem()
+	fs, err := snap.Filesystem(0)
 	require.NoError(t, err)
 	for pathname, err := range fs.Pathnames() {
 		require.NoError(t, err)

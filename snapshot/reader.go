@@ -14,7 +14,7 @@ func (snapshot *Snapshot) NewReader(pathname string) (io.ReadCloser, error) {
 func NewReader(snap *Snapshot, pathname string) (io.ReadCloser, error) {
 	pathname = path.Clean(pathname)
 
-	fsc, err := snap.Filesystem()
+	fsc, err := snap.Filesystem(0) //TODO: use the correct index
 	if err != nil {
 		return nil, err
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"github.com/PlakarKorp/kloset/snapshot/header"
 	"hash"
 
 	"github.com/PlakarKorp/kloset/events"
@@ -180,18 +181,13 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 	return nil
 }
 
-func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
-	snap.Event(events.StartEvent())
-	defer snap.Event(events.DoneEvent())
-
-	vfsStatus, err := snap.checkCache.GetVFSStatus(snap.Header.GetSource(0).VFS.Root)
+func (snap *Snapshot) processSource(idx int, source *header.Source, pathname string, opts *CheckOptions) error {
+	vfsStatus, err := snap.checkCache.GetVFSStatus(source.VFS.Root)
 	if err != nil {
 		return err
 	}
 
-	// if vfsStatus is nil, we've never seen this vfs and we have
-	// to process it.  It is zero if it's fine, or an error
-	// otherwise.
+	// If vfsStatus is nil, we've never seen this vfs and we have to process it.
 	if vfsStatus != nil {
 		if len(vfsStatus) != 0 {
 			return fmt.Errorf("%s", string(vfsStatus))
@@ -199,7 +195,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 		return nil
 	}
 
-	fs, err := snap.Filesystem()
+	fs, err := snap.Filesystem(idx)
 	if err != nil {
 		return err
 	}
@@ -233,20 +229,31 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 		return nil
 	})
 	if err != nil {
-		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
+		snap.checkCache.PutVFSStatus(source.VFS.Root, []byte(err.Error()))
 		return err
 	}
 	if err := wg.Wait(); err != nil {
-		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
+		snap.checkCache.PutVFSStatus(source.VFS.Root, []byte(err.Error()))
 		return err
 	}
 	if failed {
-		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root,
-			[]byte(ErrRootCorrupted.Error()))
+		snap.checkCache.PutVFSStatus(source.VFS.Root, []byte(ErrRootCorrupted.Error()))
 		return ErrRootCorrupted
 	}
 
-	snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(""))
+	snap.checkCache.PutVFSStatus(source.VFS.Root, []byte(""))
+	return nil
+}
+
+func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
+	snap.Event(events.StartEvent())
+	defer snap.Event(events.DoneEvent())
+
+	for i, source := range snap.Header.Sources {
+		if err := snap.processSource(i, &source, pathname, opts); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

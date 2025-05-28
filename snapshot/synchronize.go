@@ -154,42 +154,44 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		}
 	}
 
-	fs, err := src.Filesystem()
-	if err != nil {
-		return err
-	}
+	for i := range src.Header.Sources {
+		fs, err := src.Filesystem(i)
+		if err != nil {
+			return err
+		}
 
-	vfs, errors, xattrs := fs.BTrees()
+		vfs, errors, xattrs := fs.BTrees()
 
-	ctidx, err := btree.New(&btree.InMemoryStore[string, objects.MAC]{}, strings.Compare, 50)
+		ctidx, err := btree.New(&btree.InMemoryStore[string, objects.MAC]{}, strings.Compare, 50)
 
-	dst.Header.GetSource(0).VFS.Root, err = persistIndex(dst, vfs, resources.RT_VFS_BTREE,
-		resources.RT_VFS_NODE, persistVFS(src, dst, fs, ctidx))
-	if err != nil {
-		return err
-	}
+		dst.Header.GetSource(i).VFS.Root, err = persistIndex(dst, vfs, resources.RT_VFS_BTREE,
+			resources.RT_VFS_NODE, persistVFS(src, dst, fs, ctidx))
+		if err != nil {
+			return err
+		}
 
-	dst.Header.GetSource(0).VFS.Errors, err = persistIndex(dst, errors, resources.RT_ERROR_BTREE,
-		resources.RT_ERROR_NODE, persistErrors(src, dst))
-	if err != nil {
-		return err
-	}
+		dst.Header.GetSource(i).VFS.Errors, err = persistIndex(dst, errors, resources.RT_ERROR_BTREE,
+			resources.RT_ERROR_NODE, persistErrors(src, dst))
+		if err != nil {
+			return err
+		}
 
-	dst.Header.GetSource(0).VFS.Xattrs, err = persistIndex(dst, xattrs, resources.RT_XATTR_BTREE,
-		resources.RT_XATTR_NODE, persistXattrs(src, dst, fs))
-	if err != nil {
-		return err
-	}
+		dst.Header.GetSource(i).VFS.Xattrs, err = persistIndex(dst, xattrs, resources.RT_XATTR_BTREE,
+			resources.RT_XATTR_NODE, persistXattrs(src, dst, fs))
+		if err != nil {
+			return err
+		}
 
-	ctsum, err := persistIndex(dst, ctidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-		return mac, nil
-	})
-	dst.Header.GetSource(0).Indexes = []header.Index{
-		{
-			Name:  "content-type",
-			Type:  "btree",
-			Value: ctsum,
-		},
+		ctsum, err := persistIndex(dst, ctidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+			return mac, nil
+		})
+		dst.Header.GetSource(i).Indexes = []header.Index{
+			{
+				Name:  "content-type",
+				Type:  "btree",
+				Value: ctsum,
+			},
+		}
 	}
 
 	return nil

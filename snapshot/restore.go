@@ -122,7 +122,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	snap.Event(events.StartEvent())
 	defer snap.Event(events.DoneEvent())
 
-	fs, err := snap.Filesystem()
+	fs, err := snap.Filesystem(0) //TODO: support multiple filesystems
 	if err != nil {
 		return err
 	}

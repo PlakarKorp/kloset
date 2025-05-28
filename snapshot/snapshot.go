@@ -42,7 +42,9 @@ func LogicalSize(repo *repository.Repository) (int, int64, error) {
 			continue
 		}
 		nSnapshots++
-		totalSize += int64(snap.Header.GetSource(0).Summary.Directory.Size + snap.Header.GetSource(0).Summary.Below.Size)
+		for _, source := range snap.Header.Sources {
+			totalSize += int64(source.Summary.Directory.Size + source.Summary.Below.Size)
+		}
 		snap.Close()
 	}
 
@@ -137,7 +139,7 @@ func getPackfileForBlobWithError(snap *Snapshot, res resources.Type, mac objects
 }
 
 func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
-	pvfs, err := snap.Filesystem()
+	pvfs, err := snap.Filesystem(0) // TODO: handle multiple sources
 	if err != nil {
 		return nil, err
 	}
@@ -229,32 +231,33 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		// Lastly going over the indexes.
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)) {
-			return
-		}
-		rd, err := snap.repository.GetBlob(resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)
-		if err != nil {
-			if !yield(objects.MAC{}, fmt.Errorf("Failed to load Index root entry %s", err)) {
+		for _, source := range snap.Header.Sources {
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, source.Indexes[0].Value)) {
 				return
 			}
-		}
+			rd, err := snap.repository.GetBlob(resources.RT_BTREE_ROOT, source.Indexes[0].Value)
+			if err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("Failed to load Index root entry %s", err)) {
+					return
+				}
+			}
 
-		store := repository.NewRepositoryStore[string, objects.MAC](snap.repository, resources.RT_BTREE_NODE)
-		tree, err := btree.Deserialize(rd, store, strings.Compare)
-		if err != nil {
-			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
-				return
+			store := repository.NewRepositoryStore[string, objects.MAC](snap.repository, resources.RT_BTREE_NODE)
+			tree, err := btree.Deserialize(rd, store, strings.Compare)
+			if err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
+					return
+				}
+			}
+
+			indexIter := tree.IterDFS()
+			for indexIter.Next() {
+				mac, _ := indexIter.Current()
+				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
 			}
 		}
-
-		indexIter := tree.IterDFS()
-		for indexIter.Next() {
-			mac, _ := indexIter.Current()
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
-				return
-			}
-		}
-
 	}, nil
 }
 
