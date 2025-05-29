@@ -138,7 +138,7 @@ func New(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repositor
 	}
 
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
-		hasher := r.getMACHasher()
+		hasher := r.GetMACHasher()
 		hasher.Reset()
 		return hasher
 	})
@@ -193,7 +193,7 @@ func NewNoRebuild(ctx *kcontext.KContext, store storage.Store, config []byte) (*
 		storageSizeDirty: true,
 	}
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
-		hasher := r.getMACHasher()
+		hasher := r.GetMACHasher()
 		hasher.Reset()
 		return hasher
 	})
@@ -392,18 +392,6 @@ func (r *Repository) EncodeBuffer(buffer []byte) ([]byte, error) {
 		return nil, err
 	}
 	return io.ReadAll(rd)
-}
-
-func (r *Repository) getMACHasher() hash.Hash {
-	secret := r.AppContext().GetSecret()
-	if secret == nil {
-		// unencrypted repo, derive 32-bytes "secret" from RepositoryID
-		// so ComputeMAC can be used similarly to encrypted repos
-		hasher := hashing.GetHasher(r.Configuration().Hashing.Algorithm)
-		hasher.Write(r.configuration.RepositoryID[:])
-		secret = hasher.Sum(nil)
-	}
-	return hashing.GetMACHasher(r.Configuration().Hashing.Algorithm, secret)
 }
 
 func (r *Repository) GetMACHasher() hash.Hash {
