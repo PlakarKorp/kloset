@@ -342,7 +342,7 @@ func (r *Repository) decode(input io.Reader) (io.Reader, error) {
 	return stream, nil
 }
 
-func (r *Repository) Encode(input io.Reader) (io.Reader, error) {
+func (r *Repository) encode(input io.Reader) (io.Reader, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "Encode: %s", time.Since(t0))
@@ -381,13 +381,13 @@ func (r *Repository) decodeBuffer(buffer []byte) ([]byte, error) {
 	return io.ReadAll(rd)
 }
 
-func (r *Repository) EncodeBuffer(buffer []byte) ([]byte, error) {
+func (r *Repository) encodeBuffer(buffer []byte) ([]byte, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "Encode(%d): %s", len(buffer), time.Since(t0))
 	}()
 
-	rd, err := r.Encode(bytes.NewBuffer(buffer))
+	rd, err := r.encode(bytes.NewBuffer(buffer))
 	if err != nil {
 		return nil, err
 	}
@@ -542,7 +542,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		r.Logger().Trace("repository", "PutState(%x, ...): %s", mac, time.Since(t0))
 	}()
 
-	rd, err := r.Encode(rd)
+	rd, err := r.encode(rd)
 	if err != nil {
 		return err
 	}
@@ -955,7 +955,7 @@ func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
 		r.Logger().Trace("repository", "PutLock(%x, ...): %s", lockID, time.Since(t0))
 	}()
 
-	rd, err := r.Encode(rd)
+	rd, err := r.encode(rd)
 	if err != nil {
 		return 0, err
 	}
