@@ -316,10 +316,10 @@ func (r *Repository) Close() error {
 	return nil
 }
 
-func (r *Repository) Decode(input io.Reader) (io.Reader, error) {
+func (r *Repository) decode(input io.Reader) (io.Reader, error) {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "Decode: %s", time.Since(t0))
+		r.Logger().Trace("repository", "decode: %s", time.Since(t0))
 	}()
 
 	stream := input
@@ -368,13 +368,13 @@ func (r *Repository) Encode(input io.Reader) (io.Reader, error) {
 	return stream, nil
 }
 
-func (r *Repository) DecodeBuffer(buffer []byte) ([]byte, error) {
+func (r *Repository) decodeBuffer(buffer []byte) ([]byte, error) {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "Decode(%d bytes): %s", len(buffer), time.Since(t0))
+		r.Logger().Trace("repository", "decode(%d bytes): %s", len(buffer), time.Since(t0))
 	}()
 
-	rd, err := r.Decode(bytes.NewBuffer(buffer))
+	rd, err := r.decode(bytes.NewBuffer(buffer))
 	if err != nil {
 		return nil, err
 	}
@@ -541,7 +541,7 @@ func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.Reader, e
 		return versioning.Version(0), nil, err
 	}
 
-	rd, err = r.Decode(rd)
+	rd, err = r.decode(rd)
 	if err != nil {
 		return versioning.Version(0), nil, err
 	}
@@ -616,7 +616,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 	footerbuf := rawPackfile[len(rawPackfile)-int(footerBufLength):]
 	rawPackfile = rawPackfile[:len(rawPackfile)-int(footerBufLength)]
 
-	footerbuf, err = r.DecodeBuffer(footerbuf)
+	footerbuf, err = r.decodeBuffer(footerbuf)
 	if err != nil {
 		return nil, err
 	}
@@ -629,7 +629,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 	indexbuf := rawPackfile[int(footer.IndexOffset):]
 	rawPackfile = rawPackfile[:int(footer.IndexOffset)]
 
-	indexbuf, err = r.DecodeBuffer(indexbuf)
+	indexbuf, err = r.decodeBuffer(indexbuf)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +726,7 @@ func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) 
 	// discard the last lengthDelta bytes
 	data = data[:length]
 
-	decoded, err := r.DecodeBuffer(data)
+	decoded, err := r.decodeBuffer(data)
 	if err != nil {
 		return nil, err
 	}
@@ -954,7 +954,7 @@ func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.Reader,
 		return versioning.Version(0), nil, err
 	}
 
-	rd, err = r.Decode(rd)
+	rd, err = r.decode(rd)
 	if err != nil {
 		return versioning.Version(0), nil, err
 	}
