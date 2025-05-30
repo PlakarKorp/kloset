@@ -15,6 +15,9 @@ import (
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
 	grpc_exporter "github.com/PlakarKorp/kloset/snapshot/exporter/pkg"
 
+	"github.com/PlakarKorp/kloset/storage"
+	grpc_storage "github.com/PlakarKorp/kloset/storage/pkg"
+
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 )
@@ -65,6 +68,14 @@ var pTypes = map[string]pluginTypes{
 			}
 		},
 	},
+	"storage": {
+		registerFn:    func(name string, fn interface{}) {
+			storage.Register(name, wrap[storage.Storage](fn))
+		},
+		grpcClient:    func(client interface{}) interface{} {
+			return &storage.GrpcStorage{GrpcClient: grpc_storage.NewStorageClient(client.(*grpc.ClientConn))}
+		},
+	},
 }
 	
 
@@ -86,13 +97,17 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 		if err != nil {
 			return fmt.Errorf("failed to read plugin folder %s: %w", pluginEntry.Name(), err)
 		}
+
 		for _, entry := range pluginFiles {
+			fmt.Printf("1 Processing plugin file: %s\n", entry.Name())
 			matches := re.FindStringSubmatch(entry.Name())
 			if matches == nil {
 				continue
 			}
+			fmt.Printf("2 Processing plugin file: %s\n", entry.Name())
 			key := matches[1]
 			pluginFileName := matches[0]
+			fmt.Printf("3 Processing plugin file: %s\n", entry.Name())
 
 			pType, ok := pTypes[pluginEntry.Name()]
 			if !ok {
