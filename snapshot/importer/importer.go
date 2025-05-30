@@ -50,6 +50,8 @@ type ScanRecord struct {
 	IsXattr            bool
 	XattrName          string
 	XattrType          objects.Attribute
+
+	Source int
 }
 
 func (s *ScanRecord) Close() error {
@@ -62,6 +64,8 @@ func (s *ScanRecord) Close() error {
 type ScanError struct {
 	Pathname string
 	Err      error
+
+	Source int
 }
 
 type Importer interface {
