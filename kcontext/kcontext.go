@@ -20,7 +20,6 @@ type KContext struct {
 	cache   *caching.Manager `msgpack:"-"`
 	cookies *cookies.Manager `msgpack:"-"`
 	logger  *logging.Logger  `msgpack:"-"`
-	secret  []byte           `msgpack:"-"`
 	Config  *config.Config   `msgpack:"-"`
 
 	Context context.Context    `msgpack:"-"`
@@ -119,14 +118,6 @@ func (c *KContext) SetLogger(logger *logging.Logger) {
 
 func (c *KContext) GetLogger() *logging.Logger {
 	return c.logger
-}
-
-func (c *KContext) SetSecret(secret []byte) {
-	c.secret = secret
-}
-
-func (c *KContext) GetSecret() []byte {
-	return c.secret
 }
 
 func (c *KContext) GetAuthToken(repository uuid.UUID) (string, error) {

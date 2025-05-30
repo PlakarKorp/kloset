@@ -76,6 +76,8 @@ type Repository struct {
 	configuration storage.Configuration
 	appContext    *kcontext.KContext
 
+	secret []byte
+
 	wBytes atomic.Int64
 	rBytes atomic.Int64
 
@@ -101,15 +103,15 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 	}, nil
 }
 
-func New(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repository, error) {
+func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte) (*Repository, error) {
 	t0 := time.Now()
 	defer func() {
 		ctx.GetLogger().Trace("repository", "New(store=%p): %s", store, time.Since(t0))
 	}()
 
 	var hasher hash.Hash
-	if ctx.GetSecret() != nil {
-		hasher = hashing.GetMACHasher(storage.DEFAULT_HASHING_ALGORITHM, ctx.GetSecret())
+	if secret != nil {
+		hasher = hashing.GetMACHasher(storage.DEFAULT_HASHING_ALGORITHM, secret)
 	} else {
 		hasher = hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
 	}
@@ -133,6 +135,7 @@ func New(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repositor
 		store:            store,
 		configuration:    *configInstance,
 		appContext:       ctx,
+		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
 	}
@@ -157,15 +160,15 @@ func New(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repositor
 	return r, nil
 }
 
-func NewNoRebuild(ctx *kcontext.KContext, store storage.Store, config []byte) (*Repository, error) {
+func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte) (*Repository, error) {
 	t0 := time.Now()
 	defer func() {
 		ctx.GetLogger().Trace("repository", "NewNoRebuild(store=%p): %s", store, time.Since(t0))
 	}()
 
 	var hasher hash.Hash
-	if ctx.GetSecret() != nil {
-		hasher = hashing.GetMACHasher(storage.DEFAULT_HASHING_ALGORITHM, ctx.GetSecret())
+	if secret != nil {
+		hasher = hashing.GetMACHasher(storage.DEFAULT_HASHING_ALGORITHM, secret)
 	} else {
 		hasher = hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
 	}
@@ -189,6 +192,7 @@ func NewNoRebuild(ctx *kcontext.KContext, store storage.Store, config []byte) (*
 		store:            store,
 		configuration:    *configInstance,
 		appContext:       ctx,
+		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
 	}
@@ -323,8 +327,8 @@ func (r *Repository) decode(input io.Reader) (io.Reader, error) {
 	}()
 
 	stream := input
-	if r.AppContext().GetSecret() != nil {
-		tmp, err := encryption.DecryptStream(r.configuration.Encryption, r.AppContext().GetSecret(), stream)
+	if r.secret != nil {
+		tmp, err := encryption.DecryptStream(r.configuration.Encryption, r.secret, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -357,8 +361,8 @@ func (r *Repository) encode(input io.Reader) (io.Reader, error) {
 		stream = tmp
 	}
 
-	if r.AppContext().GetSecret() != nil {
-		tmp, err := encryption.EncryptStream(r.configuration.Encryption, r.AppContext().GetSecret(), stream)
+	if r.secret != nil {
+		tmp, err := encryption.EncryptStream(r.configuration.Encryption, r.secret, stream)
 		if err != nil {
 			return nil, err
 		}
@@ -395,7 +399,7 @@ func (r *Repository) encodeBuffer(buffer []byte) ([]byte, error) {
 }
 
 func (r *Repository) GetMACHasher() hash.Hash {
-	secret := r.AppContext().GetSecret()
+	secret := r.secret
 	if secret == nil {
 		// unencrypted repo, derive 32-bytes "secret" from RepositoryID
 		// so ComputeMAC can be used similarly to encrypted repos
