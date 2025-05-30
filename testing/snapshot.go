@@ -129,7 +129,8 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	require.NoError(t, err)
 	require.NotNil(t, builder)
 
-	imp, err := NewMockImporter(repo.AppContext(), "mock", map[string]string{"location": "mock://place"})
+	imp, err := NewMockImporter(repo.AppContext(), &importer.ImporterOptions{},
+		"mock", map[string]string{"location": "mock://place"})
 	require.NoError(t, err)
 	require.NotNil(t, imp)
 
