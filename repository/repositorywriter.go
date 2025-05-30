@@ -49,9 +49,9 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 
 	switch typ {
 	case PtarType:
-		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.Encode, rw.GetMACHasher, rw.PutPtarPackfile)
+		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPtarPackfile)
 	default:
-		rw.PackerManager = packer.NewPackerManager(rw.AppContext(), &rw.configuration, rw.Encode, rw.GetMACHasher, rw.PutPackfile)
+		rw.PackerManager = packer.NewPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPackfile)
 	}
 
 	// XXX: Better placement for this
@@ -179,12 +179,12 @@ func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
 		return fmt.Errorf("could not serialize pack file footer %s", err.Error())
 	}
 
-	encryptedIndex, err := r.EncodeBuffer(serializedIndex)
+	encryptedIndex, err := r.encodeBuffer(serializedIndex)
 	if err != nil {
 		return err
 	}
 
-	encryptedFooter, err := r.EncodeBuffer(serializedFooter)
+	encryptedFooter, err := r.encodeBuffer(serializedFooter)
 	if err != nil {
 		return err
 	}
