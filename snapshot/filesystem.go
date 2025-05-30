@@ -6,12 +6,12 @@ import (
 	"github.com/PlakarKorp/kloset/storage"
 )
 
-func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
+func (s *Snapshot) FilesystemN(source int) (*vfs.Filesystem, error) {
 	if s.repository.Store().Mode()&storage.ModeRead == 0 {
 		return nil, repository.ErrNotReadable
 	}
 
-	v := s.Header.GetSource(0).VFS
+	v := s.Header.GetSource(source).VFS
 
 	if s.filesystem != nil {
 		return s.filesystem, nil
@@ -21,4 +21,8 @@ func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 		s.filesystem = fs
 		return fs, nil
 	}
+}
+
+func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
+	return s.FilesystemN(0)
 }

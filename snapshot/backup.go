@@ -55,7 +55,7 @@ type BackupOptions struct {
 	NoCommit       bool
 }
 
-func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
+func (bc *BackupContext) recordEntry(source int, entry *vfs.Entry) error {
 	path := entry.Path()
 
 	bytes, err := entry.ToBytes()
@@ -64,29 +64,29 @@ func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
 	}
 
 	if entry.FileInfo.IsDir() {
-		return bc.scanCache.PutDirectory(0, path, bytes)
+		return bc.scanCache.PutDirectory(source, path, bytes)
 	}
-	return bc.scanCache.PutFile(0, path, bytes)
+	return bc.scanCache.PutFile(source, path, bytes)
 }
 
-func (bc *BackupContext) recordError(path string, err error) error {
+func (bc *BackupContext) recordError(source int, path string, err error) error {
 	entry := vfs.NewErrorItem(path, err.Error())
 	serialized, e := entry.ToBytes()
 	if e != nil {
 		return err
 	}
 
-	return bc.indexes[0].erridx.Insert(path, serialized)
+	return bc.indexes[source].erridx.Insert(path, serialized)
 }
 
-func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
+func (bc *BackupContext) recordXattr(source int, record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
 		return err
 	}
 
-	return bc.indexes[0].xattridx.Insert(xattr.ToPath(), serialized)
+	return bc.indexes[source].xattridx.Insert(xattr.ToPath(), serialized)
 }
 
 func (snapshot *Builder) skipExcludedPathname(options *BackupOptions, record *importer.ScanResult) bool {
@@ -171,7 +171,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						ctx.Cancel()
 						return
 					}
-					backupCtx.recordError(record.Pathname, record.Err)
+					backupCtx.recordError(record.Source, record.Pathname, record.Err)
 					snap.Event(events.PathErrorEvent(snap.Header.Identifier, record.Pathname, record.Err.Error()))
 
 				case record.Record != nil:
@@ -188,8 +188,8 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 					if record.FileInfo.Mode().IsDir() {
 						atomic.AddUint64(&nDirectories, +1)
 						entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-						if err := backupCtx.recordEntry(entry); err != nil {
-							backupCtx.recordError(record.Pathname, err)
+						if err := backupCtx.recordEntry(record.Source, entry); err != nil {
+							backupCtx.recordError(record.Source, record.Pathname, err)
 						}
 						record.Close()
 						return
@@ -289,10 +289,19 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 	}
 }
 
-func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error {
+func (snap *Builder) Backup(importers []importer.Importer, options *BackupOptions) error {
 	beginTime := time.Now()
 	snap.Event(events.StartEvent())
 	defer snap.Event(events.DoneEvent())
+
+	var multiSource bool
+	if len(importers) > 1 {
+		multiSource = true
+	} else if len(importers) == 1 {
+		multiSource = false
+	} else {
+		return fmt.Errorf("at least one importer is required for backup")
+	}
 
 	done, err := snap.Lock()
 	if err != nil {
@@ -301,18 +310,27 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	defer snap.Unlock(done)
 
-	snap.Header.GetSource(0).Importer.Origin = imp.Origin()
-	snap.Header.GetSource(0).Importer.Type = imp.Type()
-	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
+	snap.Header.Sources = make([]header.Source, len(importers))
 
-	if options.Name == "" {
-		snap.Header.Name = imp.Root() + " @ " + snap.Header.GetSource(0).Importer.Origin
-	} else {
-		snap.Header.Name = options.Name
+	for i, imp := range importers {
+		snap.Header.GetSource(i).Importer.Origin = imp.Origin()
+		snap.Header.GetSource(i).Importer.Type = imp.Type()
+		snap.Header.GetSource(i).Importer.Directory = imp.Root()
+		snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
+
+		if options.Name == "" {
+			snap.Header.Name = imp.Root() + " @ " + snap.Header.GetSource(0).Importer.Origin
+		} else {
+			snap.Header.Name = options.Name
+		}
 	}
-	snap.Header.GetSource(0).Importer.Directory = imp.Root()
 
-	backupCtx, err := snap.prepareBackup(imp, options)
+	_importer := importers[0]
+	if multiSource {
+		_importer, _ = importer.NewMultiImporter(snap.AppContext(), importers, 0)
+	}
+
+	backupCtx, err := snap.prepareBackup(len(importers), _importer, options)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
@@ -338,16 +356,18 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil
-	}
+	for i := range importers {
+		vfsHeader, rootSummary, indexes, err := snap.persistTrees(i, backupCtx)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil
+		}
 
-	snap.Header.Duration = time.Since(beginTime)
-	snap.Header.GetSource(0).VFS = *vfsHeader
-	snap.Header.GetSource(0).Summary = *rootSummary
-	snap.Header.GetSource(0).Indexes = indexes
+		snap.Header.Duration = time.Since(beginTime)
+		snap.Header.GetSource(i).VFS = *vfsHeader
+		snap.Header.GetSource(i).Summary = *rootSummary
+		snap.Header.GetSource(i).Indexes = indexes
+	}
 
 	return snap.Commit(backupCtx, !options.NoCommit)
 }
@@ -567,8 +587,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
-
+func (snap *Builder) prepareBackup(impNumber int, imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
 	maxConcurrency := backupOpts.MaxConcurrency
 	if maxConcurrency == 0 {
 		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
@@ -589,10 +608,12 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		stateId:        snap.Header.Identifier,
 	}
 
-	if bi, err := snap.makeBackupIndexes(); err != nil {
-		return nil, err
-	} else {
-		backupCtx.indexes = append(backupCtx.indexes, bi)
+	for range impNumber {
+		if bi, err := snap.makeBackupIndexes(); err != nil {
+			return nil, err
+		} else {
+			backupCtx.indexes = append(backupCtx.indexes, bi)
+		}
 	}
 
 	return backupCtx, nil
@@ -626,7 +647,7 @@ loop:
 				snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
 				if err := snap.processFileRecord(backupCtx, record); err != nil {
 					snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
-					backupCtx.recordError(record.Pathname, err)
+					backupCtx.recordError(record.Source, record.Pathname, err)
 				} else {
 					snap.Event(events.FileOKEvent(snap.Header.Identifier, record.Pathname, record.FileInfo.Size()))
 				}
@@ -721,7 +742,7 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 
 	// xattrs are a special case
 	if record.IsXattr {
-		backupCtx.recordXattr(record, objectMAC, object.Size())
+		backupCtx.recordXattr(record.Source, record, objectMAC, object.Size())
 		return nil
 	}
 
@@ -782,16 +803,16 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 		}
 	}
 
-	return backupCtx.recordEntry(fileEntry)
+	return backupCtx.recordEntry(record.Source, fileEntry)
 }
 
-func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
-	vfsHeader, summary, err := snap.persistVFS(backupCtx)
+func (snap *Builder) persistTrees(source int, backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
+	vfsHeader, summary, err := snap.persistVFS(source, backupCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	indexes, err := snap.persistIndexes(backupCtx)
+	indexes, err := snap.persistIndexes(source, backupCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -799,7 +820,7 @@ func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.S
 	return vfsHeader, summary, indexes, nil
 }
 
-func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
+func (snap *Builder) persistVFS(source int, backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
 	errcsum, err := persistMACIndex(snap, backupCtx.indexes[0].erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
 	if err != nil {
@@ -817,7 +838,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 	var rootSummary *vfs.Summary
 
-	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
+	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%d:", "__directory__", source), true)
 	for dirPath, bytes := range diriter {
 		select {
 		case <-snap.AppContext().Done():
@@ -835,7 +856,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		childiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
+		childiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%d:%s", "__file__", source, prefix), false)
 
 		for relpath, bytes := range childiter {
 			if strings.Contains(relpath, "/") {
@@ -867,7 +888,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			dirEntry.Summary.UpdateWithFileSummary(fileSummary)
 		}
 
-		subDirIter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
+		subDirIter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%d:%s", "__directory__", source, prefix), false)
 		for relpath := range subDirIter {
 			if relpath == "" || strings.Contains(relpath, "/") {
 				continue
@@ -910,13 +931,13 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 		serializedSummary, err := dirEntry.Summary.ToBytes()
 		if err != nil {
-			backupCtx.recordError(dirPath, err)
+			backupCtx.recordError(source, dirPath, err)
 			return nil, nil, err
 		}
 
-		err = snap.scanCache.PutSummary(0, dirPath, serializedSummary)
+		err = snap.scanCache.PutSummary(source, dirPath, serializedSummary)
 		if err != nil {
-			backupCtx.recordError(dirPath, err)
+			backupCtx.recordError(source, dirPath, err)
 			return nil, nil, err
 		}
 
@@ -942,7 +963,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		if err := backupCtx.recordEntry(dirEntry); err != nil {
+		if err := backupCtx.recordEntry(source, dirEntry); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -971,8 +992,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 }
 
-func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
-	ctmac, err := persistIndex(snap, backupCtx.indexes[0].ctidx,
+func (snap *Builder) persistIndexes(source int, backupCtx *BackupContext) ([]header.Index, error) {
+	ctmac, err := persistIndex(snap, backupCtx.indexes[source].ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
