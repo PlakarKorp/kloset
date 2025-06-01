@@ -18,6 +18,7 @@ package importer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -39,6 +40,8 @@ type ExtendedAttributes struct {
 }
 
 type ScanRecord struct {
+	Reader io.ReadCloser
+
 	Pathname           string
 	Target             string
 	FileInfo           objects.FileInfo
@@ -47,6 +50,13 @@ type ScanRecord struct {
 	IsXattr            bool
 	XattrName          string
 	XattrType          objects.Attribute
+}
+
+func (s *ScanRecord) Close() error {
+	if s.Reader == nil {
+		return errors.ErrUnsupported
+	}
+	return s.Reader.Close()
 }
 
 type ScanError struct {
@@ -59,8 +69,6 @@ type Importer interface {
 	Type() string
 	Root() string
 	Scan() (<-chan *ScanResult, error)
-	NewReader(string) (io.ReadCloser, error)
-	NewExtendedAttributeReader(string, string) (io.ReadCloser, error)
 	Close() error
 }
 
@@ -99,24 +107,26 @@ func NewImporter(ctx *kcontext.KContext, config map[string]string) (Importer, er
 	return backend(ctx, proto, config)
 }
 
-func NewScanRecord(pathname, target string, fileinfo objects.FileInfo, xattr []string) *ScanResult {
+func NewScanRecord(pathname, target string, fileinfo objects.FileInfo, xattr []string, read func() (io.ReadCloser, error)) *ScanResult {
 	return &ScanResult{
 		Record: &ScanRecord{
 			Pathname:           pathname,
 			Target:             target,
 			FileInfo:           fileinfo,
 			ExtendedAttributes: xattr,
+			Reader:             NewLazyReader(read),
 		},
 	}
 }
 
-func NewScanXattr(pathname, xattr string, kind objects.Attribute) *ScanResult {
+func NewScanXattr(pathname, xattr string, kind objects.Attribute, read func() (io.ReadCloser, error)) *ScanResult {
 	return &ScanResult{
 		Record: &ScanRecord{
 			Pathname:  pathname,
 			IsXattr:   true,
 			XattrName: xattr,
 			XattrType: kind,
+			Reader:    NewLazyReader(read),
 		},
 	}
 }

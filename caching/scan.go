@@ -38,46 +38,38 @@ func (c *ScanCache) Close() error {
 	return os.RemoveAll(filepath.Join(c.manager.cacheDir, "scan", fmt.Sprintf("%x", c.snapshotID)))
 }
 
-func (c *ScanCache) PutFile(file string, data []byte) error {
-	return c.put("__file__", file, data)
+func (c *ScanCache) PutFile(source int, file string, data []byte) error {
+	return c.put("__file__", fmt.Sprintf("%d:%s", source, file), data)
 }
 
-func (c *ScanCache) GetFile(file string) ([]byte, error) {
-	return c.get("__file__", file)
+func (c *ScanCache) GetFile(source int, file string) ([]byte, error) {
+	return c.get("__file__", fmt.Sprintf("%d:%s", source, file))
 }
 
-func (c *ScanCache) PutXattr(xattr string, data []byte) error {
-	return c.put("__xattr__", xattr, data)
+func (c *ScanCache) PutDirectory(source int, directory string, data []byte) error {
+	return c.put("__directory__", fmt.Sprintf("%d:%s", source, directory), data)
 }
 
-func (c *ScanCache) GetXattr(xattr string) ([]byte, error) {
-	return c.get("__xattr__", xattr)
+func (c *ScanCache) GetDirectory(source int, directory string) ([]byte, error) {
+	return c.get("__directory__", fmt.Sprintf("%d:%s", source, directory))
 }
 
-func (c *ScanCache) PutDirectory(directory string, data []byte) error {
-	return c.put("__directory__", directory, data)
-}
-
-func (c *ScanCache) GetDirectory(directory string) ([]byte, error) {
-	return c.get("__directory__", directory)
-}
-
-func (c *ScanCache) PutSummary(pathname string, data []byte) error {
+func (c *ScanCache) PutSummary(source int, pathname string, data []byte) error {
 	pathname = strings.TrimSuffix(pathname, "/")
 	if pathname == "" {
 		pathname = "/"
 	}
 
-	return c.put("__summary__", pathname, data)
+	return c.put("__summary__", fmt.Sprintf("%d:%s", source, pathname), data)
 }
 
-func (c *ScanCache) GetSummary(pathname string) ([]byte, error) {
+func (c *ScanCache) GetSummary(source int, pathname string) ([]byte, error) {
 	pathname = strings.TrimSuffix(pathname, "/")
 	if pathname == "" {
 		pathname = "/"
 	}
 
-	return c.get("__summary__", pathname)
+	return c.get("__summary__", fmt.Sprintf("%d:%s", source, pathname))
 }
 
 func (c *ScanCache) PutState(stateID objects.MAC, data []byte) error {
