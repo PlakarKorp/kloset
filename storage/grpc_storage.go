@@ -29,32 +29,6 @@ type GrpcStorage struct {
 	GrpcClient grpc_storage.StoreClient
 }
 
-//type Store interface {
-//	Create(ctx context.Context, config []byte) error
-//	Open(ctx context.Context) ([]byte, error)
-//	Location() string
-//	Mode() Mode
-//	Size() int64 // this can be costly, call with caution
-//
-//	GetStates() ([]objects.MAC, error)
-//	PutState(mac objects.MAC, rd io.Reader) (int64, error)
-//	GetState(mac objects.MAC) (io.Reader, error)
-//	DeleteState(mac objects.MAC) error
-//
-//	GetPackfiles() ([]objects.MAC, error)
-//	PutPackfile(mac objects.MAC, rd io.Reader) (int64, error)
-//	GetPackfile(mac objects.MAC) (io.Reader, error)
-//	GetPackfileBlob(mac objects.MAC, offset uint64, length uint32) (io.Reader, error)
-//	DeletePackfile(mac objects.MAC) error
-//
-//	GetLocks() ([]objects.MAC, error)
-//	PutLock(lockID objects.MAC, rd io.Reader) (int64, error)
-//	GetLock(lockID objects.MAC) (io.Reader, error)
-//	DeleteLock(lockID objects.MAC) error
-//
-//	Close() error
-//}
-
 const bufferSize = 4096
 
 func NewGrpcStorage(client grpc_storage.StoreClient) *GrpcStorage {
@@ -63,16 +37,16 @@ func NewGrpcStorage(client grpc_storage.StoreClient) *GrpcStorage {
 	}
 }
 
-func (s *GrpcStorage) Create(config []byte) error {
-	_, err := s.GrpcClient.Create(context.Background(), &grpc_storage.CreateRequest{Config: config})
+func (s *GrpcStorage) Create(ctx context.Context, config []byte) error {
+	_, err := s.GrpcClient.Create(ctx, &grpc_storage.CreateRequest{Config: config})
 	if err != nil {
 		return err
 	}
 	return nil
 }
 
-func (s *GrpcStorage) Open() ([]byte, error) {
-	resp, err := s.GrpcClient.Open(context.Background(), &grpc_storage.OpenRequest{})
+func (s *GrpcStorage) Open(ctx context.Context) ([]byte, error) {
+	resp, err := s.GrpcClient.Open(ctx, &grpc_storage.OpenRequest{})
 	if err != nil {
 		return nil, err
 	}
@@ -87,20 +61,29 @@ func (s *GrpcStorage) Location() string {
 	return resp.Location
 }
 
-func (s *GrpcStorage) Mode() grpc_storage.Mode {
+func (s *GrpcStorage) Mode() Mode {
 	resp, err := s.GrpcClient.GetMode(context.Background(), &grpc_storage.GetModeRequest{})
 	if err != nil {
-		return grpc_storage.Mode(0)
+		return Mode(0)
 	}
-	return resp.Mode
+	var mode Mode
+	switch resp.Mode {
+		case grpc_storage.Mode_MODE_READ_WRITE:
+			mode = ModeWrite
+		case grpc_storage.Mode_MODE_READ_ONLY:
+			mode = ModeRead
+		default:
+			mode = Mode(0)
+	}
+	return mode
 }
 
-func (s *GrpcStorage) Size() (int64, error) {
+func (s *GrpcStorage) Size() (int64) {
 	resp, err := s.GrpcClient.GetSize(context.Background(), &grpc_storage.GetSizeRequest{})
 	if err != nil {
-		return 0, err
+		return -1
 	}
-	return resp.Size, nil
+	return resp.Size
 }
 
 //========================

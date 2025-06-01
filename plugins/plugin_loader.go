@@ -73,7 +73,9 @@ var pTypes = map[string]pluginTypes{
 			storage.Register(wrap[storage.Store](fn), name)
 		},
 		grpcClient: func(client interface{}) interface{} {
-			return &storage.GrpcStorage{GrpcClient: grpc_storage.NewStoreClient(client.(*grpc.ClientConn))}
+			return &storage.GrpcStorage{
+				GrpcClient: grpc_storage.NewStoreClient(client.(*grpc.ClientConn)),
+			}
 		},
 	},
 }
@@ -98,21 +100,17 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 		}
 
 		for _, entry := range pluginFiles {
-			fmt.Printf("1 Processing plugin file: %s\n", entry.Name())
 			matches := re.FindStringSubmatch(entry.Name())
 			if matches == nil {
 				continue
 			}
-			fmt.Printf("2 Processing plugin file: %s\n", entry.Name())
 			key := matches[1]
 			pluginFileName := matches[0]
-			fmt.Printf("3 Processing plugin file: %s\n", entry.Name())
 
 			pType, ok := pTypes[pluginEntry.Name()]
 			if !ok {
 				return fmt.Errorf("unknown plugin type: %s", pluginEntry.Name())
 			}
-			fmt.Printf("Registering %s plugin: %s\n", pluginEntry.Name(), key)
 			pType.registerFn(key, func(ctx context.Context, name string, config map[string]string) (interface{}, error) {
 				_, connFd, err := forkChild(filepath.Join(pluginFolderPath, pluginFileName), config)
 				if err != nil {
