@@ -69,7 +69,7 @@ func (s *GrpcStorage) Mode() Mode {
 	return Mode(resp.Mode)
 }
 
-func (s *GrpcStorage) Size() (int64) {
+func (s *GrpcStorage) Size() int64 {
 	resp, err := s.GrpcClient.GetSize(context.Background(), &grpc_storage.GetSizeRequest{})
 	if err != nil {
 		return -1
