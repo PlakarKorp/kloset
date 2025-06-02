@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"syscall"
 	"path/filepath"
 	"regexp"
+	"syscall"
 
 	"github.com/PlakarKorp/kloset/snapshot/importer"
 	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/pkg"
@@ -43,41 +43,40 @@ func wrap[T any](fn interface{}) func(context.Context, string, map[string]string
 }
 
 type pluginTypes struct {
-	registerFn    func(string, interface{})
-	grpcClient    func(interface{}) interface{}
+	registerFn func(string, interface{})
+	grpcClient func(interface{}) interface{}
 }
 
 var pTypes = map[string]pluginTypes{
 	"importer": {
-		registerFn:    func (name string, fn interface{}) {
+		registerFn: func(name string, fn interface{}) {
 			importer.Register(name, wrap[importer.Importer](fn))
 		},
-		grpcClient:    func(client interface{}) interface{} {
+		grpcClient: func(client interface{}) interface{} {
 			return &importer.GrpcImporter{
 				GrpcClient: grpc_importer.NewImporterClient(client.(*grpc.ClientConn)),
 			}
 		},
 	},
 	"exporter": {
-		registerFn:		func (name string, fn interface{}) {
+		registerFn: func(name string, fn interface{}) {
 			exporter.Register(name, wrap[exporter.Exporter](fn))
 		},
-		grpcClient:    func(client interface{}) interface{} {	
+		grpcClient: func(client interface{}) interface{} {
 			return &exporter.GrpcExporter{
 				GrpcClient: grpc_exporter.NewExporterClient(client.(*grpc.ClientConn)),
 			}
 		},
 	},
 	"storage": {
-		registerFn:    func(name string, fn interface{}) {
-			storage.Register(name, wrap[storage.Storage](fn))
+		registerFn: func(name string, fn interface{}) {
+			storage.Register(wrap[storage.Store](fn), name)
 		},
-		grpcClient:    func(client interface{}) interface{} {
-			return &storage.GrpcStorage{GrpcClient: grpc_storage.NewStorageClient(client.(*grpc.ClientConn))}
+		grpcClient: func(client interface{}) interface{} {
+			return &storage.GrpcStorage{GrpcClient: grpc_storage.NewStoreClient(client.(*grpc.ClientConn))}
 		},
 	},
 }
-	
 
 func LoadBackends(ctx context.Context, pluginPath string) error {
 	dirEntries, err := os.ReadDir(pluginPath)
