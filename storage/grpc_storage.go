@@ -66,19 +66,10 @@ func (s *GrpcStorage) Mode() Mode {
 	if err != nil {
 		return Mode(0)
 	}
-	var mode Mode
-	switch resp.Mode {
-		case grpc_storage.Mode_MODE_READ_WRITE:
-			mode = ModeWrite
-		case grpc_storage.Mode_MODE_READ_ONLY:
-			mode = ModeRead
-		default:
-			mode = Mode(0)
-	}
-	return mode
+	return Mode(resp.Mode)
 }
 
-func (s *GrpcStorage) Size() (int64) {
+func (s *GrpcStorage) Size() int64 {
 	resp, err := s.GrpcClient.GetSize(context.Background(), &grpc_storage.GetSizeRequest{})
 	if err != nil {
 		return -1
