@@ -68,7 +68,7 @@ func (c *Manager) PutRepositoryCookie(repositoryId uuid.UUID, name string) error
 		return err
 	}
 	name = strings.ReplaceAll(name, "/", "_")
-	_, err = os.Create(filepath.Join(c.cookiesDir, name))
+	_, err = os.Create(filepath.Join(c.cookiesDir, repositoryId.String(), name))
 	return err
 }
 
