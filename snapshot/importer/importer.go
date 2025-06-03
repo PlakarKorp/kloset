@@ -72,7 +72,18 @@ type Importer interface {
 	Close() error
 }
 
-type ImporterFn func(context.Context, string, map[string]string) (Importer, error)
+type ImporterOptions struct {
+	Hostname        string
+	OperatingSystem string
+	Architecture    string
+	CWD             string
+	MaxConcurrency  int
+
+	Stdout io.Writer `msgpack:"-"`
+	Stderr io.Writer `msgpack:"-"`
+}
+
+type ImporterFn func(context.Context, *ImporterOptions, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
 
@@ -86,7 +97,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewImporter(ctx *kcontext.KContext, config map[string]string) (Importer, error) {
+func NewImporter(ctx *kcontext.KContext, opts *ImporterOptions, config map[string]string) (Importer, error) {
 	location, ok := config["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
@@ -103,30 +114,43 @@ func NewImporter(ctx *kcontext.KContext, config map[string]string) (Importer, er
 	} else {
 		config["location"] = proto + "://" + location
 	}
-
-	return backend(ctx, proto, config)
+	return backend(ctx, opts, proto, config)
 }
 
 func NewScanRecord(pathname, target string, fileinfo objects.FileInfo, xattr []string, read func() (io.ReadCloser, error)) *ScanResult {
+	var readCloser io.ReadCloser
+	if read == nil {
+		readCloser = nil
+	} else {
+		readCloser = NewLazyReader(read)
+	}
+
 	return &ScanResult{
 		Record: &ScanRecord{
 			Pathname:           pathname,
 			Target:             target,
 			FileInfo:           fileinfo,
 			ExtendedAttributes: xattr,
-			Reader:             NewLazyReader(read),
+			Reader:             readCloser,
 		},
 	}
 }
 
 func NewScanXattr(pathname, xattr string, kind objects.Attribute, read func() (io.ReadCloser, error)) *ScanResult {
+	var readCloser io.ReadCloser
+	if read == nil {
+		readCloser = nil
+	} else {
+		readCloser = NewLazyReader(read)
+	}
+
 	return &ScanResult{
 		Record: &ScanRecord{
 			Pathname:  pathname,
 			IsXattr:   true,
 			XattrName: xattr,
 			XattrType: kind,
-			Reader:    NewLazyReader(read),
+			Reader:    readCloser,	
 		},
 	}
 }
