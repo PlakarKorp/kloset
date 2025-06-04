@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 
 	"bytes"
@@ -44,7 +43,6 @@ func (g *GrpcImporter) Root() string {
 
 func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 	stream, err := g.GrpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
-	fmt.Printf("Starting scan on %s\n", g.Root())
 	if err != nil {
 		return nil, fmt.Errorf("failed to start scan: %w", err)
 	}
@@ -53,9 +51,7 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 	go func() {
 		defer close(results)
 		for {
-			fmt.Printf("Waiting for scan response...\n")
 			response, err := stream.Recv()
-			fmt.Printf("Received scan response for %s\n", response.GetPathname())
 			if err != nil {
 				if err == io.EOF {
 					fmt.Fprintf(os.Stderr, "Scan completed successfully.\n")
@@ -76,9 +72,9 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 			if response.GetRecord().GetXattr() != nil {
 				isXattr = true
 			}
-			log.Printf("Received scan record for %s\n", response.GetPathname())
 			results <- &ScanResult{
 				Record: &ScanRecord{
+					Pathname: response.GetPathname(),
 					Reader: io.NopCloser(bytes.NewReader(response.GetRecord().GetReader())),
 					FileInfo: objects.FileInfo{
 						Lname:      response.GetRecord().GetFileinfo().GetName(),

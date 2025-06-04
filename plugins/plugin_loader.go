@@ -22,12 +22,11 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-type genericFn = func(context.Context, string, map[string]string) (interface{}, error)
-
-func wrap[T any](fn interface{}) func(context.Context, string, map[string]string) (T, error) {
-	raw := fn.(genericFn)
-	return func(ctx context.Context, proto string, config map[string]string) (T, error) {
-		val, err := raw(ctx, proto, config)
+func wrap[T any, O any](fn any) func(context.Context, *O, string, map[string]string) (T, error) {
+	raw := fn.(func(context.Context, *interface{}, string, map[string]string) (interface{}, error))
+	return func(ctx context.Context, opts *O, proto string, config map[string]string) (T, error) {
+		var optsIface interface{} = opts
+		val, err := raw(ctx, &optsIface, proto, config)
 		if err != nil {
 			var zero T
 			return zero, err
@@ -42,43 +41,66 @@ func wrap[T any](fn interface{}) func(context.Context, string, map[string]string
 	}
 }
 
-type pluginTypes struct {
-	registerFn func(string, interface{})
-	grpcClient func(interface{}) interface{}
+type PluginType interface {
+	Register(name string, fn any)
+	GrpcClient(client grpc.ClientConnInterface) any
+	Wrap(fn any) any
 }
 
-var pTypes = map[string]pluginTypes{
-	"importer": {
-		registerFn: func(name string, fn interface{}) {
-			importer.Register(name, wrap[importer.Importer](fn))
+type pluginTypes[T any, O any] struct {
+	registerFn func(name string, fn func(context.Context, *O, string, map[string]string) (T, error))
+	grpcClient func(client grpc.ClientConnInterface) T
+}
+
+func (p *pluginTypes[T, O]) Register(name string, fn any) {
+	typedFn, ok := fn.(func(context.Context, *O, string, map[string]string) (T, error))
+	if !ok {
+		panic("invalid function signature for plugin")
+	}
+	p.registerFn(name, typedFn)
+}
+
+func (p *pluginTypes[T, O]) GrpcClient(client grpc.ClientConnInterface) any {
+	return p.grpcClient(client)
+}
+
+func (p *pluginTypes[T, O]) Wrap(fn any) any {
+	return wrap[T, O](fn)
+}
+
+var pTypes = map[string]PluginType{
+	"importer": &pluginTypes[importer.Importer, importer.ImporterOptions]{
+		registerFn: func(name string, fn func(context.Context, *importer.ImporterOptions, string, map[string]string) (importer.Importer, error)) {
+			importer.Register(name, fn)
 		},
-		grpcClient: func(client interface{}) interface{} {
+		grpcClient: func(client grpc.ClientConnInterface) importer.Importer {
 			return &importer.GrpcImporter{
-				GrpcClient: grpc_importer.NewImporterClient(client.(*grpc.ClientConn)),
+				GrpcClient: grpc_importer.NewImporterClient(client),
 			}
 		},
 	},
-	"exporter": {
-		registerFn: func(name string, fn interface{}) {
-			exporter.Register(name, wrap[exporter.Exporter](fn))
+	"exporter": &pluginTypes[exporter.Exporter, exporter.ExporterOptions]{
+		registerFn: func(name string, fn func(context.Context, *exporter.ExporterOptions, string, map[string]string) (exporter.Exporter, error)) {
+			exporter.Register(name, fn)
 		},
-		grpcClient: func(client interface{}) interface{} {
+		grpcClient: func(client grpc.ClientConnInterface) exporter.Exporter {
 			return &exporter.GrpcExporter{
-				GrpcClient: grpc_exporter.NewExporterClient(client.(*grpc.ClientConn)),
+				GrpcClient: grpc_exporter.NewExporterClient(client),
 			}
 		},
 	},
-	"storage": {
-		registerFn: func(name string, fn interface{}) {
-			storage.Register(wrap[storage.Store](fn), name)
+	"storage": &pluginTypes[storage.Store, storage.StoreOptions]{
+		registerFn: func(name string, fn func(context.Context, *storage.StoreOptions, string, map[string]string) (storage.Store, error)) {
+			storage.Register(fn, name)
 		},
-		grpcClient: func(client interface{}) interface{} {
+		grpcClient: func(client grpc.ClientConnInterface) storage.Store {
 			return &storage.GrpcStorage{
-				GrpcClient: grpc_storage.NewStoreClient(client.(*grpc.ClientConn)),
+				GrpcClient: grpc_storage.NewStoreClient(client),
 			}
 		},
 	},
 }
+
 
 func LoadBackends(ctx context.Context, pluginPath string) error {
 	dirEntries, err := os.ReadDir(pluginPath)
@@ -86,11 +108,11 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 		return fmt.Errorf("failed to read plugins directory: %w", err)
 	}
 
-	pluginTypes := map[string]bool{"importer": true, "exporter": true, "storage": true}
+	pluginAcceptTypes := map[string]bool{"importer": true, "exporter": true, "storage": true}
 	re := regexp.MustCompile(`^([a-z0-9][a-zA-Z0-9\+.\-]*)-(v[0-9]+\.[0-9]+\.[0-9]+)\.ptar$`)
 
 	for _, pluginEntry := range dirEntries {
-		if !pluginEntry.IsDir() || !pluginTypes[pluginEntry.Name()] {
+		if !pluginEntry.IsDir() || !pluginAcceptTypes[pluginEntry.Name()] {
 			continue
 		}
 		pluginFolderPath := filepath.Join(pluginPath, pluginEntry.Name())
@@ -111,7 +133,7 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 			if !ok {
 				return fmt.Errorf("unknown plugin type: %s", pluginEntry.Name())
 			}
-			pType.registerFn(key, func(ctx context.Context, name string, config map[string]string) (interface{}, error) {
+			wrappedFunc := pType.Wrap(func(ctx context.Context, _ *any, name string, config map[string]string) (any, error) {
 				_, connFd, err := forkChild(filepath.Join(pluginFolderPath, pluginFileName), config)
 				if err != nil {
 					return nil, fmt.Errorf("failed to fork child: %w", err)
@@ -130,12 +152,14 @@ func LoadBackends(ctx context.Context, pluginPath string) error {
 				if err != nil {
 					return nil, fmt.Errorf("failed to create client context: %w", err)
 				}
-				return pType.grpcClient(client), nil
+				return pType.GrpcClient(client), nil
 			})
+			pType.Register(key, wrappedFunc)
 		}
 	}
 	return nil
 }
+
 
 func forkChild(pluginPath string, config map[string]string) (int, int, error) {
 	sp, err := syscall.Socketpair(syscall.AF_LOCAL, syscall.SOCK_STREAM, syscall.AF_UNSPEC)
