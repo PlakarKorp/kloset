@@ -143,8 +143,7 @@ type Store interface {
 	Close() error
 }
 
-type StoreOptions interface {
-}
+type StoreOptions struct {}
 
 type StoreFn func(context.Context, *StoreOptions, string, map[string]string) (Store, error)
 

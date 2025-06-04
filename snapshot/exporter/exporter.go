@@ -20,8 +20,7 @@ type Exporter interface {
 	Close() error
 }
 
-type ExporterOptions interface {
-}
+type ExporterOptions struct {}
 
 type ExporterFn func(context.Context, *ExporterOptions, string, map[string]string) (Exporter, error)
 
