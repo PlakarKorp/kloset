@@ -26,6 +26,7 @@ type RepositoryWriter struct {
 
 	PackerManager  packer.PackerManagerInt
 	currentStateID objects.MAC
+	dryRun         bool
 }
 
 type RepositoryType int
@@ -35,7 +36,7 @@ const (
 	PtarType                   = iota
 )
 
-func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType) *RepositoryWriter {
+func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType, dryRun bool) *RepositoryWriter {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "NewRepositoryWriter(): %s", time.Since(t0))
@@ -45,6 +46,7 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 		Repository:     r,
 		deltaState:     r.state.Derive(cache),
 		currentStateID: id,
+		dryRun:         dryRun,
 	}
 
 	switch typ {
@@ -61,6 +63,9 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 }
 
 func (r *RepositoryWriter) FlushTransaction(newCache *caching.ScanCache, id objects.MAC) error {
+	if r.dryRun {
+		return nil
+	}
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repositorywriter", "FlushTransaction(): %s", time.Since(t0))
@@ -75,6 +80,9 @@ func (r *RepositoryWriter) FlushTransaction(newCache *caching.ScanCache, id obje
 }
 
 func (r *RepositoryWriter) CommitTransaction(id objects.MAC) error {
+	if r.dryRun {
+		return nil
+	}
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "CommitTransaction(): %s", time.Since(t0))
@@ -89,6 +97,9 @@ func (r *RepositoryWriter) CommitTransaction(id objects.MAC) error {
 }
 
 func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MAC) error {
+	if r.dryRun {
+		return nil
+	}
 	pr, pw := io.Pipe()
 
 	/* By using a pipe and a goroutine we bound the max size in memory. */
@@ -131,6 +142,9 @@ func (r *RepositoryWriter) PutBlobIfNotExists(Type resources.Type, mac objects.M
 }
 
 func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []byte) error {
+	if r.dryRun {
+		return nil
+	}
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repositorywriter", "PutBlob(%s, %x): %s", Type, mac, time.Since(t0))
@@ -146,6 +160,9 @@ func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []
 }
 
 func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.MAC) error {
+	if r.dryRun {
+		return nil
+	}
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "DeleteStateResource(%s, %x): %s", Type.String(), mac, time.Since(t0))
@@ -161,6 +178,9 @@ func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.
 }
 
 func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
+	if r.dryRun {
+		return nil
+	}
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "PutPackfile(%x): %s", r.currentStateID, time.Since(t0))
@@ -241,6 +261,9 @@ func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
 }
 
 func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
+	if r.dryRun {
+		return nil
+	}
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "PutPtarPackfile(%x): %s", r.currentStateID, time.Since(t0))

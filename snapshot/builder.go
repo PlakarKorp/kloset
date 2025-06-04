@@ -43,7 +43,7 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 
 		Header: header.NewHeader("default", identifier),
 	}
-	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy)
+	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, false)
 
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
