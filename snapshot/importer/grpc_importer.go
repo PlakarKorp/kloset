@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
+	"bytes"
 	"io/fs"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -42,6 +44,7 @@ func (g *GrpcImporter) Root() string {
 
 func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 	stream, err := g.GrpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
+	fmt.Printf("Starting scan on %s\n", g.Root())
 	if err != nil {
 		return nil, fmt.Errorf("failed to start scan: %w", err)
 	}
@@ -50,7 +53,9 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 	go func() {
 		defer close(results)
 		for {
+			fmt.Printf("Waiting for scan response...\n")
 			response, err := stream.Recv()
+			fmt.Printf("Received scan response for %s\n", response.GetPathname())
 			if err != nil {
 				if err == io.EOF {
 					fmt.Fprintf(os.Stderr, "Scan completed successfully.\n")
@@ -71,9 +76,10 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 			if response.GetRecord().GetXattr() != nil {
 				isXattr = true
 			}
+			log.Printf("Received scan record for %s\n", response.GetPathname())
 			results <- &ScanResult{
 				Record: &ScanRecord{
-					Pathname: response.GetPathname(),
+					Reader: io.NopCloser(bytes.NewReader(response.GetRecord().GetReader())),
 					FileInfo: objects.FileInfo{
 						Lname:      response.GetRecord().GetFileinfo().GetName(),
 						Lsize:      response.GetRecord().GetFileinfo().GetSize(),
@@ -98,40 +104,6 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 		}
 	}()
 	return results, nil
-}
-
-func (g *GrpcImporter) NewReader(path string) (io.ReadCloser, error) {
-	stream, err := g.GrpcClient.Read(context.Background(), &grpc_importer.ReadRequest{
-		Pathname: path,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to start read stream: %w", err)
-	}
-
-	pr, pw := io.Pipe()
-
-	go func() {
-		defer pw.Close()
-		for {
-			resp, err := stream.Recv()
-			if err != nil {
-				if err == io.EOF {
-					return
-				}
-				pw.CloseWithError(fmt.Errorf("failed to receive read response: %w", err))
-				return
-			}
-			if len(resp.GetData()) > 0 {
-				_, werr := pw.Write(resp.GetData())
-				if werr != nil {
-					pw.CloseWithError(fmt.Errorf("failed to write to pipe: %w", werr))
-					return
-				}
-			}
-		}
-	}()
-
-	return pr, nil
 }
 
 func (g *GrpcImporter) NewExtendedAttributeReader(path string, xattr string) (io.ReadCloser, error) {

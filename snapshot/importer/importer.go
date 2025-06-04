@@ -40,16 +40,16 @@ type ExtendedAttributes struct {
 }
 
 type ScanRecord struct {
-	Reader io.ReadCloser
+	Reader 				io.ReadCloser
 
-	Pathname           string
-	Target             string
-	FileInfo           objects.FileInfo
-	ExtendedAttributes []string
-	FileAttributes     uint32
-	IsXattr            bool
-	XattrName          string
-	XattrType          objects.Attribute
+	Pathname           	string
+	Target             	string
+	FileInfo           	objects.FileInfo
+	ExtendedAttributes 	[]string
+	FileAttributes     	uint32
+	IsXattr            	bool
+	XattrName          	string
+	XattrType          	objects.Attribute
 }
 
 func (s *ScanRecord) Close() error {
@@ -150,7 +150,7 @@ func NewScanXattr(pathname, xattr string, kind objects.Attribute, read func() (i
 			IsXattr:   true,
 			XattrName: xattr,
 			XattrType: kind,
-			Reader:    readCloser,	
+			Reader:    readCloser,
 		},
 	}
 }
