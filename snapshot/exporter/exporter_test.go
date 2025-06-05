@@ -35,10 +35,10 @@ func (m MockedExporter) Close() error {
 func TestBackends(t *testing.T) {
 	// Setup: Register some backends
 	Register("fs1", func(appCtx context.Context, name string, config map[string]string) (Exporter, error) {
-		return MockedExporter{}, nil
+		return nil, nil
 	})
 	Register("s33", func(appCtx context.Context, name string, config map[string]string) (Exporter, error) {
-		return MockedExporter{}, nil
+		return nil, nil
 	})
 
 	// Test: Retrieve the list of registered backends

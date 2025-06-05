@@ -40,16 +40,16 @@ type ExtendedAttributes struct {
 }
 
 type ScanRecord struct {
-	Reader 				io.ReadCloser
+	Reader io.ReadCloser
 
-	Pathname           	string
-	Target             	string
-	FileInfo           	objects.FileInfo
-	ExtendedAttributes 	[]string
-	FileAttributes     	uint32
-	IsXattr            	bool
-	XattrName          	string
-	XattrType          	objects.Attribute
+	Pathname           string
+	Target             string
+	FileInfo           objects.FileInfo
+	ExtendedAttributes []string
+	FileAttributes     uint32
+	IsXattr            bool
+	XattrName          string
+	XattrType          objects.Attribute
 }
 
 func (s *ScanRecord) Close() error {
@@ -118,39 +118,25 @@ func NewImporter(ctx *kcontext.KContext, opts *ImporterOptions, config map[strin
 }
 
 func NewScanRecord(pathname, target string, fileinfo objects.FileInfo, xattr []string, read func() (io.ReadCloser, error)) *ScanResult {
-	var readCloser io.ReadCloser
-	if read == nil {
-		readCloser = nil
-	} else {
-		readCloser = NewLazyReader(read)
-	}
-
 	return &ScanResult{
 		Record: &ScanRecord{
 			Pathname:           pathname,
 			Target:             target,
 			FileInfo:           fileinfo,
 			ExtendedAttributes: xattr,
-			Reader:             readCloser,
+			Reader:             NewLazyReader(read),
 		},
 	}
 }
 
 func NewScanXattr(pathname, xattr string, kind objects.Attribute, read func() (io.ReadCloser, error)) *ScanResult {
-	var readCloser io.ReadCloser
-	if read == nil {
-		readCloser = nil
-	} else {
-		readCloser = NewLazyReader(read)
-	}
-
 	return &ScanResult{
 		Record: &ScanRecord{
 			Pathname:  pathname,
 			IsXattr:   true,
 			XattrName: xattr,
 			XattrType: kind,
-			Reader:    readCloser,
+			Reader:    NewLazyReader(read),
 		},
 	}
 }

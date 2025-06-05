@@ -46,7 +46,6 @@ type KContext struct {
 	Client string
 
 	CWD            string
-	PluginsDir     string
 	MaxConcurrency int
 
 	Identity uuid.UUID
