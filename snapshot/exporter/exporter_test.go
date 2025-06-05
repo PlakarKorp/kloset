@@ -2,11 +2,10 @@ package exporter
 
 import (
 	"context"
-	"io"
 	"testing"
 
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,15 +15,7 @@ func (m MockedExporter) Root() string {
 	return ""
 }
 
-func (m MockedExporter) CreateDirectory(pathname string) error {
-	return nil
-}
-
-func (m MockedExporter) StoreFile(pathname string, fp io.Reader, size int64) error {
-	return nil
-}
-
-func (m MockedExporter) SetPermissions(pathname string, fileinfo *objects.FileInfo) error {
+func (m MockedExporter) Export(ctx context.Context, opts *ExporterOptions, fs *vfs.Filesystem) error {
 	return nil
 }
 

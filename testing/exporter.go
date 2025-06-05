@@ -7,6 +7,7 @@ import (
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 type MockExporter struct {
@@ -32,6 +33,10 @@ func NewMockExporter(appCtx context.Context, name string, config map[string]stri
 
 func (e *MockExporter) Root() string {
 	return e.rootDir
+}
+
+func (e *MockExporter) Export(ctx context.Context, opts *exporter.ExporterOptions, fs *vfs.Filesystem) error {
+	return exporter.Export(ctx, e, opts, fs)
 }
 
 func (e *MockExporter) CreateDirectory(pathname string) error {

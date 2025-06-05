@@ -7,17 +7,33 @@ import (
 	"log"
 	"path/filepath"
 
+	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
+
+type ExporterOptions struct {
+	MaxConcurrency uint64
+	Events         *events.Receiver
+	SnapID         objects.MAC
+	Strip          string
+	Base           string
+	Pathname       string
+}
 
 type Exporter interface {
 	Root() string
+	Export(context.Context, *ExporterOptions, *vfs.Filesystem) error
+	Close() error
+}
+
+type FSExporter interface {
+	Exporter
 	CreateDirectory(pathname string) error
 	StoreFile(pathname string, fp io.Reader, size int64) error
 	SetPermissions(pathname string, fileinfo *objects.FileInfo) error
-	Close() error
 }
 
 type ExporterFn func(context.Context, string, map[string]string) (Exporter, error)

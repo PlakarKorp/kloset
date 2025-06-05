@@ -23,7 +23,7 @@ type restoreContext struct {
 	maxConcurrency chan bool
 }
 
-func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *sync.WaitGroup) func(entrypath string, e *vfs.Entry, err error) error {
+func snapshotRestorePath(snap *Snapshot, exp exporter.FSExporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *sync.WaitGroup) func(entrypath string, e *vfs.Entry, err error) error {
 	return func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
 			snap.Event(events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
@@ -144,8 +144,21 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		base = base + "/"
 	}
 
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
+	if exp, ok := exp.(exporter.FSExporter); ok {
+		wg := sync.WaitGroup{}
+		defer wg.Wait()
 
-	return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
+		return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
+	}
+
+	o := exporter.ExporterOptions{
+		MaxConcurrency: maxConcurrency,
+		Events:         snap.AppContext().Events(),
+		SnapID:         snap.Header.Identifier,
+		Strip:          opts.Strip,
+		Base:           base,
+		Pathname:       pathname,
+	}
+
+	return exp.Export(snap.AppContext(), &o, fs)
 }
