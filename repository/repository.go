@@ -88,7 +88,7 @@ type Repository struct {
 }
 
 func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
-	st, err := storage.New(ctx, nil, storeConfig)
+	st, err := storage.New(ctx, storeConfig)
 	if err != nil {
 		return nil, err
 	}

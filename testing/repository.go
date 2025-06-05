@@ -42,7 +42,7 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 
 	// create a storage
 
-	r, err := storage.New(ctx, nil, map[string]string{"location": "mock://" + tmpRepoDir})
+	r, err := storage.New(ctx, map[string]string{"location": "mock://" + tmpRepoDir})
 	require.NotNil(t, r)
 	require.NoError(t, err)
 

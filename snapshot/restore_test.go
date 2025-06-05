@@ -25,7 +25,7 @@ func TestRestore(t *testing.T) {
 	var exporterInstance exporter.Exporter
 	appCtx := kcontext.NewKContext()
 
-	exporterInstance, err = ptesting.NewMockExporter(appCtx, nil, "mock", map[string]string{"location": "mock://" + tmpRestoreDir})
+	exporterInstance, err = ptesting.NewMockExporter(appCtx, "mock", map[string]string{"location": "mock://" + tmpRestoreDir})
 	require.NoError(t, err)
 	defer exporterInstance.Close()
 
