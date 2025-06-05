@@ -18,7 +18,7 @@ func TestNewStore(t *testing.T) {
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-	store, err := storage.New(ctx, map[string]string{"location": "mock:///test/location"})
+	store, err := storage.New(ctx, nil, map[string]string{"location": "mock:///test/location"})
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -28,7 +28,7 @@ func TestNewStore(t *testing.T) {
 	}
 
 	// should return an error as the backend does not exist
-	_, err = storage.New(ctx, map[string]string{"location": "unknown:///test/location"})
+	_, err = storage.New(ctx, nil, map[string]string{"location": "unknown:///test/location"})
 	if err.Error() != "backend 'unknown' does not exist" {
 		t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
 	}
@@ -95,7 +95,7 @@ func TestBackends(t *testing.T) {
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-	storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
+	storage.Register(func(ctx context.Context, opts *storage.StoreOptions, proto string, storeConfig map[string]string) (storage.Store, error) {
 		return &ptesting.MockBackend{}, nil
 	}, "test")
 
@@ -118,13 +118,13 @@ func TestNew(t *testing.T) {
 			ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
 			ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
-			storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
+			storage.Register(func(ctx context.Context, opts *storage.StoreOptions, proto string, storeConfig map[string]string) (storage.Store, error) {
 				return ptesting.NewMockBackend(storeConfig), nil
 			}, name)
 
 			location := name + ":///test/location"
 
-			store, err := storage.New(ctx, map[string]string{"location": location})
+			store, err := storage.New(ctx, nil, map[string]string{"location": location})
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
@@ -141,7 +141,7 @@ func TestNew(t *testing.T) {
 		ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
 		// storage.Register("unknown", func(location string) storage.Store { return ptesting.NewMockBackend(location) })
-		_, err := storage.New(ctx, map[string]string{"location": "unknown://dummy"})
+		_, err := storage.New(ctx, nil, map[string]string{"location": "unknown://dummy"})
 		if err.Error() != "backend 'unknown' does not exist" {
 			t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
 		}
@@ -153,7 +153,7 @@ func TestNew(t *testing.T) {
 		ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
 
 		// storage.Register("unknown", func(location string) storage.Store { return ptesting.NewMockBackend(location) })
-		store, err := storage.New(ctx, map[string]string{"location": "dummy"})
+		store, err := storage.New(ctx, nil, map[string]string{"location": "dummy"})
 		require.Nil(t, store)
 		require.ErrorContains(t, err, "backend 'fs' does not exist")
 	})

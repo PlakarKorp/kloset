@@ -20,7 +20,9 @@ type Exporter interface {
 	Close() error
 }
 
-type ExporterFn func(context.Context, string, map[string]string) (Exporter, error)
+type ExporterOptions struct {}
+
+type ExporterFn func(context.Context, *ExporterOptions, string, map[string]string) (Exporter, error)
 
 var backends = location.New[ExporterFn]("fs")
 
@@ -34,7 +36,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, error) {
+func NewExporter(ctx *kcontext.KContext, opts *ExporterOptions, config map[string]string) (Exporter, error) {
 	location, ok := config["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
@@ -52,5 +54,5 @@ func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, er
 		config["location"] = proto + "://" + location
 	}
 
-	return backend(ctx, proto, config)
+	return backend(ctx, opts, proto, config)
 }

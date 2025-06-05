@@ -18,7 +18,7 @@ func init() {
 	exporter.Register("mock", NewMockExporter)
 }
 
-func NewMockExporter(appCtx context.Context, name string, config map[string]string) (exporter.Exporter, error) {
+func NewMockExporter(appCtx context.Context, opts *exporter.ExporterOptions, name string, config map[string]string) (exporter.Exporter, error) {
 	rootDir := config["location"]
 	if len(rootDir) > 7 && rootDir[:7] == "mock://" {
 		rootDir = rootDir[7:]

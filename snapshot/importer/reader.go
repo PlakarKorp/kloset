@@ -1,6 +1,8 @@
 package importer
 
-import "io"
+import (
+	"io"
+)
 
 type LazyReader struct {
 	init func() (io.ReadCloser, error)

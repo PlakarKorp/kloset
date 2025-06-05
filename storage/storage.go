@@ -143,7 +143,9 @@ type Store interface {
 	Close() error
 }
 
-type StoreFn func(context.Context, string, map[string]string) (Store, error)
+type StoreOptions struct {}
+
+type StoreFn func(context.Context, *StoreOptions, string, map[string]string) (Store, error)
 
 var backends = location.New[StoreFn]("fs")
 
@@ -159,7 +161,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
+func New(ctx *kcontext.KContext, opts *StoreOptions, storeConfig map[string]string) (Store, error) {
 	location, ok := storeConfig["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
@@ -182,11 +184,11 @@ func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
 	} else {
 		storeConfig["location"] = proto + "://" + location
 	}
-	return backend(ctx, proto, storeConfig)
+	return backend(ctx, opts, proto, storeConfig)
 }
 
 func Open(ctx *kcontext.KContext, storeConfig map[string]string) (Store, []byte, error) {
-	store, err := New(ctx, storeConfig)
+	store, err := New(ctx, nil, storeConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", flag.CommandLine.Name(), err)
 		return nil, nil, err
@@ -201,7 +203,7 @@ func Open(ctx *kcontext.KContext, storeConfig map[string]string) (Store, []byte,
 }
 
 func Create(ctx *kcontext.KContext, storeConfig map[string]string, configuration []byte) (Store, error) {
-	store, err := New(ctx, storeConfig)
+	store, err := New(ctx, nil, storeConfig)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%s: %s\n", flag.CommandLine.Name(), err)
 		return nil, err
