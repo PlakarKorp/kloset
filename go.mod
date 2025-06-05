@@ -27,8 +27,6 @@ require (
 require (
 	github.com/DataDog/zstd v1.5.6 // indirect
 	github.com/NickBall/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5 // indirect
-	github.com/PlakarKorp/go-kloset-sdk v0.0.0-20250527112614-ff3da6f89d98 // indirect
-	github.com/PlakarKorp/plakar v1.0.1 // indirect
 	github.com/aymanbagabas/go-osc52/v2 v2.0.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
