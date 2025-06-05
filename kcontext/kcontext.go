@@ -25,6 +25,7 @@ type KContext struct {
 	Context context.Context    `msgpack:"-"`
 	Cancel  context.CancelFunc `msgpack:"-"`
 
+	Stdin  io.Reader `msgpack:"-"`
 	Stdout io.Writer `msgpack:"-"`
 	Stderr io.Writer `msgpack:"-"`
 
@@ -57,6 +58,7 @@ func NewKContext() *KContext {
 
 	return &KContext{
 		events:  events.New(),
+		Stdin:   os.Stdin,
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
 		Context: ctx,
