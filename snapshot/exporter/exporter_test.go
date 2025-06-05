@@ -13,7 +13,7 @@ import (
 
 type MockedExporter struct{}
 
-func (m MockedExporter) Export(ctx context.Context, vfs *vfs.Filesystem) error {
+func (m MockedExporter) Export(ctx context.Context, opts *ExporterOptions, base string, vfs *vfs.Filesystem) error {
 	return nil
 }
 

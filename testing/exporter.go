@@ -31,8 +31,8 @@ func NewMockExporter(appCtx context.Context, name string, config map[string]stri
 	}, nil
 }
 
-func (e *MockExporter) Export(ctx context.Context, vfs *vfs.Filesystem) error {
-	return nil
+func (e *MockExporter) Export(ctx context.Context, opts *exporter.ExporterOptions, base string, vfs *vfs.Filesystem) error {
+	return exporter.Export(ctx, base, e, opts, vfs)
 }
 
 func (e *MockExporter) Root() string {

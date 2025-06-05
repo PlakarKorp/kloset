@@ -5,16 +5,34 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
+	"path"
 	"path/filepath"
+	"strings"
+	"sync"
 
+	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
+type ExporterOptions struct {
+	MaxConcurrency uint64
+	Events         *events.Receiver
+	SnapID         objects.MAC
+	Strip          string
+}
+
+type exporterContext struct {
+	hardlinks      map[string]string
+	hardlinksMutex sync.Mutex
+	maxConcurrency chan bool
+}
+
 type Exporter interface {
-	Export(context.Context, *vfs.Filesystem) error
+	Export(context.Context, *ExporterOptions, string, *vfs.Filesystem) error
 	Root() string
 	Close() error
 }
@@ -59,4 +77,115 @@ func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, er
 	}
 
 	return backend(ctx, proto, config)
+}
+
+func restorePath(ctx context.Context, opts *ExporterOptions, fs *vfs.Filesystem, target string, exp FSExporter, restoreContext *exporterContext, wg *sync.WaitGroup) func(entrypath string, e *vfs.Entry, err error) error {
+	return func(entrypath string, e *vfs.Entry, err error) error {
+		if err != nil {
+			opts.Event(events.PathErrorEvent(opts.SnapID, entrypath, err.Error()))
+			return err
+		}
+
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+
+		opts.Event(events.PathEvent(opts.SnapID, entrypath))
+
+		// Determine destination path by stripping the prefix.
+		dest := path.Join(target, strings.TrimPrefix(entrypath, opts.Strip))
+
+		// Directory processing.
+		if e.IsDir() {
+			opts.Event(events.DirectoryEvent(opts.SnapID, entrypath))
+			// Create directory if not root.
+			if entrypath != "/" {
+				if err := exp.CreateDirectory(dest); err != nil {
+					opts.Event(events.DirectoryErrorEvent(opts.SnapID, entrypath, err.Error()))
+					return err
+				}
+			}
+
+			// WalkDir handles recursion so we don’t need to iterate children manually.
+			if entrypath != "/" {
+				if err := exp.SetPermissions(dest, e.Stat()); err != nil {
+					opts.Event(events.DirectoryErrorEvent(opts.SnapID, entrypath, err.Error()))
+					return err
+				}
+			}
+			opts.Event(events.DirectoryOKEvent(opts.SnapID, entrypath))
+			return nil
+		}
+
+		// For non-directory entries, only process regular files.
+		if !e.Stat().Mode().IsRegular() {
+			opts.Event(events.FileErrorEvent(opts.SnapID, entrypath, "unexpected vfs entry type"))
+			return nil
+		}
+
+		opts.Event(events.FileEvent(opts.SnapID, entrypath))
+		restoreContext.maxConcurrency <- true
+		wg.Add(1)
+		go func(e *vfs.Entry, entrypath string) {
+			defer wg.Done()
+			defer func() { <-restoreContext.maxConcurrency }()
+
+			// Handle hard links.
+			if e.Stat().Nlink() > 1 {
+				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
+				restoreContext.hardlinksMutex.Lock()
+				v, ok := restoreContext.hardlinks[key]
+				restoreContext.hardlinksMutex.Unlock()
+				if ok {
+					// Create a new link and return.
+					if err := os.Link(v, dest); err != nil {
+						opts.Event(events.FileErrorEvent(opts.SnapID, entrypath, err.Error()))
+					}
+					return
+				} else {
+					restoreContext.hardlinksMutex.Lock()
+					restoreContext.hardlinks[key] = dest
+					restoreContext.hardlinksMutex.Unlock()
+				}
+			}
+
+			rd := e.Open(fs)
+			defer rd.Close()
+
+			// Ensure the parent directory exists.
+			if err := exp.CreateDirectory(path.Dir(dest)); err != nil {
+				opts.Event(events.FileErrorEvent(opts.SnapID, entrypath, err.Error()))
+			}
+
+			// Restore the file content.
+			if err := exp.StoreFile(dest, rd, e.Size()); err != nil {
+				opts.Event(events.FileErrorEvent(opts.SnapID, entrypath, err.Error()))
+			} else if err := exp.SetPermissions(dest, e.Stat()); err != nil {
+				opts.Event(events.FileErrorEvent(opts.SnapID, entrypath, err.Error()))
+			} else {
+				opts.Event(events.FileOKEvent(opts.SnapID, entrypath, e.Size()))
+			}
+		}(e, entrypath)
+		return nil
+	}
+}
+
+func (eopt *ExporterOptions) Event(evt events.Event) {
+	if eopt.Events != nil {
+		eopt.Events.Send(evt)
+	}
+}
+
+func Export(ctx context.Context, base string, exp FSExporter, opts *ExporterOptions, fs *vfs.Filesystem) error {
+	restoreContext := &exporterContext{
+		hardlinks:      make(map[string]string),
+		hardlinksMutex: sync.Mutex{},
+		maxConcurrency: make(chan bool, opts.MaxConcurrency),
+	}
+	defer close(restoreContext.maxConcurrency)
+
+	wg := sync.WaitGroup{}
+	defer wg.Wait()
+
+	return fs.WalkDir("/", restorePath(ctx, opts, fs, base, exp, restoreContext, &wg))
 }
