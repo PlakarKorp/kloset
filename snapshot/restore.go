@@ -23,7 +23,7 @@ type restoreContext struct {
 	maxConcurrency chan bool
 }
 
-func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *sync.WaitGroup) func(entrypath string, e *vfs.Entry, err error) error {
+func snapshotRestorePath(snap *Snapshot, exp exporter.FSExporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *sync.WaitGroup) func(entrypath string, e *vfs.Entry, err error) error {
 	return func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
 			snap.Event(events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
@@ -127,25 +127,34 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		return err
 	}
 
-	maxConcurrency := opts.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
-	}
-
-	restoreContext := &restoreContext{
-		hardlinks:      make(map[string]string),
-		hardlinksMutex: sync.Mutex{},
-		maxConcurrency: make(chan bool, maxConcurrency),
-	}
-	defer close(restoreContext.maxConcurrency)
-
 	base = path.Clean(base)
 	if base != "/" && !strings.HasSuffix(base, "/") {
 		base = base + "/"
 	}
 
-	wg := sync.WaitGroup{}
-	defer wg.Wait()
+	if exp, ok := exp.(exporter.FSExporter); ok {
+		maxConcurrency := opts.MaxConcurrency
+		if maxConcurrency == 0 {
+			maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
+		}
 
-	return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
+		restoreContext := &restoreContext{
+			hardlinks:      make(map[string]string),
+			hardlinksMutex: sync.Mutex{},
+			maxConcurrency: make(chan bool, maxConcurrency),
+		}
+		defer close(restoreContext.maxConcurrency)
+
+		wg := sync.WaitGroup{}
+		defer wg.Wait()
+
+		return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
+	}
+
+	fs, err = fs.Chroot(base)
+	if err != nil {
+		return err
+	}
+
+	return exp.Export(snap.AppContext(), fs)
 }

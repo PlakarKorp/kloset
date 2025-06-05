@@ -10,14 +10,20 @@ import (
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 type Exporter interface {
+	Export(context.Context, *vfs.Filesystem) error
 	Root() string
+	Close() error
+}
+
+type FSExporter interface {
+	Exporter
 	CreateDirectory(pathname string) error
 	StoreFile(pathname string, fp io.Reader, size int64) error
 	SetPermissions(pathname string, fileinfo *objects.FileInfo) error
-	Close() error
 }
 
 type ExporterFn func(context.Context, string, map[string]string) (Exporter, error)

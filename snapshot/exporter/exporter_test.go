@@ -7,10 +7,15 @@ import (
 
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/stretchr/testify/require"
 )
 
 type MockedExporter struct{}
+
+func (m MockedExporter) Export(ctx context.Context, vfs *vfs.Filesystem) error {
+	return nil
+}
 
 func (m MockedExporter) Root() string {
 	return ""
