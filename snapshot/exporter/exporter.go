@@ -12,6 +12,13 @@ import (
 	"github.com/PlakarKorp/kloset/objects"
 )
 
+type Options struct {
+	MaxConcurrency uint64
+
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 type Exporter interface {
 	Root() string
 	CreateDirectory(pathname string) error
@@ -20,7 +27,7 @@ type Exporter interface {
 	Close() error
 }
 
-type ExporterFn func(context.Context, string, map[string]string) (Exporter, error)
+type ExporterFn func(context.Context, *Options, string, map[string]string) (Exporter, error)
 
 var backends = location.New[ExporterFn]("fs")
 
@@ -52,5 +59,11 @@ func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, er
 		config["location"] = proto + "://" + location
 	}
 
-	return backend(ctx, proto, config)
+	opts := &Options{
+		MaxConcurrency: uint64(ctx.MaxConcurrency),
+		Stdout:         ctx.Stdout,
+		Stderr:         ctx.Stderr,
+	}
+
+	return backend(ctx, opts, proto, config)
 }
