@@ -1,11 +1,13 @@
 package importer
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-
 	"io/fs"
+
+	"log"
 
 	"github.com/PlakarKorp/kloset/objects"
 	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/pkg"
@@ -39,46 +41,108 @@ func (g *GrpcImporter) Root() string {
 	return info.GetRoot()
 }
 
+//===========
+
+type GrpcReader struct {
+	client grpc_importer.ImporterClient
+	path   string
+	buf    *bytes.Buffer
+}
+
+func NewGrpcReader(client grpc_importer.ImporterClient, path string) *GrpcReader {
+	return &GrpcReader{
+		client: client,
+		buf:    bytes.NewBuffer(nil),
+		path:   path,
+	}
+}
+
+func (g *GrpcReader) Read(p []byte) (n int, err error) {
+	if g.buf.Len() != 0 {
+		n, err = g.buf.Read(p)
+		if n > 0 || err != nil {
+			return n, err
+		}
+	}
+	stream, err := g.client.Open(context.Background(), &grpc_importer.OpenRequest{
+		Pathname: g.path,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("failed to open file %s: %w", g.path, err)
+	}
+	fileResponse, err := stream.Recv()
+	if err != nil {
+		if err == io.EOF {
+			return 0, io.EOF
+		}
+		return 0, fmt.Errorf("failed to receive file data: %w", err)
+	}
+	if fileResponse.GetChunk() != nil {
+		g.buf.Write(fileResponse.GetChunk())
+		n, err = g.buf.Read(p)
+		if n > 0 || err != nil {
+			return n, err
+		}
+	}
+	return 0, fmt.Errorf("unexpected response: %v", fileResponse)
+}
+
+func (g *GrpcReader) Close() error {
+	_, err := g.client.Close(context.Background(), &grpc_importer.CloseRequest{
+		Pathname: g.path,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to close record %s: %w", g.path, err)
+	}
+	return nil
+}
+
+//===========
+
 func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
-	stream, err := g.GrpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
+	_, err := g.GrpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start scan: %w", err)
 	}
 
-	results := make(chan *ScanResult, 1)
+	results := make(chan *ScanResult, 1000)
 	go func() {
 		defer close(results)
 
-		var currentRecord *ScanResult
-		var pipeReader *io.PipeReader
-		var pipeWriter *io.PipeWriter
-
 		for {
-			response, err := stream.Recv()
+			done, err := g.GrpcClient.ScanDone(context.Background(), &grpc_importer.ScanDoneRequest{})
+			if done != nil {
+				if done.GetDone() {
+					log.Printf("Scan completed successfully.\n")
+					break
+				}
+				log.Printf("Scan not done yet, waiting for next record...\n")
+			} else if err != nil {
+				return
+			}
+
+			log.Printf("Waiting for scan response...\n")
+			response, err := g.GrpcClient.GetRecord(context.Background(), &grpc_importer.GetRecordRequest{})
 			if err != nil {
 				if err == io.EOF {
 					break
 				}
 				results <- NewScanError("", fmt.Errorf("failed to receive scan response: %w", err))
-				return
 			}
 			isXattr := false
 			if response.GetRecord().GetXattr() != nil {
 				isXattr = true
 			}
 
-        	if response.GetRecord() != nil {
-				fmt.Printf("Received record for pathname: %s\n", response.GetPathname())
-				if pipeWriter != nil {
-					fmt.Printf("Closing previous pipe writer for pathname: %s\n", currentRecord.Record.Pathname)
-					pipeWriter.Close()
-				}
+			if response.GetRecord() != nil {
+				//log.Printf("Received record for pathname: %s\n", response.GetPathname())
 
-				pipeReader, pipeWriter = io.Pipe()
-				currentRecord = &ScanResult{
+				results <- &ScanResult{
 					Record: &ScanRecord{
 						Pathname: response.GetPathname(),
-						Reader: pipeReader,
+						Reader: NewLazyReader(func() (io.ReadCloser, error) {
+							return NewGrpcReader(g.GrpcClient, response.GetPathname()), nil //TODO: check to not make to much files
+						}),
 						FileInfo: objects.FileInfo{
 							Lname:      response.GetRecord().GetFileinfo().GetName(),
 							Lsize:      response.GetRecord().GetFileinfo().GetSize(),
@@ -100,33 +164,15 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 					},
 					Error: nil,
 				}
-				fmt.Printf("check\n")
-			} else if response.GetChunk() != nil {
-				fmt.Printf("Received chunk for pathname: %s\n", response.GetPathname())
-				if pipeWriter == nil {
-					fmt.Printf("No pipe writer available for pathname: %s, creating new record\n", response.GetPathname())
-				}
-				if response.GetChunk().GetEof() != nil {
-					results <- currentRecord
-					pipeWriter.Close()
-					return
-				}
-				_, err := pipeWriter.Write(response.GetChunk().GetData())
-				if err != nil {
-					pipeWriter.CloseWithError(err)
-					return
-				}
 			} else if response.GetError() != nil {
 				results <- NewScanError(response.GetPathname(), fmt.Errorf("scan error: %s", response.GetError().GetMessage()))
 			} else {
 				results <- NewScanError("", fmt.Errorf("unexpected response: %v", response))
 			}
-			fmt.Printf("End of loop\n")
-    	}
-		if pipeWriter != nil {
-			pipeWriter.Close()
+			log.Printf("End of loop\n")
 		}
 	}()
+	//log.Printf("Scan completed, closing results channel\n")
 	return results, nil
 }
 

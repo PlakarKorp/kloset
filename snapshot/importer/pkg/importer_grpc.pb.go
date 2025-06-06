@@ -19,8 +19,12 @@ import (
 const _ = grpc.SupportPackageIsVersion8
 
 const (
-	Importer_Info_FullMethodName = "/importer.Importer/Info"
-	Importer_Scan_FullMethodName = "/importer.Importer/Scan"
+	Importer_Info_FullMethodName      = "/importer.Importer/Info"
+	Importer_Scan_FullMethodName      = "/importer.Importer/Scan"
+	Importer_ScanDone_FullMethodName  = "/importer.Importer/ScanDone"
+	Importer_GetRecord_FullMethodName = "/importer.Importer/GetRecord"
+	Importer_Open_FullMethodName      = "/importer.Importer/Open"
+	Importer_Close_FullMethodName     = "/importer.Importer/Close"
 )
 
 // ImporterClient is the client API for Importer service.
@@ -28,7 +32,11 @@ const (
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type ImporterClient interface {
 	Info(ctx context.Context, in *InfoRequest, opts ...grpc.CallOption) (*InfoResponse, error)
-	Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (Importer_ScanClient, error)
+	Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (*ScanResponse, error)
+	ScanDone(ctx context.Context, in *ScanDoneRequest, opts ...grpc.CallOption) (*ScanDoneResponse, error)
+	GetRecord(ctx context.Context, in *GetRecordRequest, opts ...grpc.CallOption) (*GetRecordResponse, error)
+	Open(ctx context.Context, in *OpenRequest, opts ...grpc.CallOption) (Importer_OpenClient, error)
+	Close(ctx context.Context, in *CloseRequest, opts ...grpc.CallOption) (*CloseResponse, error)
 }
 
 type importerClient struct {
@@ -49,13 +57,43 @@ func (c *importerClient) Info(ctx context.Context, in *InfoRequest, opts ...grpc
 	return out, nil
 }
 
-func (c *importerClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (Importer_ScanClient, error) {
+func (c *importerClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc.CallOption) (*ScanResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	stream, err := c.cc.NewStream(ctx, &Importer_ServiceDesc.Streams[0], Importer_Scan_FullMethodName, cOpts...)
+	out := new(ScanResponse)
+	err := c.cc.Invoke(ctx, Importer_Scan_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
-	x := &importerScanClient{ClientStream: stream}
+	return out, nil
+}
+
+func (c *importerClient) ScanDone(ctx context.Context, in *ScanDoneRequest, opts ...grpc.CallOption) (*ScanDoneResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ScanDoneResponse)
+	err := c.cc.Invoke(ctx, Importer_ScanDone_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *importerClient) GetRecord(ctx context.Context, in *GetRecordRequest, opts ...grpc.CallOption) (*GetRecordResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetRecordResponse)
+	err := c.cc.Invoke(ctx, Importer_GetRecord_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *importerClient) Open(ctx context.Context, in *OpenRequest, opts ...grpc.CallOption) (Importer_OpenClient, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &Importer_ServiceDesc.Streams[0], Importer_Open_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &importerOpenClient{ClientStream: stream}
 	if err := x.ClientStream.SendMsg(in); err != nil {
 		return nil, err
 	}
@@ -65,21 +103,31 @@ func (c *importerClient) Scan(ctx context.Context, in *ScanRequest, opts ...grpc
 	return x, nil
 }
 
-type Importer_ScanClient interface {
-	Recv() (*ScanResponse, error)
+type Importer_OpenClient interface {
+	Recv() (*OpenResponse, error)
 	grpc.ClientStream
 }
 
-type importerScanClient struct {
+type importerOpenClient struct {
 	grpc.ClientStream
 }
 
-func (x *importerScanClient) Recv() (*ScanResponse, error) {
-	m := new(ScanResponse)
+func (x *importerOpenClient) Recv() (*OpenResponse, error) {
+	m := new(OpenResponse)
 	if err := x.ClientStream.RecvMsg(m); err != nil {
 		return nil, err
 	}
 	return m, nil
+}
+
+func (c *importerClient) Close(ctx context.Context, in *CloseRequest, opts ...grpc.CallOption) (*CloseResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CloseResponse)
+	err := c.cc.Invoke(ctx, Importer_Close_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ImporterServer is the server API for Importer service.
@@ -87,7 +135,11 @@ func (x *importerScanClient) Recv() (*ScanResponse, error) {
 // for forward compatibility
 type ImporterServer interface {
 	Info(context.Context, *InfoRequest) (*InfoResponse, error)
-	Scan(*ScanRequest, Importer_ScanServer) error
+	Scan(context.Context, *ScanRequest) (*ScanResponse, error)
+	ScanDone(context.Context, *ScanDoneRequest) (*ScanDoneResponse, error)
+	GetRecord(context.Context, *GetRecordRequest) (*GetRecordResponse, error)
+	Open(*OpenRequest, Importer_OpenServer) error
+	Close(context.Context, *CloseRequest) (*CloseResponse, error)
 	mustEmbedUnimplementedImporterServer()
 }
 
@@ -98,8 +150,20 @@ type UnimplementedImporterServer struct {
 func (UnimplementedImporterServer) Info(context.Context, *InfoRequest) (*InfoResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Info not implemented")
 }
-func (UnimplementedImporterServer) Scan(*ScanRequest, Importer_ScanServer) error {
-	return status.Errorf(codes.Unimplemented, "method Scan not implemented")
+func (UnimplementedImporterServer) Scan(context.Context, *ScanRequest) (*ScanResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Scan not implemented")
+}
+func (UnimplementedImporterServer) ScanDone(context.Context, *ScanDoneRequest) (*ScanDoneResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ScanDone not implemented")
+}
+func (UnimplementedImporterServer) GetRecord(context.Context, *GetRecordRequest) (*GetRecordResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetRecord not implemented")
+}
+func (UnimplementedImporterServer) Open(*OpenRequest, Importer_OpenServer) error {
+	return status.Errorf(codes.Unimplemented, "method Open not implemented")
+}
+func (UnimplementedImporterServer) Close(context.Context, *CloseRequest) (*CloseResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Close not implemented")
 }
 func (UnimplementedImporterServer) mustEmbedUnimplementedImporterServer() {}
 
@@ -132,25 +196,97 @@ func _Importer_Info_Handler(srv interface{}, ctx context.Context, dec func(inter
 	return interceptor(ctx, in, info, handler)
 }
 
-func _Importer_Scan_Handler(srv interface{}, stream grpc.ServerStream) error {
-	m := new(ScanRequest)
+func _Importer_Scan_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScanRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ImporterServer).Scan(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Importer_Scan_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ImporterServer).Scan(ctx, req.(*ScanRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Importer_ScanDone_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ScanDoneRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ImporterServer).ScanDone(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Importer_ScanDone_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ImporterServer).ScanDone(ctx, req.(*ScanDoneRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Importer_GetRecord_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetRecordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ImporterServer).GetRecord(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Importer_GetRecord_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ImporterServer).GetRecord(ctx, req.(*GetRecordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Importer_Open_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(OpenRequest)
 	if err := stream.RecvMsg(m); err != nil {
 		return err
 	}
-	return srv.(ImporterServer).Scan(m, &importerScanServer{ServerStream: stream})
+	return srv.(ImporterServer).Open(m, &importerOpenServer{ServerStream: stream})
 }
 
-type Importer_ScanServer interface {
-	Send(*ScanResponse) error
+type Importer_OpenServer interface {
+	Send(*OpenResponse) error
 	grpc.ServerStream
 }
 
-type importerScanServer struct {
+type importerOpenServer struct {
 	grpc.ServerStream
 }
 
-func (x *importerScanServer) Send(m *ScanResponse) error {
+func (x *importerOpenServer) Send(m *OpenResponse) error {
 	return x.ServerStream.SendMsg(m)
+}
+
+func _Importer_Close_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CloseRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ImporterServer).Close(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Importer_Close_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ImporterServer).Close(ctx, req.(*CloseRequest))
+	}
+	return interceptor(ctx, in, info, handler)
 }
 
 // Importer_ServiceDesc is the grpc.ServiceDesc for Importer service.
@@ -164,11 +300,27 @@ var Importer_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Info",
 			Handler:    _Importer_Info_Handler,
 		},
+		{
+			MethodName: "Scan",
+			Handler:    _Importer_Scan_Handler,
+		},
+		{
+			MethodName: "ScanDone",
+			Handler:    _Importer_ScanDone_Handler,
+		},
+		{
+			MethodName: "GetRecord",
+			Handler:    _Importer_GetRecord_Handler,
+		},
+		{
+			MethodName: "Close",
+			Handler:    _Importer_Close_Handler,
+		},
 	},
 	Streams: []grpc.StreamDesc{
 		{
-			StreamName:    "Scan",
-			Handler:       _Importer_Scan_Handler,
+			StreamName:    "Open",
+			Handler:       _Importer_Open_Handler,
 			ServerStreams: true,
 		},
 	},
