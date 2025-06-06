@@ -4,21 +4,20 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
-	"io/fs"
-
-	"log"
-
 	"github.com/PlakarKorp/kloset/objects"
 	grpc_importer "github.com/PlakarKorp/kloset/snapshot/importer/pkg"
+	"io"
+	"io/fs"
+	"log"
 )
 
 type GrpcImporter struct {
-	GrpcClient grpc_importer.ImporterClient
+	GrpcClientScan   grpc_importer.ImporterClient //used to Scan (but also to get Origin, Type, Root and Close)
+	GrpcClientReader grpc_importer.ImporterClient //TODO: add a list of ClientReader //used to Open/Read/Close files
 }
 
 func (g *GrpcImporter) Origin() string {
-	info, err := g.GrpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
+	info, err := g.GrpcClientScan.Info(context.Background(), &grpc_importer.InfoRequest{})
 	if err != nil {
 		return ""
 	}
@@ -26,7 +25,7 @@ func (g *GrpcImporter) Origin() string {
 }
 
 func (g *GrpcImporter) Type() string {
-	info, err := g.GrpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
+	info, err := g.GrpcClientScan.Info(context.Background(), &grpc_importer.InfoRequest{})
 	if err != nil {
 		return ""
 	}
@@ -34,7 +33,7 @@ func (g *GrpcImporter) Type() string {
 }
 
 func (g *GrpcImporter) Root() string {
-	info, err := g.GrpcClient.Info(context.Background(), &grpc_importer.InfoRequest{})
+	info, err := g.GrpcClientScan.Info(context.Background(), &grpc_importer.InfoRequest{})
 	if err != nil {
 		return ""
 	}
@@ -45,6 +44,7 @@ func (g *GrpcImporter) Root() string {
 
 type GrpcReader struct {
 	client grpc_importer.ImporterClient
+	stream grpc_importer.Importer_OpenClient
 	path   string
 	buf    *bytes.Buffer
 }
@@ -64,13 +64,15 @@ func (g *GrpcReader) Read(p []byte) (n int, err error) {
 			return n, err
 		}
 	}
-	stream, err := g.client.Open(context.Background(), &grpc_importer.OpenRequest{
-		Pathname: g.path,
-	})
-	if err != nil {
-		return 0, fmt.Errorf("failed to open file %s: %w", g.path, err)
+	if g.stream == nil {
+		g.stream, err = g.client.Open(context.Background(), &grpc_importer.OpenRequest{
+			Pathname: g.path,
+		})
+		if err != nil {
+			return 0, fmt.Errorf("failed to open file %s: %w", g.path, err)
+		}
 	}
-	fileResponse, err := stream.Recv()
+	fileResponse, err := g.stream.Recv()
 	if err != nil {
 		if err == io.EOF {
 			return 0, io.EOF
@@ -100,7 +102,7 @@ func (g *GrpcReader) Close() error {
 //===========
 
 func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
-	_, err := g.GrpcClient.Scan(context.Background(), &grpc_importer.ScanRequest{})
+	stream, err := g.GrpcClientScan.Scan(context.Background(), &grpc_importer.ScanRequest{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to start scan: %w", err)
 	}
@@ -110,19 +112,8 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 		defer close(results)
 
 		for {
-			done, err := g.GrpcClient.ScanDone(context.Background(), &grpc_importer.ScanDoneRequest{})
-			if done != nil {
-				if done.GetDone() {
-					log.Printf("Scan completed successfully.\n")
-					break
-				}
-				log.Printf("Scan not done yet, waiting for next record...\n")
-			} else if err != nil {
-				return
-			}
-
 			log.Printf("Waiting for scan response...\n")
-			response, err := g.GrpcClient.GetRecord(context.Background(), &grpc_importer.GetRecordRequest{})
+			response, err := stream.Recv()
 			if err != nil {
 				if err == io.EOF {
 					break
@@ -141,7 +132,7 @@ func (g *GrpcImporter) Scan() (<-chan *ScanResult, error) {
 					Record: &ScanRecord{
 						Pathname: response.GetPathname(),
 						Reader: NewLazyReader(func() (io.ReadCloser, error) {
-							return NewGrpcReader(g.GrpcClient, response.GetPathname()), nil //TODO: check to not make to much files
+							return NewGrpcReader(g.GrpcClientReader, response.GetPathname()), nil //TODO: check to not make to much files
 						}),
 						FileInfo: objects.FileInfo{
 							Lname:      response.GetRecord().GetFileinfo().GetName(),
@@ -181,8 +172,8 @@ func (g *GrpcImporter) NewExtendedAttributeReader(path string, xattr string) (io
 }
 
 func (g *GrpcImporter) Close() error {
-	if g.GrpcClient != nil {
-		if conn, ok := g.GrpcClient.(interface{ Close() error }); ok {
+	if g.GrpcClientScan != nil {
+		if conn, ok := g.GrpcClientScan.(interface{ Close() error }); ok {
 			return conn.Close()
 		}
 	}
