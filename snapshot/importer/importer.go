@@ -72,7 +72,7 @@ type Importer interface {
 	Close() error
 }
 
-type ImporterOptions struct {
+type Options struct {
 	Hostname        string
 	OperatingSystem string
 	Architecture    string
@@ -83,7 +83,7 @@ type ImporterOptions struct {
 	Stderr io.Writer `msgpack:"-"`
 }
 
-type ImporterFn func(context.Context, *ImporterOptions, string, map[string]string) (Importer, error)
+type ImporterFn func(context.Context, *Options, string, map[string]string) (Importer, error)
 
 var backends = location.New[ImporterFn]("fs")
 
@@ -97,7 +97,7 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewImporter(ctx *kcontext.KContext, opts *ImporterOptions, config map[string]string) (Importer, error) {
+func NewImporter(ctx *kcontext.KContext, opts *Options, config map[string]string) (Importer, error) {
 	location, ok := config["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
