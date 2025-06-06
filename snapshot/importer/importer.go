@@ -79,6 +79,7 @@ type Options struct {
 	CWD             string
 	MaxConcurrency  int
 
+	Stdin  io.Reader `msgpack:"-"`
 	Stdout io.Writer `msgpack:"-"`
 	Stderr io.Writer `msgpack:"-"`
 }
