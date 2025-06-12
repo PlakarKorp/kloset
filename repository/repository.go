@@ -92,7 +92,6 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 	if err != nil {
 		return nil, err
 	}
-	defer st.Close()
 
 	return &Repository{
 		store:            st,
