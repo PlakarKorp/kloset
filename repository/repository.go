@@ -145,7 +145,12 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		return hasher
 	})
 
-	if err := r.RebuildState(); err != nil {
+	cacheInstance, err := r.AppContext().GetCache().Repository(r.Configuration().RepositoryID)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.RebuildState(cacheInstance); err != nil {
 		return nil, err
 	}
 
@@ -204,12 +209,7 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 	return r, nil
 }
 
-func (r *Repository) RebuildState() error {
-	cacheInstance, err := r.AppContext().GetCache().Repository(r.Configuration().RepositoryID)
-	if err != nil {
-		return err
-	}
-
+func (r *Repository) RebuildState(cacheInstance caching.StateCache) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "rebuildState(): %s", time.Since(t0))
