@@ -210,6 +210,10 @@ func (r *Repository) RebuildState() error {
 		return err
 	}
 
+	return r.RebuildStateWithCache(cacheInstance)
+}
+
+func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "rebuildState(): %s", time.Since(t0))
