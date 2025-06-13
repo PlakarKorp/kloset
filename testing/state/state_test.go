@@ -19,7 +19,7 @@ func TestRebuildNoStates(t *testing.T) {
 
 	cache := newCache()
 
-	err = repo.RebuildState(cache)
+	err = repo.RebuildStateWithCache(cache)
 	require.NoError(t, err)
 
 	require.Equal(t, 0, len(cache.states))
@@ -47,7 +47,7 @@ func TestRebuildWithRemoteStates(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	err = repo.RebuildState(cache)
+	err = repo.RebuildStateWithCache(cache)
 	require.NoError(t, err)
 
 	require.Equal(t, 5, len(cache.states))
@@ -79,7 +79,7 @@ func TestRebuildWithLocalState(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	err = repo.RebuildState(cache)
+	err = repo.RebuildStateWithCache(cache)
 	require.NoError(t, err)
 
 	require.Equal(t, 5, len(cache.states))
@@ -123,7 +123,7 @@ func TestRebuildNewLayout(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	err = repo.RebuildState(cache)
+	err = repo.RebuildStateWithCache(cache)
 	require.NoError(t, err)
 
 	require.Equal(t, 5, len(cache.states))
