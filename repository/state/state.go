@@ -32,7 +32,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-const VERSION = "1.0.0"
+const VERSION = "1.1.0"
 
 func init() {
 	versioning.Register(resources.RT_STATE, versioning.FromString(VERSION))
@@ -48,10 +48,19 @@ const (
 	ET_CONFIGURATION           = 5
 )
 
+type Flag uint64
+
+const (
+	F_AGGREGATE  Flag = 0x1
+	F_CHECKPOINT      = 0x2
+)
+
 type Metadata struct {
 	Version   versioning.Version `msgpack:"version"`
 	Timestamp time.Time          `msgpack:"timestamp"`
 	Serial    uuid.UUID          `msgpack:"serial"`
+	Flags     uint64             `msgpack:"flags"`
+	Parents   []objects.MAC      `msgpack:"parents"`
 }
 
 type Location struct {
@@ -181,6 +190,14 @@ func (ls *LocalState) UpdateSerialOr(serial uuid.UUID) error {
 	return nil
 }
 
+func NewFromReader(rd io.Reader) (*LocalState, error) {
+	ls := &LocalState{}
+	if err := ls.deserializeFromStream(rd); err != nil {
+		return nil, err
+	}
+	return ls, nil
+}
+
 /* Insert the state denotated by stateID and its associated delta entries read
  * from rd into the local aggregated version of the state. */
 func (ls *LocalState) MergeState(version versioning.Version, stateID objects.MAC, rd io.Reader) error {
@@ -305,6 +322,17 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 	}
 	if _, err := w.Write(ls.Metadata.Serial[:]); err != nil {
 		return fmt.Errorf("failed to write serial flag: %w", err)
+	}
+	if err := writeUint64(ls.Metadata.Flags); err != nil {
+		return fmt.Errorf("failed to write flags: %w", err)
+	}
+	if err := writeUint32(uint32(len(ls.Metadata.Parents))); err != nil {
+		return fmt.Errorf("failed to write num parents: %w", err)
+	}
+	for i := range ls.Metadata.Parents {
+		if _, err := w.Write(ls.Metadata.Parents[i][:]); err != nil {
+			return fmt.Errorf("failed to write parent %d: %w", i, err)
+		}
 	}
 
 	return nil
@@ -614,6 +642,26 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 		return fmt.Errorf("failed to read serial: %w", err)
 	}
 	ls.Metadata.Serial = uuid.UUID(serial)
+
+	flags, err := readUint64()
+	if err != nil {
+		return fmt.Errorf("failed to read flags: %w", err)
+	}
+	ls.Metadata.Flags = flags
+
+	nparents, err := readUint32()
+	if err != nil {
+		return fmt.Errorf("failed to read num parents: %w", err)
+	}
+	ls.Metadata.Parents = make([]objects.MAC, 0, nparents)
+
+	for i := range nparents {
+		var mac objects.MAC
+		if _, err := io.ReadFull(r, mac[:]); err != nil {
+			return fmt.Errorf("failed to read parent %d: %w", i, err)
+		}
+		ls.Metadata.Parents = append(ls.Metadata.Parents, mac)
+	}
 
 	return nil
 }

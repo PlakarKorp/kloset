@@ -257,6 +257,21 @@ func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) err
 		}
 	}
 
+	graph := make(map[objects.MAC]state.Metadata)
+	for i := range remoteStates {
+		_, remoteStateRd, err := r.GetState(remoteStates[i])
+		if err != nil {
+			return err
+		}
+
+		ls, err := state.NewFromReader(remoteStateRd)
+		if err != nil {
+			return err
+		}
+
+		graph[remoteStates[i]] = ls.Metadata
+	}
+
 	rebuilt := false
 	for _, stateID := range missingStates {
 		version, remoteStateRd, err := r.GetState(stateID)
