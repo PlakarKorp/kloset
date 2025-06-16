@@ -1,4 +1,4 @@
-# plakar - Effortless backup
+# Kloset - Immutable Data Store Engine
 
 ## Plakar V1.0.1 released
 
