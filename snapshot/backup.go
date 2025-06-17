@@ -598,47 +598,45 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) processFiles(backupCtx *BackupContext, filesChannel <-chan *importer.ScanRecord) error {
-	var wg sync.WaitGroup
-	semaphore := make(chan struct{}, backupCtx.maxConcurrency)
-
+func processFile(wg *sync.WaitGroup, backupCtx *BackupContext, snap *Builder, filesChannel <-chan *importer.ScanRecord) {
+	defer wg.Done()
 	ctx := snap.AppContext()
 
-loop:
 	for {
 		select {
 		case <-ctx.Done():
-			break loop
-
+			return
 		case record, ok := <-filesChannel:
 			if !ok {
-				break loop
+				return
 			}
-
-			semaphore <- struct{}{}
-			wg.Add(1)
-
-			go func(record *importer.ScanRecord) {
-				defer wg.Done()
-				defer func() { <-semaphore }()
-				defer record.Close()
-
-				snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
-				if err := snap.processFileRecord(backupCtx, record); err != nil {
-					snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
-					backupCtx.recordError(record.Pathname, err)
-				} else {
-					snap.Event(events.FileOKEvent(snap.Header.Identifier, record.Pathname, record.FileInfo.Size()))
-				}
-			}(record)
+			snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
+			if err := snap.processFileRecord(backupCtx, record); err != nil {
+				snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
+				backupCtx.recordError(record.Pathname, err)
+			} else {
+				snap.Event(events.FileOKEvent(snap.Header.Identifier, record.Pathname, record.FileInfo.Size()))
+			}
+			record.Close()
 		}
 	}
+}
+
+func (snap *Builder) processFiles(backupCtx *BackupContext, filesChannel <-chan *importer.ScanRecord) error {
+	var wg sync.WaitGroup
+
+	for range backupCtx.maxConcurrency {
+		wg.Add(1)
+		go processFile(&wg, backupCtx, snap, filesChannel)
+	}
 	wg.Wait()
+
 	for range filesChannel {
 		// drain the filesChannel to consume the items that
 		// the importerJob might still have inflight.
 	}
-	return ctx.Err()
+
+	return snap.AppContext().Err()
 }
 
 func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importer.ScanRecord) error {
