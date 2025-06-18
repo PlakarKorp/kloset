@@ -2,72 +2,28 @@ package config
 
 import (
 	"fmt"
-	"io"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"maps"
-
-	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	pathname          string
-	DefaultRepository string                      `yaml:"default-repo"`
-	Repositories      map[string]RepositoryConfig `yaml:"repositories"`
-	Remotes           map[string]RemoteConfig     `yaml:"remotes"`
+	DefaultRepository string
+	Repositories      map[string]RepositoryConfig
+	Sources           map[string]SourceConfig
+	Destinations      map[string]DestinationConfig
 }
 
 type RepositoryConfig map[string]string
-type RemoteConfig map[string]string
+type SourceConfig map[string]string
+type DestinationConfig map[string]string
 
-func LoadOrCreate(configFile string) (*Config, error) {
-	f, err := os.Open(configFile)
-	if err != nil {
-		if os.IsNotExist(err) {
-			cfg := &Config{
-				pathname:     configFile,
-				Repositories: make(map[string]RepositoryConfig),
-				Remotes:      make(map[string]RemoteConfig),
-			}
-			return cfg, cfg.Save()
-		}
-		return nil, fmt.Errorf("error reading config file: %T", err)
+func NewConfig() *Config {
+	return &Config{
+		Repositories: make(map[string]RepositoryConfig),
+		Sources:      make(map[string]SourceConfig),
+		Destinations: make(map[string]DestinationConfig),
 	}
-	defer f.Close()
-	var config Config
-	if err := yaml.NewDecoder(f).Decode(&config); err != nil {
-		return nil, fmt.Errorf("failed to parse config file: %w", err)
-	}
-	config.pathname = configFile
-	if config.Repositories == nil {
-		config.Repositories = make(map[string]RepositoryConfig)
-	}
-	if config.Remotes == nil {
-		config.Remotes = make(map[string]RemoteConfig)
-	}
-	return &config, nil
-}
-
-func (c *Config) Render(w io.Writer) error {
-	return yaml.NewEncoder(w).Encode(c)
-}
-
-func (c *Config) Save() error {
-	dir := filepath.Dir(c.pathname)
-	tmpFile, err := os.CreateTemp(dir, "config.*.yaml")
-	if err != nil {
-		return err
-	}
-
-	err = c.Render(tmpFile)
-	tmpFile.Close()
-	if err != nil {
-		os.Remove(tmpFile.Name())
-		return err
-	}
-	return os.Rename(tmpFile.Name(), c.pathname)
 }
 
 func (c *Config) HasRepository(name string) bool {
@@ -93,13 +49,28 @@ func (c *Config) GetRepository(name string) (map[string]string, error) {
 	}
 }
 
-func (c *Config) HasRemote(name string) bool {
-	_, ok := c.Remotes[name]
+func (c *Config) HasSource(name string) bool {
+	_, ok := c.Sources[name]
 	return ok
 }
 
-func (c *Config) GetRemote(name string) (map[string]string, bool) {
-	if kv, ok := c.Remotes[name]; !ok {
+func (c *Config) GetSource(name string) (map[string]string, bool) {
+	if kv, ok := c.Sources[name]; !ok {
+		return nil, false
+	} else {
+		res := make(map[string]string)
+		maps.Copy(res, kv)
+		return res, ok
+	}
+}
+
+func (c *Config) HasDestination(name string) bool {
+	_, ok := c.Destinations[name]
+	return ok
+}
+
+func (c *Config) GetDestination(name string) (map[string]string, bool) {
+	if kv, ok := c.Destinations[name]; !ok {
 		return nil, false
 	} else {
 		res := make(map[string]string)
