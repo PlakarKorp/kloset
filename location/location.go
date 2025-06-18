@@ -9,8 +9,8 @@ import (
 type Flags uint32
 
 const (
-	FLAG_LOCALFS Flags = 1 << 1
-	FLAG_FILE    Flags = 1 << 2
+	FLAG_LOCALFS Flags = 1 << 0
+	FLAG_FILE    Flags = 1 << 1
 )
 
 type tWrapper[T any] struct {
