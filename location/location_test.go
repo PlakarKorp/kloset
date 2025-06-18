@@ -22,17 +22,17 @@ func TestRegister(t *testing.T) {
 	loc := New[string]("default")
 
 	// Test successful registration
-	if !loc.Register("test", "value") {
+	if !loc.Register("test", "value", 0) {
 		t.Error("Register failed to register new item")
 	}
 
 	// Test duplicate registration
-	if loc.Register("test", "value2") {
+	if loc.Register("test", "value2", 0) {
 		t.Error("Register succeeded when it should have failed for duplicate")
 	}
 
 	// Verify the value wasn't changed
-	if v, ok := loc.items["test"]; !ok || v != "value" {
+	if v, ok := loc.items["test"]; !ok || v.item != "value" {
 		t.Errorf("Duplicate registration changed value: got %v, want %v", v, "value")
 	}
 }
@@ -42,9 +42,9 @@ func TestNames(t *testing.T) {
 	expected := []string{"a", "b", "c"}
 
 	// Register items in reverse order to test sorting
-	loc.Register("c", "value3")
-	loc.Register("b", "value2")
-	loc.Register("a", "value1")
+	loc.Register("c", "value3", 0)
+	loc.Register("b", "value2", 0)
+	loc.Register("a", "value1", 0)
 
 	names := loc.Names()
 	if len(names) != len(expected) {
@@ -60,8 +60,8 @@ func TestNames(t *testing.T) {
 
 func TestLookup(t *testing.T) {
 	loc := New[string]("default")
-	loc.Register("http", "http-value")
-	loc.Register("https", "https-value")
+	loc.Register("http", "http-value", 0)
+	loc.Register("https", "https-value", 0)
 
 	tests := []struct {
 		name         string
@@ -115,7 +115,7 @@ func TestLookup(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			proto, location, value, found := loc.Lookup(tt.uri)
+			proto, location, value, _, found := loc.Lookup(tt.uri)
 			if proto != tt.wantProto {
 				t.Errorf("Lookup() proto = %v, want %v", proto, tt.wantProto)
 			}
