@@ -26,6 +26,7 @@ type Lock struct {
 
 func newLock(hostname string, exclusive bool) *Lock {
 	return &Lock{
+		Version:   versioning.FromString(LOCK_VERSION),
 		Timestamp: time.Now(),
 		Hostname:  hostname,
 		Exclusive: exclusive,
