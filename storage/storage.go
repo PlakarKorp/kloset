@@ -25,6 +25,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/PlakarKorp/kloset/chunking"
@@ -170,8 +171,15 @@ func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
 		return nil, fmt.Errorf("backend '%s' does not exist", proto)
 	}
 
-	if flags&location.FLAG_LOCALFS != 0 && !filepath.IsAbs(loc) {
-		loc = filepath.Join(ctx.CWD, loc)
+	if flags&location.FLAG_LOCALFS != 0 {
+		if !filepath.IsAbs(loc) {
+			loc = filepath.Join(ctx.CWD, loc)
+		}
+
+		if proto == "fs" && strings.HasSuffix(loc, ".ptar") {
+			storeConfig["location"] = "ptar://" + loc
+			return New(ctx, storeConfig)
+		}
 	}
 	storeConfig["location"] = proto + "://" + loc
 
