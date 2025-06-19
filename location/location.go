@@ -6,26 +6,41 @@ import (
 	"sync"
 )
 
+type Flags uint32
+
+const (
+	FLAG_LOCALFS Flags = 1 << 0
+	FLAG_FILE    Flags = 1 << 1
+)
+
+type tWrapper[T any] struct {
+	item  T
+	flags Flags
+}
+
 type Location[T any] struct {
 	mtx      sync.Mutex
-	items    map[string]T
+	items    map[string]tWrapper[T]
 	fallback string
 }
 
 func New[T any](fallback string) *Location[T] {
 	return &Location[T]{
-		items:    make(map[string]T),
+		items:    make(map[string]tWrapper[T]),
 		fallback: fallback,
 	}
 }
 
-func (l *Location[T]) Register(name string, item T) bool {
+func (l *Location[T]) Register(name string, item T, flags Flags) bool {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 	if _, ok := l.items[name]; ok {
 		return false
 	}
-	l.items[name] = item
+	l.items[name] = tWrapper[T]{
+		item:  item,
+		flags: flags,
+	}
 	return true
 }
 
@@ -46,7 +61,7 @@ func allowedInUri(c rune) bool {
 		c == '+' || c == '-' || c == '.'
 }
 
-func (l *Location[T]) Lookup(uri string) (proto, location string, item T, ok bool) {
+func (l *Location[T]) Lookup(uri string) (proto, location string, item T, flags Flags, ok bool) {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()
 
@@ -68,6 +83,10 @@ func (l *Location[T]) Lookup(uri string) (proto, location string, item T, ok boo
 		proto = l.fallback
 	}
 
-	item, ok = l.items[proto]
+	t, ok := l.items[proto]
+	if ok {
+		item = t.item
+		flags = t.flags
+	}
 	return
 }

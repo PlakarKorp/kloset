@@ -25,6 +25,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/PlakarKorp/kloset/chunking"
@@ -147,9 +148,9 @@ type StoreFn func(context.Context, string, map[string]string) (Store, error)
 
 var backends = location.New[StoreFn]("fs")
 
-func Register(backend StoreFn, names ...string) {
+func Register(backend StoreFn, flags location.Flags, names ...string) {
 	for _, name := range names {
-		if !backends.Register(name, backend) {
+		if !backends.Register(name, backend, flags) {
 			log.Fatalf("backend '%s' registered twice", name)
 		}
 	}
@@ -160,28 +161,28 @@ func Backends() []string {
 }
 
 func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
-	location, ok := storeConfig["location"]
+	loc, ok := storeConfig["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
 	}
 
-	proto, location, backend, ok := backends.Lookup(location)
+	proto, loc, backend, flags, ok := backends.Lookup(loc)
 	if !ok {
 		return nil, fmt.Errorf("backend '%s' does not exist", proto)
 	}
 
-	if proto == "fs" && !filepath.IsAbs(location) {
-		location = filepath.Join(ctx.CWD, location)
-		storeConfig["location"] = "fs://" + location
-	} else if proto == "ptar" && !filepath.IsAbs(location) {
-		location = filepath.Join(ctx.CWD, location)
-		storeConfig["location"] = "ptar://" + location
-	} else if proto == "sqlite" && !filepath.IsAbs(location) {
-		location = filepath.Join(ctx.CWD, location)
-		storeConfig["location"] = "sqlite://" + location
-	} else {
-		storeConfig["location"] = proto + "://" + location
+	if flags&location.FLAG_LOCALFS != 0 {
+		if !filepath.IsAbs(loc) {
+			loc = filepath.Join(ctx.CWD, loc)
+		}
+
+		if proto == "fs" && strings.HasSuffix(loc, ".ptar") {
+			storeConfig["location"] = "ptar://" + loc
+			return New(ctx, storeConfig)
+		}
 	}
+	storeConfig["location"] = proto + "://" + loc
+
 	return backend(ctx, proto, storeConfig)
 }
 

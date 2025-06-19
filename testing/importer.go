@@ -15,7 +15,7 @@ type MockImporter struct {
 }
 
 func init() {
-	importer.Register("mock", NewMockImporter)
+	importer.Register("mock", 0, NewMockImporter)
 }
 
 func NewMockImporter(appCtx context.Context, opts *importer.Options, name string, config map[string]string) (importer.Importer, error) {

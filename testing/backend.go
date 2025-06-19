@@ -18,7 +18,7 @@ import (
 func init() {
 	storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 		return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}, nil
-	}, "mock")
+	}, 0, "mock")
 }
 
 type mockedBackendBehavior struct {

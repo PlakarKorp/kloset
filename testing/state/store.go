@@ -14,7 +14,7 @@ func init() {
 		return &store{
 			states: make(map[objects.MAC][]byte),
 		}, nil
-	}, "fake+state")
+	}, 0, "fake+state")
 }
 
 type store struct {
