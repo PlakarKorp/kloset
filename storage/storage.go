@@ -171,14 +171,14 @@ func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
 		return nil, fmt.Errorf("backend '%s' does not exist", proto)
 	}
 
-	if flags&location.FLAG_LOCALFS == location.FLAG_LOCALFS {
-		if proto != "ptar" && strings.HasSuffix(loc, ".ptar") {
-			storeConfig["location"] = "ptar://" + loc
-			return New(ctx, storeConfig)
-		}
-
+	if flags&location.FLAG_LOCALFS != 0 {
 		if !filepath.IsAbs(loc) {
 			loc = filepath.Join(ctx.CWD, loc)
+		}
+
+		if proto == "fs" && strings.HasSuffix(loc, ".ptar") {
+			storeConfig["location"] = "ptar://" + loc
+			return New(ctx, storeConfig)
 		}
 	}
 	storeConfig["location"] = proto + "://" + loc
