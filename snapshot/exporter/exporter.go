@@ -31,8 +31,8 @@ type ExporterFn func(context.Context, *Options, string, map[string]string) (Expo
 
 var backends = location.New[ExporterFn]("fs")
 
-func Register(name string, backend ExporterFn) {
-	if !backends.Register(name, backend) {
+func Register(name string, flags location.Flags, backend ExporterFn) {
+	if !backends.Register(name, backend, flags) {
 		log.Fatalf("backend '%s' registered twice", name)
 	}
 }
@@ -42,22 +42,20 @@ func Backends() []string {
 }
 
 func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, error) {
-	location, ok := config["location"]
+	loc, ok := config["location"]
 	if !ok {
 		return nil, fmt.Errorf("missing location")
 	}
 
-	proto, location, backend, ok := backends.Lookup(location)
+	proto, loc, backend, flags, ok := backends.Lookup(loc)
 	if !ok {
 		return nil, fmt.Errorf("unsupported exporter protocol")
 	}
 
-	if proto == "fs" && !filepath.IsAbs(location) {
-		location = filepath.Join(ctx.CWD, location)
-		config["location"] = "fs://" + location
-	} else {
-		config["location"] = proto + "://" + location
+	if flags&location.FLAG_LOCALFS != 0 && !filepath.IsAbs(loc) {
+		loc = filepath.Join(ctx.CWD, loc)
 	}
+	config["location"] = proto + "://" + loc
 
 	opts := &Options{
 		MaxConcurrency: uint64(ctx.MaxConcurrency),

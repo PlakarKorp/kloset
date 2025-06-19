@@ -97,7 +97,7 @@ func TestBackends(t *testing.T) {
 
 	storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 		return &ptesting.MockBackend{}, nil
-	}, "test")
+	}, 0, "test")
 
 	expected := []string{"mock", "test"}
 	actual := storage.Backends()
@@ -120,7 +120,7 @@ func TestNew(t *testing.T) {
 
 			storage.Register(func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
 				return ptesting.NewMockBackend(storeConfig), nil
-			}, name)
+			}, 0, name)
 
 			location := name + ":///test/location"
 

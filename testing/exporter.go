@@ -15,7 +15,7 @@ type MockExporter struct {
 }
 
 func init() {
-	exporter.Register("mock", NewMockExporter)
+	exporter.Register("mock", 0, NewMockExporter)
 }
 
 func NewMockExporter(appCtx context.Context, opt *exporter.Options, name string, config map[string]string) (exporter.Exporter, error) {
