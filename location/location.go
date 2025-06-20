@@ -1,6 +1,7 @@
 package location
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"sync"
@@ -12,6 +13,8 @@ const (
 	FLAG_LOCALFS Flags = 1 << 0
 	FLAG_FILE    Flags = 1 << 1
 )
+
+var ErrUnknownFlag = errors.New("unknown flag")
 
 type tWrapper[T any] struct {
 	item  T
@@ -89,4 +92,15 @@ func (l *Location[T]) Lookup(uri string) (proto, location string, item T, flags 
 		flags = t.flags
 	}
 	return
+}
+
+func ParseFlag(name string) (Flags, error) {
+	switch name {
+	case "localfs":
+		return FLAG_LOCALFS, nil
+	case "file":
+		return FLAG_FILE, nil
+	default:
+		return 0, ErrUnknownFlag
+	}
 }
