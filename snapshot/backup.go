@@ -6,7 +6,6 @@ import (
 	"math"
 	"mime"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -198,10 +197,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 					if record.FileInfo.Mode().IsRegular() {
 						atomic.AddUint64(&size, uint64(record.FileInfo.Size()))
 					}
-					// if snapshot root is a file, then reset to the parent directory
-					if snap.Header.GetSource(0).Importer.Directory == record.Pathname {
-						snap.Header.GetSource(0).Importer.Directory = filepath.Dir(record.Pathname)
-					}
 				}
 			}(_record)
 		}
@@ -304,7 +299,6 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	} else {
 		snap.Header.Name = options.Name
 	}
-	snap.Header.GetSource(0).Importer.Directory = imp.Root()
 
 	backupCtx, err := snap.prepareBackup(imp, options)
 	if err != nil {
@@ -339,6 +333,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
+	snap.Header.GetSource(0).Importer.Directory = imp.Root()
 	snap.Header.GetSource(0).VFS = *vfsHeader
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
