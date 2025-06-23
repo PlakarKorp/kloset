@@ -121,7 +121,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 	wg := sync.WaitGroup{}
 	filesChannel := make(chan *importer.ScanRecord, 1000)
 	repoLocation := snap.repository.Location()
-	root := backupCtx.imp.Root()
 
 	go func() {
 		startEvent := events.StartImporterEvent()
@@ -166,12 +165,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 				switch {
 				case record.Error != nil:
 					record := record.Error
-					if strings.HasPrefix(root, path.Dir(record.Pathname)) {
-						// do we really need to do this?  if so, maybe we
-						// should propagate the original error as well.
-						ctx.Cancel()
-						return
-					}
 					backupCtx.recordError(record.Pathname, record.Err)
 					snap.Event(events.PathErrorEvent(snap.Header.Identifier, record.Pathname, record.Err.Error()))
 
