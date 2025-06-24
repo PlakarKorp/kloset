@@ -99,8 +99,5 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 	repo, err := repository.New(ctx, key, r, serializedConfig)
 	require.NoError(t, err, "creating repository")
 
-	// override the homedir to avoid having test overwriting existing home configuration
-	ctx.HomeDir = repo.Location()
-
 	return repo
 }

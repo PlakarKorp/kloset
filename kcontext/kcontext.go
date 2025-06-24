@@ -28,7 +28,6 @@ type KContext struct {
 	Stderr io.Writer `msgpack:"-"`
 
 	Username    string
-	HomeDir     string
 	Hostname    string
 	CommandLine string
 	MachineID   string

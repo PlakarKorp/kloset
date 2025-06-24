@@ -50,8 +50,6 @@ func GenerateContext(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer) *
 	}
 	// logger.EnableTrace("all")
 	ctx.SetLogger(logger)
-	// override the homedir to avoid having test overwriting existing home configuration
-	ctx.HomeDir = tmpRepoDirRoot
 
 	return ctx
 }

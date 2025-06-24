@@ -65,14 +65,6 @@ func TestContext_SettersAndGetters(t *testing.T) {
 			expected: "key123",
 		},
 		{
-			name: "SetHomeDir",
-			setter: func() {
-				ctx.HomeDir = "/home/testuser"
-			},
-			getter:   func() interface{} { return ctx.HomeDir },
-			expected: "/home/testuser",
-		},
-		{
 			name: "SetCacheDir",
 			setter: func() {
 				ctx.CacheDir = "/cache/testuser"
