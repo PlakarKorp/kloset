@@ -6,7 +6,6 @@ import (
 	"math"
 	"mime"
 	"path"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -165,12 +164,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 				switch {
 				case record.Error != nil:
 					record := record.Error
-					if record.Pathname == backupCtx.imp.Root() || len(record.Pathname) < len(backupCtx.imp.Root()) {
-						// do we really need to do this?  if so, maybe we
-						// should propagate the original error as well.
-						ctx.Cancel()
-						return
-					}
 					backupCtx.recordError(record.Pathname, record.Err)
 					snap.Event(events.PathErrorEvent(snap.Header.Identifier, record.Pathname, record.Err.Error()))
 
@@ -203,10 +196,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 					atomic.AddUint64(&nFiles, +1)
 					if record.FileInfo.Mode().IsRegular() {
 						atomic.AddUint64(&size, uint64(record.FileInfo.Size()))
-					}
-					// if snapshot root is a file, then reset to the parent directory
-					if snap.Header.GetSource(0).Importer.Directory == record.Pathname {
-						snap.Header.GetSource(0).Importer.Directory = filepath.Dir(record.Pathname)
 					}
 				}
 			}(_record)
@@ -310,7 +299,6 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	} else {
 		snap.Header.Name = options.Name
 	}
-	snap.Header.GetSource(0).Importer.Directory = imp.Root()
 
 	backupCtx, err := snap.prepareBackup(imp, options)
 	if err != nil {
@@ -345,6 +333,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
+	snap.Header.GetSource(0).Importer.Directory = imp.Root()
 	snap.Header.GetSource(0).VFS = *vfsHeader
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
