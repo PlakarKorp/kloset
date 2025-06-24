@@ -25,14 +25,6 @@ func TestContext_SettersAndGetters(t *testing.T) {
 		expected interface{}
 	}{
 		{
-			name: "SetNumCPU",
-			setter: func() {
-				ctx.NumCPU = 4
-			},
-			getter:   func() interface{} { return ctx.NumCPU },
-			expected: 4,
-		},
-		{
 			name: "SetUsername",
 			setter: func() {
 				ctx.Username = "testuser"
@@ -111,14 +103,6 @@ func TestContext_SettersAndGetters(t *testing.T) {
 			},
 			getter:   func() interface{} { return ctx.ProcessID },
 			expected: 12345,
-		},
-		{
-			name: "SetKeyringDir",
-			setter: func() {
-				ctx.KeyringDir = "/keyring/dir"
-			},
-			getter:   func() interface{} { return ctx.KeyringDir },
-			expected: "/keyring/dir",
 		},
 		{
 			name: "SetIdentity",

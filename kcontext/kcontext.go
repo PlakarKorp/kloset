@@ -27,7 +27,6 @@ type KContext struct {
 	Stdout io.Writer `msgpack:"-"`
 	Stderr io.Writer `msgpack:"-"`
 
-	NumCPU      int
 	Username    string
 	HomeDir     string
 	Hostname    string
@@ -35,7 +34,6 @@ type KContext struct {
 	MachineID   string
 	KeyFromFile string
 	CacheDir    string
-	KeyringDir  string
 
 	OperatingSystem string
 	Architecture    string
