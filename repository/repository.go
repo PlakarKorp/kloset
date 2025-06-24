@@ -149,13 +149,6 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		return nil, err
 	}
 
-	clientVersion := r.appContext.Client
-	if !r.appContext.GetCookies().HasRepositoryCookie(r.configuration.RepositoryID, clientVersion) {
-		if err := r.appContext.GetCookies().PutRepositoryCookie(r.configuration.RepositoryID, clientVersion); err != nil {
-			return nil, err
-		}
-	}
-
 	return r, nil
 }
 

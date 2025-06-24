@@ -8,7 +8,6 @@ import (
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/config"
-	"github.com/PlakarKorp/kloset/cookies"
 	"github.com/PlakarKorp/kloset/encryption/keypair"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/logging"
@@ -16,11 +15,10 @@ import (
 )
 
 type KContext struct {
-	events  *events.Receiver `msgpack:"-"`
-	cache   *caching.Manager `msgpack:"-"`
-	cookies *cookies.Manager `msgpack:"-"`
-	logger  *logging.Logger  `msgpack:"-"`
-	Config  *config.Config   `msgpack:"-"`
+	events *events.Receiver `msgpack:"-"`
+	cache  *caching.Manager `msgpack:"-"`
+	logger *logging.Logger  `msgpack:"-"`
+	Config *config.Config   `msgpack:"-"`
 
 	Context context.Context    `msgpack:"-"`
 	Cancel  context.CancelFunc `msgpack:"-"`
@@ -36,7 +34,6 @@ type KContext struct {
 	CommandLine string
 	MachineID   string
 	KeyFromFile string
-	CookiesDir  string
 	CacheDir    string
 	KeyringDir  string
 
@@ -106,26 +103,10 @@ func (c *KContext) GetCache() *caching.Manager {
 	return c.cache
 }
 
-func (c *KContext) SetCookies(cacheManager *cookies.Manager) {
-	c.cookies = cacheManager
-}
-
-func (c *KContext) GetCookies() *cookies.Manager {
-	return c.cookies
-}
-
 func (c *KContext) SetLogger(logger *logging.Logger) {
 	c.logger = logger
 }
 
 func (c *KContext) GetLogger() *logging.Logger {
 	return c.logger
-}
-
-func (c *KContext) GetAuthToken(repository uuid.UUID) (string, error) {
-	if authToken, err := c.cookies.GetAuthToken(); err != nil {
-		return "", err
-	} else {
-		return authToken, nil
-	}
 }
