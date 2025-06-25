@@ -244,7 +244,7 @@ func TestRepositoryCreation(t *testing.T) {
 		ctx := ptesting.GenerateContext(t, nil, nil)
 
 		// create a storage
-		r, err := storage.New(ctx, map[string]string{"location": "mock://" + ctx.HomeDir})
+		r, err := storage.New(ctx, map[string]string{"location": "mock:///nonexistent"})
 		require.NotNil(t, r)
 		require.NoError(t, err)
 
