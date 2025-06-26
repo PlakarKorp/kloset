@@ -112,113 +112,117 @@ func (snapshot *Builder) skipExcludedPathname(options *BackupOptions, record *im
 	return doExclude
 }
 
-func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOptions) (chan *importer.ScanRecord, error) {
+func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOptions) error {
 	scanner, err := backupCtx.imp.Scan()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	wg := sync.WaitGroup{}
-	filesChannel := make(chan *importer.ScanRecord, 1000)
 	repoLocation := snap.repository.Location()
 
-	go func() {
-		startEvent := events.StartImporterEvent()
-		startEvent.SnapshotID = snap.Header.Identifier
-		snap.Event(startEvent)
+	startEvent := events.StartImporterEvent()
+	startEvent.SnapshotID = snap.Header.Identifier
+	snap.Event(startEvent)
 
-		nFiles := uint64(0)
-		nDirectories := uint64(0)
-		size := uint64(0)
+	nFiles := uint64(0)
+	nDirectories := uint64(0)
+	size := uint64(0)
 
-		concurrencyChan := make(chan struct{}, backupCtx.maxConcurrency)
+	concurrencyChan := make(chan struct{}, backupCtx.maxConcurrency)
 
-		ctx := snap.AppContext()
-	loop:
-		for {
-			var (
-				_record *importer.ScanResult
-				ok      bool
-			)
+	ctx := snap.AppContext()
+loop:
+	for {
+		var (
+			_record *importer.ScanResult
+			ok      bool
+		)
 
-			select {
-			case _record, ok = <-scanner:
-				if !ok {
-					break loop
-				}
-			case <-ctx.Done():
+		select {
+		case _record, ok = <-scanner:
+			if !ok {
 				break loop
 			}
+		case <-ctx.Done():
+			break loop
+		}
 
-			if snap.skipExcludedPathname(options, _record) {
-				continue
-			}
+		if snap.skipExcludedPathname(options, _record) {
+			continue
+		}
 
-			concurrencyChan <- struct{}{}
-			wg.Add(1)
-			go func(record *importer.ScanResult) {
-				defer func() {
-					<-concurrencyChan
-					wg.Done()
-				}()
+		concurrencyChan <- struct{}{}
+		wg.Add(1)
+		go func(record *importer.ScanResult) {
+			defer func() {
+				<-concurrencyChan
+				wg.Done()
+			}()
 
-				switch {
-				case record.Error != nil:
-					record := record.Error
-					backupCtx.recordError(record.Pathname, record.Err)
-					snap.Event(events.PathErrorEvent(snap.Header.Identifier, record.Pathname, record.Err.Error()))
+			switch {
+			case record.Error != nil:
+				record := record.Error
+				backupCtx.recordError(record.Pathname, record.Err)
+				snap.Event(events.PathErrorEvent(snap.Header.Identifier, record.Pathname, record.Err.Error()))
 
-				case record.Record != nil:
-					record := record.Record
-					snap.Event(events.PathEvent(snap.Header.Identifier, record.Pathname))
+			case record.Record != nil:
+				record := record.Record
+				snap.Event(events.PathEvent(snap.Header.Identifier, record.Pathname))
 
-					if strings.HasPrefix(record.Pathname, repoLocation+"/") {
-						snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
-						record.Close()
-						// skip repository directory
-						return
-					}
-
-					if record.FileInfo.Mode().IsDir() {
-						atomic.AddUint64(&nDirectories, +1)
-						entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-						if err := backupCtx.recordEntry(entry); err != nil {
-							backupCtx.recordError(record.Pathname, err)
-						}
-						record.Close()
-						return
-					}
-
-					filesChannel <- record
-					if record.IsXattr {
-						return
-					}
-
-					atomic.AddUint64(&nFiles, +1)
-					if record.FileInfo.Mode().IsRegular() {
-						atomic.AddUint64(&size, uint64(record.FileInfo.Size()))
-					}
+				if strings.HasPrefix(record.Pathname, repoLocation+"/") {
+					snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
+					record.Close()
+					// skip repository directory
+					return
 				}
-			}(_record)
-		}
-		wg.Wait()
 
-		for range scanner {
-			// drain the importer channel since we might
-			// have been cancelled while the importer is
-			// trying to still produce some records.
-		}
+				if record.FileInfo.Mode().IsDir() {
+					atomic.AddUint64(&nDirectories, +1)
+					entry := vfs.NewEntry(path.Dir(record.Pathname), record)
+					if err := backupCtx.recordEntry(entry); err != nil {
+						backupCtx.recordError(record.Pathname, err)
+					}
+					record.Close()
+					return
+				}
 
-		close(filesChannel)
-		doneEvent := events.DoneImporterEvent()
-		doneEvent.SnapshotID = snap.Header.Identifier
-		doneEvent.NumFiles = nFiles
-		doneEvent.NumDirectories = nDirectories
-		doneEvent.Size = size
-		snap.Event(doneEvent)
-	}()
+				snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
+				if err := snap.processFileRecord(backupCtx, record); err != nil {
+					snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
+					backupCtx.recordError(record.Pathname, err)
+				} else {
+					snap.Event(events.FileOKEvent(snap.Header.Identifier, record.Pathname, record.FileInfo.Size()))
+				}
+				record.Close()
 
-	return filesChannel, nil
+				if record.IsXattr {
+					return
+				}
+
+				atomic.AddUint64(&nFiles, +1)
+				if record.FileInfo.Mode().IsRegular() {
+					atomic.AddUint64(&size, uint64(record.FileInfo.Size()))
+				}
+			}
+		}(_record)
+	}
+	wg.Wait()
+
+	for range scanner {
+		// drain the importer channel since we might
+		// have been cancelled while the importer is
+		// trying to still produce some records.
+	}
+
+	doneEvent := events.DoneImporterEvent()
+	doneEvent.SnapshotID = snap.Header.Identifier
+	doneEvent.NumFiles = nFiles
+	doneEvent.NumDirectories = nDirectories
+	doneEvent.Size = size
+	snap.Event(doneEvent)
+
+	return nil
 }
 
 func (snap *Builder) flushDeltaState(bc *BackupContext) {
@@ -314,14 +318,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	/* importer */
-	filesChannel, err := snap.importerJob(backupCtx, options)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	/* scanner */
-	if err := snap.processFiles(backupCtx, filesChannel); err != nil {
+	if err := snap.importerJob(backupCtx, options); err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
@@ -586,47 +583,6 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	}
 
 	return backupCtx, nil
-}
-
-func processFile(wg *sync.WaitGroup, backupCtx *BackupContext, snap *Builder, filesChannel <-chan *importer.ScanRecord) {
-	defer wg.Done()
-	ctx := snap.AppContext()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case record, ok := <-filesChannel:
-			if !ok {
-				return
-			}
-			snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
-			if err := snap.processFileRecord(backupCtx, record); err != nil {
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
-				backupCtx.recordError(record.Pathname, err)
-			} else {
-				snap.Event(events.FileOKEvent(snap.Header.Identifier, record.Pathname, record.FileInfo.Size()))
-			}
-			record.Close()
-		}
-	}
-}
-
-func (snap *Builder) processFiles(backupCtx *BackupContext, filesChannel <-chan *importer.ScanRecord) error {
-	var wg sync.WaitGroup
-
-	for range backupCtx.maxConcurrency {
-		wg.Add(1)
-		go processFile(&wg, backupCtx, snap, filesChannel)
-	}
-	wg.Wait()
-
-	for range filesChannel {
-		// drain the filesChannel to consume the items that
-		// the importerJob might still have inflight.
-	}
-
-	return snap.AppContext().Err()
 }
 
 func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importer.ScanRecord) error {
