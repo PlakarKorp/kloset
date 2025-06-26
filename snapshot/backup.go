@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
@@ -118,7 +119,7 @@ func (snapshot *Builder) skipExcludedPathname(options *BackupOptions, record *im
 	return doExclude
 }
 
-func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats) {
+func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
 	switch {
 	case record.Error != nil:
 		record := record.Error
@@ -147,7 +148,7 @@ func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.Sc
 		}
 
 		snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
-		if err := snap.processFileRecord(backupCtx, record); err != nil {
+		if err := snap.processFileRecord(backupCtx, record, chunker); err != nil {
 			snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
 			backupCtx.recordError(record.Pathname, err)
 		} else {
@@ -166,6 +167,16 @@ func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.Sc
 }
 
 func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOptions) error {
+	var ckers []*chunkers.Chunker
+	for range backupCtx.maxConcurrency {
+		cker, err := snap.repository.Chunker(nil)
+		if err != nil {
+			return err
+		}
+
+		ckers = append(ckers, cker)
+	}
+
 	scanner, err := backupCtx.imp.Scan()
 	if err != nil {
 		return err
@@ -179,9 +190,9 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 	snap.Event(startEvent)
 
 	var stats scanStats
-	for range backupCtx.maxConcurrency {
+	for _, cker := range ckers {
 		wg.Add(1)
-		go func() {
+		go func(ck *chunkers.Chunker) {
 			defer wg.Done()
 			for {
 				select {
@@ -193,10 +204,10 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						return
 					}
 
-					snap.processRecord(backupCtx, record, &stats)
+					snap.processRecord(backupCtx, record, &stats, ck)
 				}
 			}
-		}()
+		}(cker)
 	}
 	wg.Wait()
 
@@ -353,7 +364,7 @@ func entropy(data []byte) (float64, [256]float64) {
 	return entropy, freq
 }
 
-func (snap *Builder) chunkify(pathname string, rd io.Reader) (*objects.Object, int64, error) {
+func (snap *Builder) chunkify(chk *chunkers.Chunker, pathname string, rd io.Reader) (*objects.Object, int64, error) {
 	object := objects.NewObject()
 
 	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
@@ -401,11 +412,7 @@ func (snap *Builder) chunkify(pathname string, rd io.Reader) (*objects.Object, i
 		return snap.repository.PutBlobIfNotExists(resources.RT_CHUNK, chunk.ContentMAC, data)
 	}
 
-	chk, err := snap.repository.Chunker(rd)
-	if err != nil {
-		return nil, -1, err
-	}
-
+	chk.Reset(rd)
 	ctx := snap.AppContext()
 	for i := 0; ; i++ {
 		if i%1024 == 0 {
@@ -576,7 +583,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importer.ScanRecord) error {
+func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
 	vfsCache := backupCtx.vfsCache
 
 	var err error
@@ -628,7 +635,7 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 
 		if object == nil || !snap.repository.BlobExists(resources.RT_OBJECT, objectMAC) {
 			var dataSize int64
-			object, dataSize, err = snap.chunkify(record.Pathname, record.Reader)
+			object, dataSize, err = snap.chunkify(chunker, record.Pathname, record.Reader)
 			if err != nil {
 				return err
 			}
