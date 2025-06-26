@@ -33,7 +33,7 @@ func TestManagerClose(t *testing.T) {
 	_, err = manager.Repository(repoID)
 	require.Equal(t, ErrClosed, err)
 
-	_, err = manager.VFS(repoID, "test", "origin")
+	_, err = manager.VFS(repoID, "test", "origin", false)
 	require.Equal(t, ErrClosed, err)
 
 	_, err = manager.Maintenance(repoID)
@@ -68,12 +68,12 @@ func TestManagerVFS(t *testing.T) {
 	origin := "test-origin"
 
 	// Test getting a new VFS cache
-	vfsCache, err := manager.VFS(repoID, scheme, origin)
+	vfsCache, err := manager.VFS(repoID, scheme, origin, false)
 	require.NoError(t, err)
 	require.NotNil(t, vfsCache)
 
 	// Test getting the same VFS cache again (should return cached instance)
-	vfsCache2, err := manager.VFS(repoID, scheme, origin)
+	vfsCache2, err := manager.VFS(repoID, scheme, origin, false)
 	require.NoError(t, err)
 	require.Equal(t, vfsCache, vfsCache2)
 }

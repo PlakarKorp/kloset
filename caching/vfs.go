@@ -2,6 +2,7 @@ package caching
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/google/uuid"
@@ -9,10 +10,12 @@ import (
 
 type VFSCache struct {
 	*PebbleCache
-	manager *Manager
+	manager       *Manager
+	repoId        uuid.UUID
+	deleteOnClose bool
 }
 
-func newVFSCache(cacheManager *Manager, repositoryID uuid.UUID, scheme string, origin string) (*VFSCache, error) {
+func newVFSCache(cacheManager *Manager, repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
 	cacheDir := filepath.Join(cacheManager.cacheDir, "vfs", repositoryID.String(), scheme, origin)
 
 	db, err := New(cacheDir)
@@ -21,9 +24,25 @@ func newVFSCache(cacheManager *Manager, repositoryID uuid.UUID, scheme string, o
 	}
 
 	return &VFSCache{
-		PebbleCache: db,
-		manager:     cacheManager,
+		PebbleCache:   db,
+		manager:       cacheManager,
+		repoId:        repositoryID,
+		deleteOnClose: deleteOnClose,
 	}, nil
+}
+
+func (c *VFSCache) Close() error {
+	if err := c.PebbleCache.Close(); err != nil {
+		return err
+	}
+
+	if c.deleteOnClose {
+		// Note this is two level above the cache dir, because we don't want to
+		// leave behind empty directories.
+		return os.RemoveAll(filepath.Join(c.manager.cacheDir, "vfs", c.repoId.String()))
+	} else {
+		return nil
+	}
 }
 
 func (c *VFSCache) PutDirectory(pathname string, data []byte) error {

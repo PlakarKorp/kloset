@@ -46,12 +46,13 @@ type BackupContext struct {
 }
 
 type BackupOptions struct {
-	MaxConcurrency uint64
-	Name           string
-	Tags           []string
-	Excludes       []glob.Glob
-	NoCheckpoint   bool
-	NoCommit       bool
+	MaxConcurrency  uint64
+	Name            string
+	Tags            []string
+	Excludes        []glob.Glob
+	NoCheckpoint    bool
+	NoCommit        bool
+	CleanupVFSCache bool
 }
 
 func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
@@ -563,7 +564,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
 	}
 
-	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, imp.Type(), imp.Origin())
+	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, imp.Type(), imp.Origin(), backupOpts.CleanupVFSCache)
 	if err != nil {
 		return nil, err
 	}

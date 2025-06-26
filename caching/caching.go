@@ -68,7 +68,7 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string) (*VFSCache, error) {
+func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
 	if m.closed.Load() {
 		return nil, ErrClosed
 	}
@@ -82,7 +82,7 @@ func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string) (*VF
 		return cache, nil
 	}
 
-	if cache, err := newVFSCache(m, repositoryID, scheme, origin); err != nil {
+	if cache, err := newVFSCache(m, repositoryID, scheme, origin, deleteOnClose); err != nil {
 		return nil, err
 	} else {
 		m.vfsCache[key] = cache
