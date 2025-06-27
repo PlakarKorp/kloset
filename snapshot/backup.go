@@ -132,8 +132,11 @@ func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.Sc
 
 		snap.Event(events.PathEvent(snap.Header.Identifier, record.Pathname))
 
+		// XXX: Remove this when we introduce the Location object.
 		repoLocation := snap.repository.Location()
-		if strings.HasPrefix(record.Pathname, repoLocation+"/") {
+		repoLocation = strings.TrimPrefix(repoLocation, "fs://")
+		repoLocation = strings.TrimPrefix(repoLocation, "ptar://")
+		if record.Pathname == repoLocation || strings.HasPrefix(record.Pathname, repoLocation+"/") {
 			snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
 			return
 		}
