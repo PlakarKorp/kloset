@@ -204,6 +204,13 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						return
 					}
 
+					if snap.skipExcludedPathname(options, record) {
+						if record.Record != nil {
+							record.Record.Close()
+						}
+						return
+					}
+
 					snap.processRecord(backupCtx, record, &stats, ck)
 				}
 			}
