@@ -432,14 +432,6 @@ func (snap *Builder) chunkify(chk *chunkers.Chunker, pathname string, rd io.Read
 		if err != nil && err != io.EOF {
 			return nil, -1, err
 		}
-		if cdcChunk == nil {
-			// on an empty file, we need to compute an empty chunk for the first block
-			// should we make go-cdc-chunkers return an empty chunk instead of nil?
-			if i != 0 {
-				break
-			}
-			cdcChunk = []byte{}
-		}
 
 		chunkCopy := make([]byte, len(cdcChunk))
 		copy(chunkCopy, cdcChunk)
