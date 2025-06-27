@@ -6,6 +6,8 @@ github.com/PlakarKorp/go-cdc-chunkers v0.0.10 h1:3LlrN+0ElLIy3bBAxcX4DhgSaAmtDrB
 github.com/PlakarKorp/go-cdc-chunkers v0.0.10/go.mod h1:BfBmO/foiZaqX+Iet67EHnLcLeq9ymOnYJqWzR4b/o8=
 github.com/PlakarKorp/go-cdc-chunkers v0.0.12-0.20250626141412-2cc7f1c9c15d h1:ngdIVlY9y9yk3bTW1xA4/hWyE7aeZGf2vYty33XmJGE=
 github.com/PlakarKorp/go-cdc-chunkers v0.0.12-0.20250626141412-2cc7f1c9c15d/go.mod h1:BfBmO/foiZaqX+Iet67EHnLcLeq9ymOnYJqWzR4b/o8=
+github.com/PlakarKorp/go-cdc-chunkers v0.0.12-0.20250627142555-5621f83a0b1c h1:CtJpbefCRA4iiHCa7SWagnZvEWN92QZ699aDx3wixXg=
+github.com/PlakarKorp/go-cdc-chunkers v0.0.12-0.20250627142555-5621f83a0b1c/go.mod h1:BfBmO/foiZaqX+Iet67EHnLcLeq9ymOnYJqWzR4b/o8=
 github.com/aclements/go-perfevent v0.0.0-20240301234650-f7843625020f h1:JjxwchlOepwsUWcQwD2mLUAGE9aCp0/ehy6yCHFBOvo=
 github.com/aclements/go-perfevent v0.0.0-20240301234650-f7843625020f/go.mod h1:tMDTce/yLLN/SK8gMOxQfnyeMeCg8KGzp0D1cbECEeo=
 github.com/aymanbagabas/go-osc52/v2 v2.0.1 h1:HwpRHbFMcZLEVr42D4p7XBqjyuxQH5SMiErDT4WkJ2k=
