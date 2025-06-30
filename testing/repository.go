@@ -34,10 +34,7 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 
 	ctx := kcontext.NewKContext()
 
-	ctx.Client = "plakar-test/1.0.0"
-
 	// create a storage
-
 	r, err := storage.New(ctx, map[string]string{"location": "mock://" + tmpRepoDir})
 	require.NotNil(t, r)
 	require.NoError(t, err)
