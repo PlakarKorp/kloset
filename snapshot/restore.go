@@ -10,6 +10,7 @@ import (
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
+	"golang.org/x/sync/errgroup"
 )
 
 type RestoreOptions struct {
@@ -20,10 +21,9 @@ type RestoreOptions struct {
 type restoreContext struct {
 	hardlinks      map[string]string
 	hardlinksMutex sync.Mutex
-	maxConcurrency chan bool
 }
 
-func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *sync.WaitGroup) func(entrypath string, e *vfs.Entry, err error) error {
+func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *errgroup.Group) func(entrypath string, e *vfs.Entry, err error) error {
 	return func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
 			snap.Event(events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
@@ -68,12 +68,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		}
 
 		snap.Event(events.FileEvent(snap.Header.Identifier, entrypath))
-		restoreContext.maxConcurrency <- true
-		wg.Add(1)
-		go func(e *vfs.Entry, entrypath string) {
-			defer wg.Done()
-			defer func() { <-restoreContext.maxConcurrency }()
-
+		wg.Go(func() error {
 			// Handle hard links.
 			if e.Stat().Nlink() > 1 {
 				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
@@ -85,7 +80,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					if err := os.Link(v, dest); err != nil {
 						snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 					}
-					return
+					return nil
 				} else {
 					restoreContext.hardlinksMutex.Lock()
 					restoreContext.hardlinks[key] = dest
@@ -96,7 +91,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			rd, err := snap.NewReader(entrypath)
 			if err != nil {
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-				return
+				return nil
 			}
 			defer rd.Close()
 
@@ -113,7 +108,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			} else {
 				snap.Event(events.FileOKEvent(snap.Header.Identifier, entrypath, e.Size()))
 			}
-		}(e, entrypath)
+			return nil
+		})
 		return nil
 	}
 }
@@ -135,16 +131,15 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	restoreContext := &restoreContext{
 		hardlinks:      make(map[string]string),
 		hardlinksMutex: sync.Mutex{},
-		maxConcurrency: make(chan bool, maxConcurrency),
 	}
-	defer close(restoreContext.maxConcurrency)
 
 	base = path.Clean(base)
 	if base != "/" && !strings.HasSuffix(base, "/") {
 		base = base + "/"
 	}
 
-	wg := sync.WaitGroup{}
+	wg := errgroup.Group{}
+	wg.SetLimit(int(maxConcurrency))
 	defer wg.Wait()
 
 	return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
