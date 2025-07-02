@@ -3,20 +3,29 @@ package vfs
 import (
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
 )
 
+const prefetchCnt = 10
+
+type prefetchedChk struct {
+	rd  io.ReadSeeker
+	err error
+}
+
 type ObjectReader struct {
 	object *objects.Object
 	repo   *repository.Repository
 	size   int64
 
-	objoff int
-	off    int64
-	rd     io.ReadSeeker
+	objoff  int
+	pobjoff int // offset into the rds
+	off     int64
+	rds     []prefetchedChk
 }
 
 func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64) *ObjectReader {
@@ -27,114 +36,56 @@ func NewObjectReader(repo *repository.Repository, object *objects.Object, size i
 	}
 }
 
+func (or *ObjectReader) prefetch(n, offset int) []prefetchedChk {
+	ret := make([]prefetchedChk, n)
+	wg := sync.WaitGroup{}
+	for i := range n {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			rd, err := or.repo.GetBlob(resources.RT_CHUNK, or.object.Chunks[or.objoff+i].ContentMAC)
+
+			ret[i] = prefetchedChk{rd, err}
+		}(i)
+	}
+
+	wg.Wait()
+	return ret
+}
+
 func (or *ObjectReader) Read(p []byte) (int, error) {
 	for or.objoff < len(or.object.Chunks) {
-		if or.rd == nil {
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				or.object.Chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return -1, err
-			}
-			or.rd = rd
+		if or.rds == nil {
+			or.pobjoff = 0
+			or.rds = or.prefetch(min(prefetchCnt, len(or.object.Chunks)-or.objoff), or.objoff)
 		}
 
-		n, err := or.rd.Read(p)
-		if errors.Is(err, io.EOF) {
-			or.objoff++
-			or.rd = nil
-			continue
+		for i := or.pobjoff; i < len(or.rds); i++ {
+			chk := or.rds[i]
+			if chk.err != nil {
+				return -1, chk.err
+			}
+
+			n, err := chk.rd.Read(p)
+			if errors.Is(err, io.EOF) {
+				or.objoff++
+				or.pobjoff++
+
+				// We consummed all the prefetched blobs signal it for next loop
+				if or.pobjoff == len(or.rds) {
+					or.rds = nil
+				}
+
+				continue
+			}
+
+			return n, err
 		}
-		or.off += int64(n)
-		return n, err
 	}
 
 	return 0, io.EOF
 }
 
 func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
-	chunks := or.object.Chunks
-
-	switch whence {
-	case io.SeekStart:
-		or.rd = nil
-		or.off = 0
-		for or.objoff = 0; or.objoff < len(chunks); or.objoff++ {
-			clen := int64(chunks[or.objoff].Length)
-			if offset > clen {
-				or.off += clen
-				offset -= clen
-				continue
-			}
-			or.off += offset
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			if _, err := rd.Seek(offset, whence); err != nil {
-				return 0, err
-			}
-			or.rd = rd
-			break
-		}
-
-	case io.SeekEnd:
-		or.rd = nil
-		or.off = or.size
-		for or.objoff = len(chunks) - 1; or.objoff >= 0; or.objoff-- {
-			clen := int64(chunks[or.objoff].Length)
-			if offset > clen {
-				or.off -= clen
-				offset -= clen
-				continue
-			}
-			or.off -= offset
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			if _, err := rd.Seek(offset, whence); err != nil {
-				return 0, err
-			}
-			or.rd = rd
-			break
-		}
-
-	case io.SeekCurrent:
-		if or.rd != nil {
-			n, err := or.rd.Seek(offset, whence)
-			if err != nil {
-				return 0, err
-			}
-			diff := n - or.off
-			or.off += diff
-			offset -= diff
-		}
-
-		if offset == 0 {
-			break
-		}
-
-		or.objoff++
-		for or.objoff < len(chunks) {
-			clen := int64(chunks[or.objoff].Length)
-			if offset > clen {
-				or.off += clen
-				offset -= clen
-			}
-			or.off += offset
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			if _, err := rd.Seek(offset, whence); err != nil {
-				return 0, err
-			}
-			or.rd = rd
-		}
-	}
-
-	return or.off, nil
+	panic("FOOBARED")
 }
