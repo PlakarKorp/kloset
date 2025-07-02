@@ -10,11 +10,11 @@ import (
 )
 
 func init() {
-	storage.Register(func(ctx context.Context, name string, conf map[string]string) (storage.Store, error) {
+	storage.Register("fake+state", 0, func(ctx context.Context, name string, conf map[string]string) (storage.Store, error) {
 		return &store{
 			states: make(map[objects.MAC][]byte),
 		}, nil
-	}, 0, "fake+state")
+	})
 }
 
 type store struct {
