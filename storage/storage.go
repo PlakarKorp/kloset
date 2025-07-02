@@ -148,11 +148,9 @@ type StoreFn func(context.Context, string, map[string]string) (Store, error)
 
 var backends = location.New[StoreFn]("fs")
 
-func Register(backend StoreFn, flags location.Flags, names ...string) {
-	for _, name := range names {
-		if !backends.Register(name, backend, flags) {
-			log.Fatalf("backend '%s' registered twice", name)
-		}
+func Register(name string, flags location.Flags, backend StoreFn) {
+	if !backends.Register(name, backend, flags) {
+		log.Fatalf("backend '%s' registered twice", name)
 	}
 }
 
