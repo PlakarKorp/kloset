@@ -695,24 +695,21 @@ func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) 
 	}
 	lengthDelta := uint32(uint64(overhead) - offsetDelta)
 
-	rd, err := r.store.GetPackfileBlob(loc.Packfile, offset+uint64(storage.STORAGE_HEADER_SIZE)-offsetDelta, length+uint32(offsetDelta)+lengthDelta)
+	realLen := length + uint32(offsetDelta) + lengthDelta
+	rd, err := r.store.GetPackfileBlob(loc.Packfile, offset+uint64(storage.STORAGE_HEADER_SIZE)-offsetDelta, realLen)
 	if err != nil {
 		return nil, err
 	}
 
 	// discard the first offsetDelta bytes
-	_, err = io.ReadFull(rd, make([]byte, offsetDelta))
+	data := make([]byte, realLen)
+	_, err = io.ReadFull(rd, data)
 	if err != nil {
 		return nil, err
 	}
 
-	data, err := io.ReadAll(rd)
-	if err != nil {
-		return nil, err
-	}
-
-	// discard the last lengthDelta bytes
-	data = data[:length]
+	// discard the first offsetDelta bytes and last lengthDelta bytes
+	data = data[offsetDelta : length+uint32(offsetDelta)]
 
 	decoded, err := r.decodeBuffer(data)
 	if err != nil {
