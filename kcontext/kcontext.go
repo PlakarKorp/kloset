@@ -27,18 +27,8 @@ type KContext struct {
 	Stdout io.Writer `msgpack:"-"`
 	Stderr io.Writer `msgpack:"-"`
 
-	Username    string
-	Hostname    string
-	CommandLine string
-	MachineID   string
 	KeyFromFile string
 	CacheDir    string
-
-	OperatingSystem string
-	Architecture    string
-	ProcessID       int
-
-	Client string
 
 	CWD            string
 	MaxConcurrency int
