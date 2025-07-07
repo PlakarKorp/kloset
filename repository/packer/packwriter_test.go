@@ -13,6 +13,7 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
 )
 
 func TestNewBlobFromBytes(t *testing.T) {
@@ -712,20 +713,17 @@ func TestPackWriter_ConcurrentInternalAccess(t *testing.T) {
 	encoder := func(r io.Reader) (io.Reader, error) { return r, nil }
 	hasher := func() hash.Hash { return sha256.New() }
 	putter := func(pw *PackWriter) error {
-		done := make(chan error, 3)
+		g := new(errgroup.Group)
 		for i := 0; i < 3; i++ {
-			go func(index int) {
+			index := i // Capture loop variable
+			g.Go(func() error {
 				var buf bytes.Buffer
-				err := pw.writeAndSum(&buf, uint32(index))
-				done <- err
-			}(i)
+				return pw.writeAndSum(&buf, uint32(index))
+			})
 		}
 
-		for i := 0; i < 3; i++ {
-			err := <-done
-			if err != nil {
-				return err
-			}
+		if err := g.Wait(); err != nil {
+			return err
 		}
 
 		mac := objects.RandomMAC()
