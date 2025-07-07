@@ -92,7 +92,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			rd, err := snap.NewReader(entrypath)
 			if err != nil {
-				err := fmt.Errorf("failed to get a reader to file %q: %w", entrypath, err)
+				err := fmt.Errorf("failed to open file in the snapshot %q: %w", entrypath, err)
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 				return nil
 			}
