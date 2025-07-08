@@ -6,6 +6,7 @@ import (
 	"io"
 	"iter"
 	"strings"
+	"time"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
@@ -47,6 +48,25 @@ func LogicalSize(repo *repository.Repository) (int, int64, error) {
 	}
 
 	return nSnapshots, totalSize, nil
+}
+
+func NSnapshotsPerDay(repo *repository.Repository, ndays int) ([]int, error) {
+	nSnapshotsPerDay := make([]int, ndays)
+	for snapshotID := range repo.ListSnapshots() {
+		snap, err := Load(repo, snapshotID)
+		if err != nil {
+			continue
+		}
+		if !snap.Header.Timestamp.Before(repo.Configuration().Timestamp.AddDate(0, 0, -ndays)) {
+			dayIndex := time.Since(snap.Header.Timestamp).Hours() / 24
+			if dayIndex < float64(ndays) {
+				nSnapshotsPerDay[(ndays-1)-int(dayIndex)]++
+			}
+		}
+		snap.Close()
+	}
+
+	return nSnapshotsPerDay, nil
 }
 
 func Load(repo *repository.Repository, Identifier objects.MAC) (*Snapshot, error) {
