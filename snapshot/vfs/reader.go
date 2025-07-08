@@ -33,7 +33,7 @@ func (or *ObjectReader) Read(p []byte) (int, error) {
 			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
 				or.object.Chunks[or.objoff].ContentMAC)
 			if err != nil {
-				return -1, err
+				return 0, err
 			}
 			or.rd = rd
 		}
