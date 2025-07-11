@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"errors"
+	"fmt"
 	"io"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -17,9 +18,13 @@ type ObjectReader struct {
 	objoff int
 	off    int64
 	rd     io.ReadSeeker
+	buf    []byte
+	read   int
+	copied int
 }
 
 func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64) *ObjectReader {
+	fmt.Printf("Object has %d chunks\n", len(object.Chunks))
 	return &ObjectReader{
 		object: object,
 		repo:   repo,
@@ -28,6 +33,51 @@ func NewObjectReader(repo *repository.Repository, object *objects.Object, size i
 }
 
 func (or *ObjectReader) Read(p []byte) (int, error) {
+	var pOffset int
+
+	// We still have an half consummed buf flush it.
+	if len(or.buf) > 0 {
+		n := copy(p, or.buf)
+		or.copied += n
+
+		pOffset += n
+		if n < len(or.buf) {
+			or.buf = or.buf[n:]
+			return pOffset, nil
+		}
+
+		or.buf = nil
+		or.objoff++
+	}
+
+	for or.objoff < len(or.object.Chunks) {
+		for data, err := range or.repo.GetObjectContent(or.object, or.objoff) {
+			or.read += len(data)
+			if err != nil {
+				return 0, err
+			}
+
+			n := copy(p[pOffset:], data)
+			or.copied += n
+			or.buf = data[n:]
+			pOffset += n
+			if n < len(data) {
+				// Should update or.off here to handle Seek
+				//or.off += int64(n)
+				return pOffset, nil
+			}
+
+			or.objoff++
+			// ???
+			//or.off += int64(n)
+		}
+	}
+
+	fmt.Printf("Exiting with eof at %d with off %d  remaining data %d, copied %d read %d \n", or.objoff, pOffset, len(or.buf), or.copied, or.read)
+	return pOffset, io.EOF
+}
+
+func (or *ObjectReader) Read2(p []byte) (int, error) {
 	for or.objoff < len(or.object.Chunks) {
 		if or.rd == nil {
 			rd, err := or.repo.GetBlob(resources.RT_CHUNK,

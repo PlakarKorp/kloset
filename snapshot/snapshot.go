@@ -125,7 +125,7 @@ func (snap *Snapshot) LookupObject(mac objects.MAC) (*objects.Object, error) {
 	return objects.NewObjectFromBytes(buffer)
 }
 
-func getPackfileForBlobWithError(snap *Snapshot, res resources.Type, mac objects.MAC) (objects.MAC, error) {
+func GetPackfileForBlobWithError(snap *Snapshot, res resources.Type, mac objects.MAC) (objects.MAC, error) {
 	packfile, exists, err := snap.repository.GetPackfileForBlob(res, mac)
 	if err != nil {
 		return objects.MAC{}, fmt.Errorf("Error %s while trying to locate packfile for blob %x of type %s", err, mac, res)
@@ -143,17 +143,17 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 	}
 
 	return func(yield func(objects.MAC, error) bool) {
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_SNAPSHOT, snap.Header.Identifier)) {
+		if !yield(GetPackfileForBlobWithError(snap, resources.RT_SNAPSHOT, snap.Header.Identifier)) {
 			return
 		}
 
 		if snap.Header.Identity.Identifier != uuid.Nil {
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_SIGNATURE, snap.Header.Identifier)) {
+			if !yield(GetPackfileForBlobWithError(snap, resources.RT_SIGNATURE, snap.Header.Identifier)) {
 				return
 			}
 		}
 
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_BTREE, snap.Header.Sources[0].VFS.Root)) {
+		if !yield(GetPackfileForBlobWithError(snap, resources.RT_VFS_BTREE, snap.Header.Sources[0].VFS.Root)) {
 			return
 		}
 
@@ -161,12 +161,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		fsIter := pvfs.IterNodes()
 		for fsIter.Next() {
 			macNode, node := fsIter.Current()
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_NODE, macNode)) {
+			if !yield(GetPackfileForBlobWithError(snap, resources.RT_VFS_NODE, macNode)) {
 				return
 			}
 
 			for _, entry := range node.Values {
-				if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_ENTRY, entry)) {
+				if !yield(GetPackfileForBlobWithError(snap, resources.RT_VFS_ENTRY, entry)) {
 					return
 				}
 
@@ -178,12 +178,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				}
 
 				if vfsEntry.HasObject() {
-					if !yield(getPackfileForBlobWithError(snap, resources.RT_OBJECT, vfsEntry.Object)) {
+					if !yield(GetPackfileForBlobWithError(snap, resources.RT_OBJECT, vfsEntry.Object)) {
 						return
 					}
 
 					for _, chunk := range vfsEntry.ResolvedObject.Chunks {
-						if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
+						if !yield(GetPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
 							return
 						}
 					}
@@ -194,42 +194,42 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 
 		}
 
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_ERROR_BTREE, snap.Header.Sources[0].VFS.Errors)) {
+		if !yield(GetPackfileForBlobWithError(snap, resources.RT_ERROR_BTREE, snap.Header.Sources[0].VFS.Errors)) {
 			return
 		}
 		errIter := pvfs.IterErrorNodes()
 		for errIter.Next() {
 			macNode, node := errIter.Current()
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_ERROR_NODE, macNode)) {
+			if !yield(GetPackfileForBlobWithError(snap, resources.RT_ERROR_NODE, macNode)) {
 				return
 			}
 
 			for _, error := range node.Values {
-				if !yield(getPackfileForBlobWithError(snap, resources.RT_ERROR_ENTRY, error)) {
+				if !yield(GetPackfileForBlobWithError(snap, resources.RT_ERROR_ENTRY, error)) {
 					return
 				}
 			}
 		}
 
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_BTREE, snap.Header.Sources[0].VFS.Xattrs)) {
+		if !yield(GetPackfileForBlobWithError(snap, resources.RT_XATTR_BTREE, snap.Header.Sources[0].VFS.Xattrs)) {
 			return
 		}
 		xattrIter := pvfs.XattrNodes()
 		for xattrIter.Next() {
 			mac, node := xattrIter.Current()
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_NODE, mac)) {
+			if !yield(GetPackfileForBlobWithError(snap, resources.RT_XATTR_NODE, mac)) {
 				return
 			}
 
 			for _, error := range node.Values {
-				if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_ENTRY, error)) {
+				if !yield(GetPackfileForBlobWithError(snap, resources.RT_XATTR_ENTRY, error)) {
 					return
 				}
 			}
 		}
 
 		// Lastly going over the indexes.
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)) {
+		if !yield(GetPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)) {
 			return
 		}
 		rd, err := snap.repository.GetBlob(resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)
@@ -250,7 +250,7 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		indexIter := tree.IterDFS()
 		for indexIter.Next() {
 			mac, _ := indexIter.Current()
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+			if !yield(GetPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
 				return
 			}
 		}

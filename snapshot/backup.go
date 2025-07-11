@@ -119,7 +119,7 @@ func (snapshot *Builder) skipExcludedPathname(options *BackupOptions, record *im
 	return doExclude
 }
 
-func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
+func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
 	switch {
 	case record.Error != nil:
 		record := record.Error
@@ -151,7 +151,7 @@ func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.Sc
 		}
 
 		snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
-		if err := snap.processFileRecord(backupCtx, record, chunker); err != nil {
+		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
 			snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
 			backupCtx.recordError(record.Pathname, err)
 		} else {
@@ -193,9 +193,9 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 	snap.Event(startEvent)
 
 	var stats scanStats
-	for _, cker := range ckers {
+	for i, cker := range ckers {
 		wg.Add(1)
-		go func(ck *chunkers.Chunker) {
+		go func(ck *chunkers.Chunker, idx int) {
 			defer wg.Done()
 			for {
 				select {
@@ -214,10 +214,10 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						return
 					}
 
-					snap.processRecord(backupCtx, record, &stats, ck)
+					snap.processRecord(idx, backupCtx, record, &stats, ck)
 				}
 			}
-		}(cker)
+		}(cker, i)
 	}
 	wg.Wait()
 
@@ -374,7 +374,7 @@ func entropy(data []byte) (float64, [256]float64) {
 	return entropy, freq
 }
 
-func (snap *Builder) chunkify(chk *chunkers.Chunker, pathname string, rd io.Reader) (*objects.Object, int64, error) {
+func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader) (*objects.Object, int64, error) {
 	object := objects.NewObject()
 
 	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
@@ -419,7 +419,7 @@ func (snap *Builder) chunkify(chk *chunkers.Chunker, pathname string, rd io.Read
 		totalEntropy += chunk.Entropy * float64(len(data))
 		totalDataSize += int64(len(data))
 
-		return snap.repository.PutBlobIfNotExists(resources.RT_CHUNK, chunk.ContentMAC, data)
+		return snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_CHUNK, chunk.ContentMAC, data)
 	}
 
 	chk.Reset(rd)
@@ -585,7 +585,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
 	vfsCache := backupCtx.vfsCache
 
 	var err error
@@ -637,7 +637,7 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 
 		if object == nil || !snap.repository.BlobExists(resources.RT_OBJECT, objectMAC) {
 			var dataSize int64
-			object, dataSize, err = snap.chunkify(chunker, record.Pathname, record.Reader)
+			object, dataSize, err = snap.chunkify(idx, chunker, record.Pathname, record.Reader)
 			if err != nil {
 				return err
 			}
@@ -657,7 +657,7 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 				}
 			}
 
-			if err := snap.repository.PutBlob(resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+			if err := snap.repository.PutBlobWithHint(idx, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
 				return err
 			}
 		}
@@ -681,7 +681,7 @@ func (snap *Builder) processFileRecord(backupCtx *BackupContext, record *importe
 		}
 
 		fileEntryMAC := snap.repository.ComputeMAC(serialized)
-		if err := snap.repository.PutBlob(resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
+		if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
 			return err
 		}
 
