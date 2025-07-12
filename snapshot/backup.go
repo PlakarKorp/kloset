@@ -211,7 +211,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						if record.Record != nil {
 							record.Record.Close()
 						}
-						return
+						continue
 					}
 
 					snap.processRecord(backupCtx, record, &stats, ck)

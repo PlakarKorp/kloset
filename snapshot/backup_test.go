@@ -40,6 +40,30 @@ func TestSimpleBackup(t *testing.T) {
 	require.Nil(t, fp)
 }
 
+func TestBackupWithExcludes(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+
+	files := []ptesting.MockFile{
+		ptesting.NewMockFile("hello0", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello1", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello2", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello3", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello4", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello5", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello6", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello7", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello8", 0644, "hello world!\n"),
+		ptesting.NewMockFile("hello9", 0644, "hello world!\n"),
+	}
+
+	snap := ptesting.GenerateSnapshot(t, repo, files, ptesting.WithExcludes([]string{
+		"/hello0", "/hello2", "/hello4", "/hello8",
+	}))
+
+	summary := &snap.Header.GetSource(0).Summary
+	require.Equal(t, summary.Directory.Files, uint64(6))
+}
+
 func errorGenerator(ch chan<- *importer.ScanResult) {
 	ch <- &importer.ScanResult{
 		Record: &importer.ScanRecord{
