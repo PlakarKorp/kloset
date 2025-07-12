@@ -12,6 +12,7 @@ import (
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
+	"github.com/gobwas/glob"
 	"github.com/stretchr/testify/require"
 )
 
@@ -75,8 +76,9 @@ func (m *MockFile) ScanResult() *importer.ScanResult {
 }
 
 type testingOptions struct {
-	name string
-	gen  func(chan<- *importer.ScanResult)
+	name     string
+	excludes []string
+	gen      func(chan<- *importer.ScanResult)
 }
 
 func newTestingOptions() *testingOptions {
@@ -90,6 +92,12 @@ type TestingOptions func(o *testingOptions)
 func WithName(name string) TestingOptions {
 	return func(o *testingOptions) {
 		o.name = name
+	}
+}
+
+func WithExcludes(excludes []string) TestingOptions {
+	return func(o *testingOptions) {
+		o.excludes = excludes
 	}
 }
 
@@ -140,7 +148,16 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 		imp.(*MockImporter).SetFiles(files)
 	}
 
-	err = builder.Backup(imp, &snapshot.BackupOptions{Name: o.name, MaxConcurrency: 1})
+	var excludes []glob.Glob
+	for i := range o.excludes {
+		excludes = append(excludes, glob.MustCompile(o.excludes[i]))
+	}
+
+	err = builder.Backup(imp, &snapshot.BackupOptions{
+		Name:           o.name,
+		MaxConcurrency: 1,
+		Excludes:       excludes,
+	})
 	require.NoError(t, err)
 
 	err = builder.Repository().RebuildState()
