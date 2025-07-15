@@ -12,7 +12,6 @@ import (
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
-	"github.com/gobwas/glob"
 	"github.com/stretchr/testify/require"
 )
 
@@ -148,15 +147,10 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 		imp.(*MockImporter).SetFiles(files)
 	}
 
-	var excludes []glob.Glob
-	for i := range o.excludes {
-		excludes = append(excludes, glob.MustCompile(o.excludes[i]))
-	}
-
 	err = builder.Backup(imp, &snapshot.BackupOptions{
 		Name:           o.name,
 		MaxConcurrency: 1,
-		Excludes:       excludes,
+		Excludes:       o.excludes,
 	})
 	require.NoError(t, err)
 
