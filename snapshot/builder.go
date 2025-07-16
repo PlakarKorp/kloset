@@ -6,6 +6,7 @@ import (
 	"os"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -96,6 +97,68 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, er
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
+	return snap, nil
+}
+
+func (src *Snapshot) Fork() (*Builder, error) {
+
+	identifier := objects.RandomMAC()
+	scanCache, err := src.repository.AppContext().GetCache().Scan(identifier)
+	if err != nil {
+		return nil, err
+	}
+
+	var packingStrategy repository.RepositoryType
+	if strings.HasPrefix(src.repository.Location(), "ptar:") {
+		packingStrategy = repository.PtarType
+	} else {
+		packingStrategy = repository.DefaultType
+	}
+
+	snap := &Builder{
+		scanCache:  scanCache,
+		deltaCache: scanCache,
+
+		Header: header.NewHeader("default", identifier),
+	}
+
+	snap.Header.Timestamp = time.Now()
+	snap.Header.Name = src.Header.Name
+	snap.Header.Category = src.Header.Category
+	snap.Header.Environment = src.Header.Environment
+	snap.Header.Perimeter = src.Header.Perimeter
+	snap.Header.Job = src.Header.Job
+	snap.Header.Replicas = src.Header.Replicas
+
+	snap.Header.Classifications = make([]header.Classification, len(src.Header.Classifications))
+	copy(snap.Header.Classifications, src.Header.Classifications)
+
+	snap.Header.Tags = make([]string, len(src.Header.Tags))
+	copy(snap.Header.Tags, src.Header.Tags)
+
+	snap.Header.Context = make([]header.KeyValue, len(src.Header.Context))
+
+	snap.Header.Sources = make([]header.Source, len(src.Header.Sources))
+	copy(snap.Header.Sources, src.Header.Sources)
+
+	snap.repository = src.repository.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy)
+
+	if snap.AppContext().Identity != uuid.Nil {
+		snap.Header.Identity.Identifier = snap.AppContext().Identity
+		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
+	}
+	snap.Header.SetContext("Hostname", snap.AppContext().Hostname)
+	snap.Header.SetContext("Username", snap.AppContext().Username)
+	snap.Header.SetContext("OperatingSystem", snap.AppContext().OperatingSystem)
+	snap.Header.SetContext("MachineID", snap.AppContext().MachineID)
+	snap.Header.SetContext("CommandLine", snap.AppContext().CommandLine)
+	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", snap.AppContext().ProcessID))
+	snap.Header.SetContext("Architecture", snap.AppContext().Architecture)
+	snap.Header.SetContext("NumCPU", fmt.Sprintf("%d", runtime.NumCPU()))
+	snap.Header.SetContext("MaxProcs", fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
+	snap.Header.SetContext("Client", snap.AppContext().Client)
+
+	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
 	return snap, nil
 }
 
