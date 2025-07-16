@@ -32,6 +32,7 @@ type BackupIndexes struct {
 
 type BackupContext struct {
 	imp            importer.Importer
+	excludes       []glob.Glob
 	maxConcurrency uint64
 
 	scanCache *caching.ScanCache
@@ -56,7 +57,7 @@ type BackupOptions struct {
 	MaxConcurrency  uint64
 	Name            string
 	Tags            []string
-	Excludes        []glob.Glob
+	Excludes        []string
 	NoCheckpoint    bool
 	NoCommit        bool
 	CleanupVFSCache bool
@@ -96,7 +97,7 @@ func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC obje
 	return bc.indexes[0].xattridx.Insert(xattr.ToPath(), serialized)
 }
 
-func (snapshot *Builder) skipExcludedPathname(options *BackupOptions, record *importer.ScanResult) bool {
+func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *importer.ScanResult) bool {
 	var pathname string
 	switch {
 	case record.Record != nil:
@@ -110,7 +111,7 @@ func (snapshot *Builder) skipExcludedPathname(options *BackupOptions, record *im
 	}
 
 	doExclude := false
-	for _, exclude := range options.Excludes {
+	for _, exclude := range backupCtx.excludes {
 		if exclude.Match(pathname) {
 			doExclude = true
 			break
@@ -169,7 +170,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	}
 }
 
-func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOptions) error {
+func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	var ckers []*chunkers.Chunker
 	for range backupCtx.maxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -207,11 +208,11 @@ func (snap *Builder) importerJob(backupCtx *BackupContext, options *BackupOption
 						return
 					}
 
-					if snap.skipExcludedPathname(options, record) {
+					if snap.skipExcludedPathname(backupCtx, record) {
 						if record.Record != nil {
 							record.Record.Close()
 						}
-						return
+						continue
 					}
 
 					snap.processRecord(idx, backupCtx, record, &stats, ck)
@@ -330,7 +331,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	/* importer */
-	if err := snap.importerJob(backupCtx, options); err != nil {
+	if err := snap.importerJob(backupCtx); err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
@@ -555,7 +556,6 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 }
 
 func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
-
 	maxConcurrency := backupOpts.MaxConcurrency
 	if maxConcurrency == 0 {
 		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
@@ -574,6 +574,16 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan bool),
 		stateId:        snap.Header.Identifier,
+	}
+
+	for i := range backupOpts.Excludes {
+		g, err := glob.Compile(backupOpts.Excludes[i])
+		if err != nil {
+			err = fmt.Errorf("failed to compile exclude pattern %s: %w",
+				backupOpts.Excludes[i], err)
+			return nil, err
+		}
+		backupCtx.excludes = append(backupCtx.excludes, g)
 	}
 
 	if bi, err := snap.makeBackupIndexes(); err != nil {

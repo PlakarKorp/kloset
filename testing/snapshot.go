@@ -75,8 +75,9 @@ func (m *MockFile) ScanResult() *importer.ScanResult {
 }
 
 type testingOptions struct {
-	name string
-	gen  func(chan<- *importer.ScanResult)
+	name     string
+	excludes []string
+	gen      func(chan<- *importer.ScanResult)
 }
 
 func newTestingOptions() *testingOptions {
@@ -90,6 +91,12 @@ type TestingOptions func(o *testingOptions)
 func WithName(name string) TestingOptions {
 	return func(o *testingOptions) {
 		o.name = name
+	}
+}
+
+func WithExcludes(excludes []string) TestingOptions {
+	return func(o *testingOptions) {
+		o.excludes = excludes
 	}
 }
 
@@ -140,7 +147,11 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 		imp.(*MockImporter).SetFiles(files)
 	}
 
-	err = builder.Backup(imp, &snapshot.BackupOptions{Name: o.name, MaxConcurrency: 1})
+	err = builder.Backup(imp, &snapshot.BackupOptions{
+		Name:           o.name,
+		MaxConcurrency: 1,
+		Excludes:       o.excludes,
+	})
 	require.NoError(t, err)
 
 	err = builder.Repository().RebuildState()
