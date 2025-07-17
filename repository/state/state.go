@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -701,7 +702,8 @@ func (ls *LocalState) DelPackfile(packfile objects.MAC) error {
 func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
 	return func(yield func(objects.MAC) bool) {
 		for st, _ := range ls.cache.GetPackfiles() {
-			if !yield(st) {
+			log.Println("yielding", string(st))
+			if !yield(objects.MAC(st)) {
 				return
 			}
 		}

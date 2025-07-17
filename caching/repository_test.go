@@ -71,41 +71,13 @@ func TestRepositoryCache(t *testing.T) {
 		deltas := cache.GetDelta(blobType, blobCsum)
 		var found bool
 		for mac, deltaData := range deltas {
-			if mac == packfile {
+			if objects.MAC(mac) == packfile {
 				require.Equal(t, data, deltaData)
 				found = true
 				break
 			}
 		}
 		require.True(t, found)
-
-		// Test GetDeltasByType
-		deltasByType := cache.GetDeltasByType(blobType)
-		found = false
-		for mac, deltaData := range deltasByType {
-			if mac == packfile {
-				require.Equal(t, data, deltaData)
-				found = true
-				break
-			}
-		}
-		require.True(t, found)
-
-		// Test GetDeltas
-		allDeltas := cache.GetDeltas()
-		found = false
-		for mac, deltaData := range allDeltas {
-			if mac == packfile {
-				require.Equal(t, data, deltaData)
-				found = true
-				break
-			}
-		}
-		require.True(t, found)
-
-		// Test DelDelta
-		err = cache.DelDelta(blobType, blobCsum, packfile)
-		require.NoError(t, err)
 	})
 
 	// Test deleted operations

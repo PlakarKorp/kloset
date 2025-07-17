@@ -1,4 +1,4 @@
-package caching
+package pebble
 
 import (
 	"testing"
@@ -17,49 +17,45 @@ func TestPebbleCache(t *testing.T) {
 
 	// Test put operation
 	t.Run("Put Operation", func(t *testing.T) {
-		prefix := "test_prefix"
-		key := "test_key"
+		key := []byte("test:prefix")
 		data := []byte("test data")
 
 		// Put data into the cache
-		err := cache.put(prefix, key, data)
+		err := cache.Put(key, data)
 		require.NoError(t, err)
 	})
 
 	// Test has operation
 	t.Run("Has Operation", func(t *testing.T) {
-		prefix := "test_prefix"
-		key := "test_key"
+		key := []byte("test:prefix")
 
 		// Check if the key exists
-		exists, err := cache.has(prefix, key)
+		exists, err := cache.Has(key)
 		require.NoError(t, err)
 		require.True(t, exists)
 	})
 
 	// Test get operation
 	t.Run("Get Operation", func(t *testing.T) {
-		prefix := "test_prefix"
-		key := "test_key"
+		key := []byte("test:prefix")
 		expectedData := []byte("test data")
 
 		// Get data from the cache
-		retrievedData, err := cache.get(prefix, key)
+		retrievedData, err := cache.Get(key)
 		require.NoError(t, err)
 		require.Equal(t, expectedData, retrievedData)
 	})
 
 	// Test delete operation
 	t.Run("Delete Operation", func(t *testing.T) {
-		prefix := "test_prefix"
-		key := "test_key"
+		key := []byte("test:prefix")
 
 		// Delete the key from the cache
-		err := cache.delete(prefix, key)
+		err := cache.Delete(key)
 		require.NoError(t, err)
 
 		// Verify the key is deleted
-		exists, err := cache.has(prefix, key)
+		exists, err := cache.Has(key)
 		require.NoError(t, err)
 		require.False(t, exists)
 	})
