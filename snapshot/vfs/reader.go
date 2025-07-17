@@ -1,8 +1,7 @@
 package vfs
 
 import (
-	"errors"
-	"fmt"
+	"bytes"
 	"io"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -18,91 +17,65 @@ type ObjectReader struct {
 	objoff int
 	off    int64
 	rd     io.ReadSeeker
-	buf    []byte
-	read   int
-	copied int
+
+	dirty          bool
+	prefetchBuffer bytes.Buffer
 }
 
 func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64) *ObjectReader {
-	fmt.Printf("Object has %d chunks\n", len(object.Chunks))
 	return &ObjectReader{
-		object: object,
-		repo:   repo,
-		size:   size,
+		object:         object,
+		repo:           repo,
+		size:           size,
+		dirty:          true,
+		prefetchBuffer: bytes.Buffer{},
 	}
+}
+
+func (or *ObjectReader) prefetch(size int64) error {
+
+	if or.prefetchBuffer.Len() == 0 {
+		or.dirty = true
+	}
+
+	if !or.dirty {
+		return nil
+	}
+
+	if or.objoff >= len(or.object.Chunks) {
+		return nil
+	}
+
+	for data, err := range or.repo.GetObjectContent(or.object, or.objoff) {
+		if err != nil {
+			return err
+		}
+
+		if _, err := or.prefetchBuffer.Write(data); err != nil {
+			return err
+		}
+		or.objoff++
+
+		if or.prefetchBuffer.Len() >= int(size) {
+			break
+		}
+	}
+
+	or.dirty = false
+	return nil
 }
 
 func (or *ObjectReader) Read(p []byte) (int, error) {
-	var pOffset int
-
-	// We still have an half consummed buf flush it.
-	if len(or.buf) > 0 {
-		n := copy(p, or.buf)
-		or.copied += n
-
-		pOffset += n
-		if n < len(or.buf) {
-			or.buf = or.buf[n:]
-			return pOffset, nil
-		}
-
-		or.buf = nil
-		or.objoff++
+	if err := or.prefetch(8 * 1024 * 1024); err != nil {
+		return 0, err
 	}
-
-	for or.objoff < len(or.object.Chunks) {
-		for data, err := range or.repo.GetObjectContent(or.object, or.objoff) {
-			or.read += len(data)
-			if err != nil {
-				return 0, err
-			}
-
-			n := copy(p[pOffset:], data)
-			or.copied += n
-			or.buf = data[n:]
-			pOffset += n
-			if n < len(data) {
-				// Should update or.off here to handle Seek
-				//or.off += int64(n)
-				return pOffset, nil
-			}
-
-			or.objoff++
-			// ???
-			//or.off += int64(n)
-		}
-	}
-
-	fmt.Printf("Exiting with eof at %d with off %d  remaining data %d, copied %d read %d \n", or.objoff, pOffset, len(or.buf), or.copied, or.read)
-	return pOffset, io.EOF
-}
-
-func (or *ObjectReader) Read2(p []byte) (int, error) {
-	for or.objoff < len(or.object.Chunks) {
-		if or.rd == nil {
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				or.object.Chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			or.rd = rd
-		}
-
-		n, err := or.rd.Read(p)
-		if errors.Is(err, io.EOF) {
-			or.objoff++
-			or.rd = nil
-			continue
-		}
-		or.off += int64(n)
-		return n, err
-	}
-
-	return 0, io.EOF
+	return or.prefetchBuffer.Read(p)
 }
 
 func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 	chunks := or.object.Chunks
+
+	savedOffset := or.off
 
 	switch whence {
 	case io.SeekStart:
@@ -184,6 +157,10 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 			}
 			or.rd = rd
 		}
+	}
+
+	if savedOffset != or.off {
+		or.dirty = true
 	}
 
 	return or.off, nil

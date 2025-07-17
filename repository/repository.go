@@ -842,14 +842,13 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int) iter.Seq2[
 				}
 			}
 
-			currChks = append(currChks, loc)
-
 			if currPackfile == objects.NilMac {
 				currPackfile = loc.Packfile
 				offset = loc.Offset
 				size = loc.Length
 				nextOffset = uint64(loc.Length) + loc.Offset
 				leftOver = true
+				currChks = append(currChks, loc)
 				continue
 			}
 
@@ -865,7 +864,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int) iter.Seq2[
 
 				currentOffset := 0
 				for _, l := range currChks {
-					chunkData := data[currentOffset:l.Length]
+					chunkData := data[currentOffset : currentOffset+int(l.Length)]
 					currentOffset += int(l.Length)
 
 					decodedChunk, err := r.decodeBuffer(chunkData)
@@ -880,17 +879,20 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int) iter.Seq2[
 					}
 				}
 
-				leftOver = false
+				leftOver = true
 				currPackfile = loc.Packfile
 				offset = loc.Offset
 				size = loc.Length
 				nextOffset = uint64(loc.Length) + loc.Offset
 				currChks = nil
+				currChks = append(currChks, loc)
 				continue
 			}
 
 			nextOffset = loc.Offset + uint64(loc.Length)
 			size += loc.Length
+
+			currChks = append(currChks, loc)
 		}
 
 		if leftOver {
@@ -905,7 +907,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int) iter.Seq2[
 
 			currentOffset := 0
 			for _, l := range currChks {
-				chunkData := data[currentOffset:l.Length]
+				chunkData := data[currentOffset : currentOffset+int(l.Length)]
 				currentOffset += int(l.Length)
 
 				decodedChunk, err := r.decodeBuffer(chunkData)
