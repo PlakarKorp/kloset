@@ -672,10 +672,10 @@ func randomShift(n uint32) (uint64, error) {
 	return uint64(r.Int64()), nil
 }
 
-func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) {
+func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "GetPackfileBlob(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
+		r.Logger().Trace("repository", "GetPackfileRange(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
 	}()
 
 	offset := loc.Offset
@@ -709,7 +709,19 @@ func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) 
 	}
 
 	// discard the first offsetDelta bytes and last lengthDelta bytes
-	data = data[offsetDelta : length+uint32(offsetDelta)]
+	return data[offsetDelta : length+uint32(offsetDelta)], nil
+}
+
+func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "GetPackfileBlob(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
+	}()
+
+	data, err := r.GetPackfileRange(loc)
+	if err != nil {
+		return nil, err
+	}
 
 	decoded, err := r.decodeBuffer(data)
 	if err != nil {
@@ -806,6 +818,117 @@ func (r *Repository) GetPackfileForBlob(Type resources.Type, mac objects.MAC) (o
 	packfile, exists, err := r.state.GetSubpartForBlob(Type, mac)
 
 	return packfile.Packfile, exists, err
+}
+
+func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize uint32) iter.Seq2[[]byte, error] {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "GetObjectContent(%x, off=%d): %s", obj.ContentMAC, start, time.Since(t0))
+	}()
+
+	return func(yield func([]byte, error) bool) {
+		var currPackfile objects.MAC
+		var offset, nextOffset uint64
+		var size uint32
+		var leftOver bool
+		var currChks []state.Location
+
+		for i := start; i < len(obj.Chunks); i++ {
+			loc, exists, err := r.state.GetSubpartForBlob(resources.RT_CHUNK, obj.Chunks[i].ContentMAC)
+			if err != nil {
+				if !yield(nil, err) {
+					return
+				}
+			}
+
+			if !exists {
+				if !yield(nil, ErrPackfileNotFound) {
+					return
+				}
+			}
+
+			if currPackfile == objects.NilMac {
+				currPackfile = loc.Packfile
+				offset = loc.Offset
+				size = loc.Length
+				nextOffset = uint64(loc.Length) + loc.Offset
+				leftOver = true
+				currChks = append(currChks, loc)
+				continue
+			}
+
+			if currPackfile != loc.Packfile || nextOffset != loc.Offset || size >= maxSize {
+				data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
+				if err != nil {
+					if !yield(nil, err) {
+						return
+					}
+				}
+
+				r.rBytes.Add(int64(size))
+
+				currentOffset := 0
+				for _, l := range currChks {
+					chunkData := data[currentOffset : currentOffset+int(l.Length)]
+					currentOffset += int(l.Length)
+
+					decodedChunk, err := r.decodeBuffer(chunkData)
+					if err != nil {
+						if !yield(nil, err) {
+							return
+						}
+					}
+
+					if !yield(decodedChunk, nil) {
+						return
+					}
+				}
+
+				leftOver = true
+				currPackfile = loc.Packfile
+				offset = loc.Offset
+				size = loc.Length
+				nextOffset = uint64(loc.Length) + loc.Offset
+				currChks = nil
+				currChks = append(currChks, loc)
+				continue
+			}
+
+			nextOffset = loc.Offset + uint64(loc.Length)
+			size += loc.Length
+
+			currChks = append(currChks, loc)
+		}
+
+		if leftOver {
+			data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
+			if err != nil {
+				if !yield(nil, err) {
+					return
+				}
+			}
+
+			r.rBytes.Add(int64(size))
+
+			currentOffset := 0
+			for _, l := range currChks {
+				chunkData := data[currentOffset : currentOffset+int(l.Length)]
+				currentOffset += int(l.Length)
+
+				decodedChunk, err := r.decodeBuffer(chunkData)
+				if err != nil {
+					if !yield(nil, err) {
+						return
+					}
+				}
+
+				if !yield(decodedChunk, nil) {
+					return
+				}
+			}
+		}
+
+	}
 }
 
 func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeker, error) {
