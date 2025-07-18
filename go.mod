@@ -14,7 +14,7 @@ require (
 	github.com/pierrec/lz4/v4 v4.1.22
 	github.com/pkg/sftp v1.13.9
 	github.com/stretchr/testify v1.10.0
-	github.com/tink-crypto/tink-go/v2 v2.3.0
+	github.com/tink-crypto/tink-go/v2 v2.4.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.40.0
