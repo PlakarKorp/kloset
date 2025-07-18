@@ -1,13 +1,15 @@
 package vfs
 
 import (
-	"errors"
+	"bytes"
 	"io"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
 )
+
+const prefetchSize = 20 * 1024 * 1024
 
 type ObjectReader struct {
 	object *objects.Object
@@ -17,42 +19,61 @@ type ObjectReader struct {
 	objoff int
 	off    int64
 	rd     io.ReadSeeker
+
+	dirty          bool
+	prefetchBuffer bytes.Buffer
 }
 
 func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64) *ObjectReader {
 	return &ObjectReader{
-		object: object,
-		repo:   repo,
-		size:   size,
+		object:         object,
+		repo:           repo,
+		size:           size,
+		dirty:          true,
+		prefetchBuffer: bytes.Buffer{},
 	}
 }
 
-func (or *ObjectReader) Read(p []byte) (int, error) {
-	for or.objoff < len(or.object.Chunks) {
-		if or.rd == nil {
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				or.object.Chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			or.rd = rd
-		}
+func (or *ObjectReader) prefetch() error {
 
-		n, err := or.rd.Read(p)
-		if errors.Is(err, io.EOF) {
-			or.objoff++
-			or.rd = nil
-			continue
-		}
-		or.off += int64(n)
-		return n, err
+	if or.prefetchBuffer.Len() == 0 {
+		or.dirty = true
 	}
 
-	return 0, io.EOF
+	if !or.dirty {
+		return nil
+	}
+
+	if or.objoff >= len(or.object.Chunks) {
+		return nil
+	}
+
+	for data, err := range or.repo.GetObjectContent(or.object, or.objoff, prefetchSize) {
+		if err != nil {
+			return err
+		}
+
+		if _, err := or.prefetchBuffer.Write(data); err != nil {
+			return err
+		}
+		or.objoff++
+	}
+
+	or.dirty = false
+	return nil
+}
+
+func (or *ObjectReader) Read(p []byte) (int, error) {
+	if err := or.prefetch(); err != nil {
+		return 0, err
+	}
+	return or.prefetchBuffer.Read(p)
 }
 
 func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 	chunks := or.object.Chunks
+
+	savedOffset := or.off
 
 	switch whence {
 	case io.SeekStart:
@@ -134,6 +155,10 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 			}
 			or.rd = rd
 		}
+	}
+
+	if savedOffset != or.off {
+		or.dirty = true
 	}
 
 	return or.off, nil
