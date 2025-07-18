@@ -125,7 +125,7 @@ func (mgr *platarPackerManager) InsertIfNotPresent(Type resources.Type, mac obje
 	return false, nil
 }
 
-func (mgr *platarPackerManager) Put(Type resources.Type, mac objects.MAC, data []byte) error {
+func (mgr *platarPackerManager) Put(_ int, Type resources.Type, mac objects.MAC, data []byte) error {
 	mgr.packerChan <- &PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: data}
 	return nil
 }
