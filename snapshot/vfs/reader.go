@@ -9,6 +9,8 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 )
 
+const prefetchSize = 20 * 1024 * 1024
+
 type ObjectReader struct {
 	object *objects.Object
 	repo   *repository.Repository
@@ -32,7 +34,7 @@ func NewObjectReader(repo *repository.Repository, object *objects.Object, size i
 	}
 }
 
-func (or *ObjectReader) prefetch(size int64) error {
+func (or *ObjectReader) prefetch() error {
 
 	if or.prefetchBuffer.Len() == 0 {
 		or.dirty = true
@@ -46,7 +48,7 @@ func (or *ObjectReader) prefetch(size int64) error {
 		return nil
 	}
 
-	for data, err := range or.repo.GetObjectContent(or.object, or.objoff) {
+	for data, err := range or.repo.GetObjectContent(or.object, or.objoff, prefetchSize) {
 		if err != nil {
 			return err
 		}
@@ -55,10 +57,6 @@ func (or *ObjectReader) prefetch(size int64) error {
 			return err
 		}
 		or.objoff++
-
-		if or.prefetchBuffer.Len() >= int(size) {
-			break
-		}
 	}
 
 	or.dirty = false
@@ -66,7 +64,7 @@ func (or *ObjectReader) prefetch(size int64) error {
 }
 
 func (or *ObjectReader) Read(p []byte) (int, error) {
-	if err := or.prefetch(8 * 1024 * 1024); err != nil {
+	if err := or.prefetch(); err != nil {
 		return 0, err
 	}
 	return or.prefetchBuffer.Read(p)

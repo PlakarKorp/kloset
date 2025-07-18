@@ -673,6 +673,11 @@ func randomShift(n uint32) (uint64, error) {
 }
 
 func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "GetPackfileRange(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
+	}()
+
 	offset := loc.Offset
 	length := loc.Length
 
@@ -815,7 +820,7 @@ func (r *Repository) GetPackfileForBlob(Type resources.Type, mac objects.MAC) (o
 	return packfile.Packfile, exists, err
 }
 
-func (r *Repository) GetObjectContent(obj *objects.Object, start int) iter.Seq2[[]byte, error] {
+func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize uint32) iter.Seq2[[]byte, error] {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetObjectContent(%x, off=%d): %s", obj.ContentMAC, start, time.Since(t0))
@@ -852,7 +857,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int) iter.Seq2[
 				continue
 			}
 
-			if currPackfile != loc.Packfile || nextOffset != loc.Offset {
+			if currPackfile != loc.Packfile || nextOffset != loc.Offset || size >= maxSize {
 				data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 				if err != nil {
 					if !yield(nil, err) {
