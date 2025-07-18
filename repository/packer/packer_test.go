@@ -121,7 +121,7 @@ func TestPackerManager_Put(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 		data := []byte("test data")
 
-		err := mgr.Put(resources.RT_CONFIG, mac, data)
+		err := mgr.Put(0, resources.RT_CONFIG, mac, data)
 		require.NoError(t, err)
 	})
 
@@ -130,7 +130,7 @@ func TestPackerManager_Put(t *testing.T) {
 			mac := objects.MAC{byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i)}
 			data := []byte("test data " + string(rune(i+'0')))
 
-			err := mgr.Put(resources.RT_CONFIG, mac, data)
+			err := mgr.Put(0, resources.RT_CONFIG, mac, data)
 			require.NoError(t, err)
 		}
 	})
@@ -163,7 +163,7 @@ func TestPackerManager_RunAndWait(t *testing.T) {
 			mac := objects.MAC{byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i)}
 			data := []byte("test data " + string(rune(i+'0')))
 
-			err := mgr.Put(resources.RT_CONFIG, mac, data)
+			err := mgr.Put(0, resources.RT_CONFIG, mac, data)
 			require.NoError(t, err)
 		}
 
@@ -203,7 +203,7 @@ func TestPackerManager_AddPadding(t *testing.T) {
 	mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 	data := []byte("test data")
 
-	err := mgr.Put(resources.RT_CONFIG, mac, data)
+	err := mgr.Put(0, resources.RT_CONFIG, mac, data)
 	require.NoError(t, err)
 
 	// Wait for completion
@@ -309,7 +309,7 @@ func TestPackerManager_Concurrency(t *testing.T) {
 					mac := objects.MAC{byte(goroutineID), byte(j), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
 					data := []byte("test data from goroutine " + string(rune(goroutineID+'0')) + " blob " + string(rune(j+'0')))
 
-					err := mgr.Put(resources.RT_CONFIG, mac, data)
+					err := mgr.Put(0, resources.RT_CONFIG, mac, data)
 					require.NoError(t, err)
 				}
 			}(i)
@@ -360,7 +360,7 @@ func TestPackerManager_ErrorHandling(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 		data := []byte("test data")
 
-		err := mgr.Put(resources.RT_CONFIG, mac, data)
+		err := mgr.Put(0, resources.RT_CONFIG, mac, data)
 		require.NoError(t, err)
 
 		// Wait for completion
