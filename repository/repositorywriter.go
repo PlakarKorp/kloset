@@ -51,7 +51,7 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	case PtarType:
 		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPtarPackfile)
 	default:
-		rw.PackerManager = packer.NewPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPackfile)
+		rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPackfile)
 	}
 
 	// XXX: Better placement for this
@@ -123,6 +123,28 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 	return r.state.BlobExists(Type, mac)
 }
 
+func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
+	if r.BlobExists(Type, mac) {
+		return nil
+	}
+	return r.PutBlobWithHint(hint, Type, mac, data)
+}
+
+func (r *RepositoryWriter) PutBlobWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repositorywriter", "PutBlob(%s, %x): %s", Type, mac, time.Since(t0))
+	}()
+
+	if ok, err := r.PackerManager.InsertIfNotPresent(Type, mac); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+
+	return r.PackerManager.Put(hint, Type, mac, data)
+}
+
 func (r *RepositoryWriter) PutBlobIfNotExists(Type resources.Type, mac objects.MAC, data []byte) error {
 	if r.BlobExists(Type, mac) {
 		return nil
@@ -142,7 +164,7 @@ func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []
 		return nil
 	}
 
-	return r.PackerManager.Put(Type, mac, data)
+	return r.PackerManager.Put(-1, Type, mac, data)
 }
 
 func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.MAC) error {
