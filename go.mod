@@ -3,7 +3,7 @@ module github.com/PlakarKorp/kloset
 go 1.23.3
 
 require (
-	github.com/PlakarKorp/go-cdc-chunkers v0.0.12-0.20250627142555-5621f83a0b1c
+	github.com/PlakarKorp/go-cdc-chunkers v1.0.0
 	github.com/charmbracelet/log v0.4.1
 	github.com/cockroachdb/pebble/v2 v2.0.6
 	github.com/dustin/go-humanize v1.0.1
