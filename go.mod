@@ -4,7 +4,7 @@ go 1.23.3
 
 require (
 	github.com/PlakarKorp/go-cdc-chunkers v1.0.0
-	github.com/charmbracelet/log v0.4.1
+	github.com/charmbracelet/log v0.4.2
 	github.com/cockroachdb/pebble/v2 v2.0.6
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gabriel-vasile/mimetype v1.4.9
