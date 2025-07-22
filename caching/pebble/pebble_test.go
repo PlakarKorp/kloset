@@ -1,4 +1,4 @@
-package caching
+package pebble
 
 import (
 	"testing"

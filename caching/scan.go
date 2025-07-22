@@ -3,8 +3,6 @@ package caching
 import (
 	"fmt"
 	"iter"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -12,46 +10,38 @@ import (
 )
 
 type ScanCache struct {
-	*PebbleCache
-
-	snapshotID [32]byte
-	manager    *Manager
+	cache Cache
 }
 
-func newScanCache(cacheManager *Manager, snapshotID [32]byte) (*ScanCache, error) {
-	cacheDir := filepath.Join(cacheManager.cacheDir, "scan", fmt.Sprintf("%x", snapshotID))
-
-	db, err := New(cacheDir)
+func newScanCache(cons Constructor, snapshotID [32]byte) (*ScanCache, error) {
+	cache, err := cons(CACHE_VERSION, "scan", fmt.Sprintf("%x", snapshotID), DeleteOnClose)
 	if err != nil {
 		return nil, err
 	}
 
 	return &ScanCache{
-		PebbleCache: db,
-		snapshotID:  snapshotID,
-		manager:     cacheManager,
+		cache: cache,
 	}, nil
 }
 
 func (c *ScanCache) Close() error {
-	c.PebbleCache.Close()
-	return os.RemoveAll(filepath.Join(c.manager.cacheDir, "scan", fmt.Sprintf("%x", c.snapshotID)))
+	return c.cache.Close()
 }
 
 func (c *ScanCache) PutFile(source int, file string, data []byte) error {
-	return c.put("__file__", fmt.Sprintf("%d:%s", source, file), data)
+	return c.cache.Put([]byte(fmt.Sprintf("__file__:%d:%s", source, file)), data)
 }
 
 func (c *ScanCache) GetFile(source int, file string) ([]byte, error) {
-	return c.get("__file__", fmt.Sprintf("%d:%s", source, file))
+	return c.cache.Get([]byte(fmt.Sprintf("__file__:%d:%s", source, file)))
 }
 
 func (c *ScanCache) PutDirectory(source int, directory string, data []byte) error {
-	return c.put("__directory__", fmt.Sprintf("%d:%s", source, directory), data)
+	return c.cache.Put([]byte(fmt.Sprintf("__directory__:%d:%s", source, directory)), data)
 }
 
 func (c *ScanCache) GetDirectory(source int, directory string) ([]byte, error) {
-	return c.get("__directory__", fmt.Sprintf("%d:%s", source, directory))
+	return c.cache.Get([]byte(fmt.Sprintf("__directory__:%d:%s", source, directory)))
 }
 
 func (c *ScanCache) PutSummary(source int, pathname string, data []byte) error {
@@ -60,7 +50,7 @@ func (c *ScanCache) PutSummary(source int, pathname string, data []byte) error {
 		pathname = "/"
 	}
 
-	return c.put("__summary__", fmt.Sprintf("%d:%s", source, pathname), data)
+	return c.cache.Put([]byte(fmt.Sprintf("__summary__:%d:%s", source, pathname)), data)
 }
 
 func (c *ScanCache) GetSummary(source int, pathname string) ([]byte, error) {
@@ -69,11 +59,11 @@ func (c *ScanCache) GetSummary(source int, pathname string) ([]byte, error) {
 		pathname = "/"
 	}
 
-	return c.get("__summary__", fmt.Sprintf("%d:%s", source, pathname))
+	return c.cache.Get([]byte(fmt.Sprintf("__summary__:%d:%s", source, pathname)))
 }
 
 func (c *ScanCache) PutState(stateID objects.MAC, data []byte) error {
-	return c.put("__state__", fmt.Sprintf("%x", stateID), data)
+	return c.cache.Put(key("__state__", stateID), data)
 }
 
 func (c *ScanCache) HasState(stateID objects.MAC) (bool, error) {
@@ -93,96 +83,84 @@ func (c *ScanCache) DelState(stateID objects.MAC) error {
 }
 
 func (c *ScanCache) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC(fmt.Sprintf("__delta__:%d:%x:", blobType, blobCsum))
+	return scanMAC2(c.cache, keyT("__delta__", blobType, blobCsum))
 }
 
 func (c *ScanCache) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	return c.put("__delta__", fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfile), data)
+	return c.cache.Put(keyT2("__delta__", blobType, blobCsum, packfile), data)
 }
 
 func (c *ScanCache) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC(fmt.Sprintf("__delta__:%d:", blobType))
+	return scanMAC2(c.cache, []byte(fmt.Sprintf("__delta__:%d", blobType)))
 }
 
 func (c *ScanCache) GetDeltas() iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC("__delta__:")
+	return scanMAC2(c.cache, []byte("__delta__:"))
 }
 
 func (c *ScanCache) DelDelta(blobType resources.Type, blobCsum, packfileMAC objects.MAC) error {
-	return c.delete("__delta__", fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfileMAC))
+	return c.cache.Delete(keyT2("__delta__", blobType, blobCsum, packfileMAC))
 }
 
 func (c *ScanCache) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
-	return c.put("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum), data)
+	return c.cache.Put(keyT("__deleted__", blobType, blobCsum), data)
 }
 
 func (c *ScanCache) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
-	return c.has("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum))
+	return c.cache.Has(keyT("__deleted__", blobType, blobCsum))
 }
 
 func (c *ScanCache) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC(fmt.Sprintf("__deleted__:"))
+	return scanMAC2(c.cache, []byte("__deleted__:"))
 }
 
 func (c *ScanCache) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC(fmt.Sprintf("__deleted__:%d:", blobType))
+	return scanMAC2(c.cache, []byte(fmt.Sprintf("__deleted__:%d:", blobType)))
 }
 
 func (c *ScanCache) DelDeleted(blobType resources.Type, blobCsum objects.MAC) error {
-	return c.delete("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum))
+	return c.cache.Delete(keyT("__deleted__", blobType, blobCsum))
 }
 
 func (c *ScanCache) PutPackfile(packfile objects.MAC, data []byte) error {
-	return c.put("__packfile__", fmt.Sprintf("%x", packfile), data)
+	return c.cache.Put(key("__packfile__", packfile), data)
 }
 
 func (c *ScanCache) HasPackfile(packfile objects.MAC) (bool, error) {
-	return c.has("__packfile__", fmt.Sprintf("%x", packfile))
+	return c.cache.Has(key("__packfile__", packfile))
 }
 
 func (c *ScanCache) DelPackfile(packfile objects.MAC) error {
-	return c.delete("__packfile__", fmt.Sprintf("%x", packfile))
+	return c.cache.Delete(key("__packfile__", packfile))
 }
 
 func (c *ScanCache) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC("__packfile__:")
+	return scanMAC2(c.cache, []byte("__packfile__:"))
 }
 
 func (c *ScanCache) PutConfiguration(key string, data []byte) error {
-	return c.put("__configuration__", key, data)
+	return c.cache.Put([]byte(fmt.Sprint("__configuration__:", key)), data)
 }
 
 func (c *ScanCache) GetConfiguration(key string) ([]byte, error) {
-	return c.get("__configuration__", key)
+	return c.cache.Get([]byte(fmt.Sprint("__configuration__:", key)))
 }
 
 func (c *ScanCache) GetConfigurations() iter.Seq[[]byte] {
-	return c.getObjects("__configuration__:")
+	return func(yield func([]byte) bool) {
+		for _, val := range c.cache.Scan([]byte("__configuration__:"), false) {
+			if !yield(val) {
+				return
+			}
+		}
+	}
 }
 
 func (c *ScanCache) EnumerateKeysWithPrefix(prefix string, reverse bool) iter.Seq2[string, []byte] {
-	l := len(prefix)
-
 	return func(yield func(string, []byte) bool) {
-		iter, _ := c.db.NewIter(MakePrefixIterIterOptions([]byte(prefix)))
-		defer iter.Close()
-
-		if reverse {
-			iter.Last()
-		} else {
-			iter.First()
-		}
-
-		for iter.Valid() {
-			key := iter.Key()
-			if !yield(string(key)[l:], iter.Value()) {
+		for key, val := range c.cache.Scan([]byte(prefix), reverse) {
+			if !yield(string(key), val) {
 				return
-			}
-
-			if reverse {
-				iter.Prev()
-			} else {
-				iter.Next()
 			}
 		}
 	}

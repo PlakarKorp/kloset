@@ -2,77 +2,58 @@ package caching
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
+	"path"
 
 	"github.com/google/uuid"
 )
 
 type VFSCache struct {
-	*PebbleCache
-	manager       *Manager
-	repoId        uuid.UUID
-	deleteOnClose bool
+	cache Cache
 }
 
-func newVFSCache(cacheManager *Manager, repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
-	cacheDir := filepath.Join(cacheManager.cacheDir, "vfs", repositoryID.String(), scheme, origin)
-
-	db, err := New(cacheDir)
+func newVFSCache(cons Constructor, repositoryID uuid.UUID, scheme string, origin string, opt Option) (*VFSCache, error) {
+	cache, err := cons(CACHE_VERSION, "vfs", path.Join(repositoryID.String(), scheme, origin), opt)
 	if err != nil {
 		return nil, err
 	}
 
 	return &VFSCache{
-		PebbleCache:   db,
-		manager:       cacheManager,
-		repoId:        repositoryID,
-		deleteOnClose: deleteOnClose,
+		cache: cache,
 	}, nil
 }
 
 func (c *VFSCache) Close() error {
-	if err := c.PebbleCache.Close(); err != nil {
-		return err
-	}
-
-	if c.deleteOnClose {
-		// Note this is two level above the cache dir, because we don't want to
-		// leave behind empty directories.
-		return os.RemoveAll(filepath.Join(c.manager.cacheDir, "vfs", c.repoId.String()))
-	} else {
-		return nil
-	}
+	return c.cache.Close()
 }
 
 func (c *VFSCache) PutDirectory(pathname string, data []byte) error {
-	return c.put("__directory__", pathname, data)
+	return c.cache.Put([]byte(fmt.Sprint("__directory__:", pathname)), data)
 }
 
 func (c *VFSCache) GetDirectory(pathname string) ([]byte, error) {
-	return c.get("__directory__", pathname)
+	return c.cache.Get([]byte(fmt.Sprint("__directory__:", pathname)))
 }
 
 func (c *VFSCache) PutFilename(pathname string, data []byte) error {
-	return c.put("__filename__", pathname, data)
+	return c.cache.Put([]byte(fmt.Sprint("__filename__:", pathname)), data)
 }
 
 func (c *VFSCache) GetFilename(pathname string) ([]byte, error) {
-	return c.get("__filename__", pathname)
+	return c.cache.Get([]byte(fmt.Sprint("__filename__:", pathname)))
 }
 
 func (c *VFSCache) PutFileSummary(pathname string, data []byte) error {
-	return c.put("__file_summary__", pathname, data)
+	return c.cache.Put([]byte(fmt.Sprint("__file_summary__:", pathname)), data)
 }
 
 func (c *VFSCache) GetFileSummary(pathname string) ([]byte, error) {
-	return c.get("__file_summary__", pathname)
+	return c.cache.Get([]byte(fmt.Sprint("__file_summary__:", pathname)))
 }
 
 func (c *VFSCache) PutObject(mac [32]byte, data []byte) error {
-	return c.put("__object__", fmt.Sprintf("%x", mac), data)
+	return c.cache.Put(key("__object__", mac), data)
 }
 
 func (c *VFSCache) GetObject(mac [32]byte) ([]byte, error) {
-	return c.get("__object__", fmt.Sprintf("%x", mac))
+	return c.cache.Get(key("__object__", mac))
 }

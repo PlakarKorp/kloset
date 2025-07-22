@@ -3,6 +3,7 @@ package caching
 import (
 	"testing"
 
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -12,7 +13,7 @@ func TestNewManager(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Test creating a new manager
-	manager := NewManager(tmpDir)
+	manager := NewManager(pebble.Constructor(tmpDir))
 	require.NotNil(t, manager)
 	require.Equal(t, tmpDir+"/"+CACHE_VERSION, manager.cacheDir)
 	require.NotNil(t, manager.repositoryCache)
