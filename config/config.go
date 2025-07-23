@@ -14,9 +14,9 @@ type Config struct {
 	Destinations      map[string]DestinationConfig
 }
 
-type RepositoryConfig map[string]string
-type SourceConfig map[string]string
-type DestinationConfig map[string]string
+type RepositoryConfig = map[string]string
+type SourceConfig = map[string]string
+type DestinationConfig = map[string]string
 
 func NewConfig() *Config {
 	return &Config{
