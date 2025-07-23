@@ -15,7 +15,7 @@ func TestLogger(t *testing.T) {
 
 	// Test Printf
 	logger.Printf("Test message")
-	if bufOut.String() != "info: Test message\n" {
+	if bufOut.String() != "Test message\n" {
 		t.Errorf("Printf did not produce expected output")
 	}
 	bufOut.Reset()
@@ -36,21 +36,21 @@ func TestLogger(t *testing.T) {
 
 	// Test Warn
 	logger.Warn("Test message")
-	if bufErr.String() != "warn: Test message\n" {
+	if bufErr.String() != "Test message\n" {
 		t.Errorf("Warn did not produce expected output")
 	}
 	bufErr.Reset()
 
 	// Test Error
 	logger.Error("Test message")
-	if bufErr.String() != "error: Test message\n" {
+	if bufErr.String() != "Test message\n" {
 		t.Errorf("Error did not produce expected output")
 	}
 	bufErr.Reset()
 
 	// Test Debug
 	logger.Debug("Test message")
-	if bufOut.String() != "debug: Test message\n" {
+	if bufErr.String() != "Test message\n" {
 		t.Errorf("Debug did not produce expected output")
 	}
 	bufOut.Reset()
@@ -69,17 +69,17 @@ func TestLogger(t *testing.T) {
 
 	// Test Info
 	logger.Info("Test message")
-	if bufOut.String() != "info: Test message\n" {
+	if bufErr.String() != "Test message\n" {
 		t.Errorf("Info did not produce expected output")
 	}
-	bufOut.Reset()
+	bufErr.Reset()
 
 	// Test Trace without enabling trace
 	logger.Trace("subsystem", "Test message")
-	if bufOut.String() != "" {
+	if bufErr.String() != "" {
 		t.Errorf("Trace should not produce output")
 	}
-	bufOut.Reset()
+	bufErr.Reset()
 
 	// Test EnableTrace
 	logger.EnableTracing("subsystem")
@@ -91,20 +91,21 @@ func TestLogger(t *testing.T) {
 	}
 
 	// Test Trace
+	bufOut.Reset()
 	logger.Trace("subsystem", "Test message")
-	if bufOut.String() != "trace: subsystem: Test message\n" {
+	if bufOut.String() != "subsystem: Test message\n" {
 		t.Errorf("Trace did not produce expected output")
 	}
-	bufOut.Reset()
 
 	// Test Trace with unknown subsystem but not all tracing subsystem enabled
+	bufOut.Reset()
 	logger.Trace("unknown", "Test message")
 	if bufOut.String() != "" {
 		t.Errorf("Trace should not produce output")
 	}
 	logger.EnableTracing("all")
 	logger.Trace("unknown", "Test message")
-	if bufOut.String() != "trace: unknown: Test message\n" {
+	if bufOut.String() != "unknown: Test message\n" {
 		t.Errorf("Trace did not produce expected output")
 	}
 	bufOut.Reset()
@@ -146,7 +147,7 @@ func TestLoggerPanic(t *testing.T) {
 		if r := recover(); r != nil {
 			logger.Printf("Recovered panic: %v", r)
 		}
-		if bufOut.String() != "info: Recovered panic: Test panic\n" {
+		if bufOut.String() != "Recovered panic: Test panic\n" {
 			t.Errorf("Panic logging did not produce expected output")
 		}
 	}()
