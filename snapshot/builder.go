@@ -224,6 +224,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 		}
 
 		lock, err := repository.NewLockFromStream(version, rd)
+		rd.Close()
 		if err != nil {
 			snap.repository.DeleteLock(snap.Header.Identifier)
 			return nil, err

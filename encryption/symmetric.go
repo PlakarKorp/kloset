@@ -158,7 +158,7 @@ func DeriveCanary(config *Configuration, key []byte) ([]byte, error) {
 }
 
 func VerifyCanary(config *Configuration, key []byte) bool {
-	rd, err := DecryptStream(config, key, bytes.NewReader(config.Canary))
+	rd, err := DecryptStream(config, key, io.NopCloser(bytes.NewReader(config.Canary)))
 	if err != nil {
 		return false
 	}
@@ -328,7 +328,7 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 }
 
 // DecryptStream decrypts a stream using AES-GCM with a random session-specific subkey
-func DecryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, error) {
+func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadCloser, error) {
 	if config.DataAlgorithm != "AES256-GCM-SIV" {
 		return nil, fmt.Errorf("unsupported data encryption algorithm: %s", config.DataAlgorithm)
 	}

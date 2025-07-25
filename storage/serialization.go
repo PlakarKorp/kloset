@@ -25,7 +25,7 @@ const (
 )
 
 type deserializeReader struct {
-	inner    io.Reader
+	inner    io.ReadCloser
 	leftOver []byte
 
 	hasher hash.Hash
@@ -34,7 +34,7 @@ type deserializeReader struct {
 	eof bool
 }
 
-func newDeserializeReader(hasher hash.Hash, resourceType resources.Type, inner io.Reader) (versioning.Version, *deserializeReader, error) {
+func newDeserializeReader(hasher hash.Hash, resourceType resources.Type, inner io.ReadCloser) (versioning.Version, *deserializeReader, error) {
 	buf := make([]byte, STORAGE_HEADER_SIZE)
 	_, err := io.ReadFull(inner, buf)
 	if err != nil {
@@ -120,7 +120,11 @@ func (s *deserializeReader) Read(p []byte) (int, error) {
 	return total, nil
 }
 
-func Deserialize(hasher hash.Hash, resourceType resources.Type, input io.Reader) (versioning.Version, io.Reader, error) {
+func (s *deserializeReader) Close() error {
+	return s.inner.Close()
+}
+
+func Deserialize(hasher hash.Hash, resourceType resources.Type, input io.ReadCloser) (versioning.Version, io.ReadCloser, error) {
 	return newDeserializeReader(hasher, resourceType, input)
 }
 
