@@ -125,23 +125,23 @@ type Store interface {
 	Mode() Mode
 	Size() int64 // this can be costly, call with caution
 
-	GetStates() ([]objects.MAC, error)
-	PutState(mac objects.MAC, rd io.Reader) (int64, error)
-	GetState(mac objects.MAC) (io.Reader, error)
-	DeleteState(mac objects.MAC) error
+	GetStates(ctx context.Context) ([]objects.MAC, error)
+	PutState(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error)
+	GetState(ctx context.Context, mac objects.MAC) (io.Reader, error)
+	DeleteState(ctx context.Context, mac objects.MAC) error
 
-	GetPackfiles() ([]objects.MAC, error)
-	PutPackfile(mac objects.MAC, rd io.Reader) (int64, error)
-	GetPackfile(mac objects.MAC) (io.Reader, error)
-	GetPackfileBlob(mac objects.MAC, offset uint64, length uint32) (io.Reader, error)
-	DeletePackfile(mac objects.MAC) error
+	GetPackfiles(ctx context.Context) ([]objects.MAC, error)
+	PutPackfile(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error)
+	GetPackfile(ctx context.Context, mac objects.MAC) (io.Reader, error)
+	GetPackfileBlob(ctx context.Context, mac objects.MAC, offset uint64, length uint32) (io.Reader, error)
+	DeletePackfile(ctx context.Context, mac objects.MAC) error
 
-	GetLocks() ([]objects.MAC, error)
-	PutLock(lockID objects.MAC, rd io.Reader) (int64, error)
-	GetLock(lockID objects.MAC) (io.Reader, error)
-	DeleteLock(lockID objects.MAC) error
+	GetLocks(ctx context.Context) ([]objects.MAC, error)
+	PutLock(ctx context.Context, lockID objects.MAC, rd io.Reader) (int64, error)
+	GetLock(ctx context.Context, lockID objects.MAC) (io.Reader, error)
+	DeleteLock(ctx context.Context, lockID objects.MAC) error
 
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type StoreFn func(context.Context, string, map[string]string) (Store, error)

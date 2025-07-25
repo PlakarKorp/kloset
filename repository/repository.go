@@ -510,7 +510,7 @@ func (r *Repository) GetStates() ([]objects.MAC, error) {
 		r.Logger().Trace("repository", "GetStates(): %s", time.Since(t0))
 	}()
 
-	return r.store.GetStates()
+	return r.store.GetStates(r.appContext)
 }
 
 func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.Reader, error) {
@@ -519,7 +519,7 @@ func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.Reader, e
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
 	}()
 
-	rd, err := r.store.GetState(mac)
+	rd, err := r.store.GetState(r.appContext, mac)
 	if err != nil {
 		return versioning.Version(0), nil, err
 	}
@@ -552,7 +552,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		return err
 	}
 
-	nbytes, err := r.store.PutState(mac, rd)
+	nbytes, err := r.store.PutState(r.appContext, mac, rd)
 	r.wBytes.Add(nbytes)
 	return err
 }
@@ -563,7 +563,7 @@ func (r *Repository) DeleteState(mac objects.MAC) error {
 		r.Logger().Trace("repository", "DeleteState(%x, ...): %s", mac, time.Since(t0))
 	}()
 
-	return r.store.DeleteState(mac)
+	return r.store.DeleteState(r.appContext, mac)
 }
 
 func (r *Repository) GetPackfiles() ([]objects.MAC, error) {
@@ -572,7 +572,7 @@ func (r *Repository) GetPackfiles() ([]objects.MAC, error) {
 		r.Logger().Trace("repository", "GetPackfiles(): %s", time.Since(t0))
 	}()
 
-	return r.store.GetPackfiles()
+	return r.store.GetPackfiles(r.appContext)
 }
 
 func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
@@ -583,7 +583,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 
 	hasher := r.GetMACHasher()
 
-	rd, err := r.store.GetPackfile(mac)
+	rd, err := r.store.GetPackfile(r.appContext, mac)
 	if err != nil {
 		return nil, err
 	}
@@ -696,7 +696,7 @@ func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) 
 	lengthDelta := uint32(uint64(overhead) - offsetDelta)
 
 	realLen := length + uint32(offsetDelta) + lengthDelta
-	rd, err := r.store.GetPackfileBlob(loc.Packfile, offset+uint64(storage.STORAGE_HEADER_SIZE)-offsetDelta, realLen)
+	rd, err := r.store.GetPackfileBlob(r.appContext, loc.Packfile, offset+uint64(storage.STORAGE_HEADER_SIZE)-offsetDelta, realLen)
 	if err != nil {
 		return nil, err
 	}
@@ -726,7 +726,7 @@ func (r *Repository) DeletePackfile(mac objects.MAC) error {
 		r.Logger().Trace("repository", "DeletePackfile(%x): %s", mac, time.Since(t0))
 	}()
 
-	return r.store.DeletePackfile(mac)
+	return r.store.DeletePackfile(r.appContext, mac)
 }
 
 // Removes the packfile from the state, making it unreachable.
@@ -920,7 +920,7 @@ func (r *Repository) GetLocks() ([]objects.MAC, error) {
 		r.Logger().Trace("repository", "GetLocks(): %s", time.Since(t0))
 	}()
 
-	return r.store.GetLocks()
+	return r.store.GetLocks(r.appContext)
 }
 
 func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.Reader, error) {
@@ -929,7 +929,7 @@ func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.Reader,
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
 	}()
 
-	rd, err := r.store.GetLock(lockID)
+	rd, err := r.store.GetLock(r.appContext, lockID)
 	if err != nil {
 		return versioning.Version(0), nil, err
 	}
@@ -962,7 +962,7 @@ func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
 		return 0, err
 	}
 
-	return r.store.PutLock(lockID, rd)
+	return r.store.PutLock(r.appContext, lockID, rd)
 }
 
 func (r *Repository) DeleteLock(lockID objects.MAC) error {
@@ -971,5 +971,5 @@ func (r *Repository) DeleteLock(lockID objects.MAC) error {
 		r.Logger().Trace("repository", "DeleteLock(%x, ...): %s", lockID, time.Since(t0))
 	}()
 
-	return r.store.DeleteLock(lockID)
+	return r.store.DeleteLock(r.appContext, lockID)
 }
