@@ -115,7 +115,7 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		hasher = hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
 	}
 
-	version, unwrappedConfigRd, err := storage.Deserialize(hasher, resources.RT_CONFIG, bytes.NewReader(config))
+	version, unwrappedConfigRd, err := storage.Deserialize(hasher, resources.RT_CONFIG, io.NopCloser(bytes.NewReader(config)))
 	if err != nil {
 		return nil, err
 	}
@@ -165,7 +165,7 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		hasher = hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
 	}
 
-	version, unwrappedConfigRd, err := storage.Deserialize(hasher, resources.RT_CONFIG, bytes.NewReader(config))
+	version, unwrappedConfigRd, err := storage.Deserialize(hasher, resources.RT_CONFIG, io.NopCloser(bytes.NewReader(config)))
 	if err != nil {
 		return nil, err
 	}
@@ -257,9 +257,13 @@ func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) err
 			return err
 		}
 
-		if err := aggregatedState.MergeState(version, stateID, remoteStateRd); err != nil {
+		err = aggregatedState.MergeState(version, stateID, remoteStateRd)
+		remoteStateRd.Close()
+
+		if err != nil {
 			return err
 		}
+
 		rebuilt = true
 	}
 
@@ -316,7 +320,7 @@ func (r *Repository) Close() error {
 	return nil
 }
 
-func (r *Repository) decode(input io.Reader) (io.Reader, error) {
+func (r *Repository) decode(input io.ReadCloser) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "decode: %s", time.Since(t0))
@@ -374,7 +378,7 @@ func (r *Repository) decodeBuffer(buffer []byte) ([]byte, error) {
 		r.Logger().Trace("repository", "decode(%d bytes): %s", len(buffer), time.Since(t0))
 	}()
 
-	rd, err := r.decode(bytes.NewBuffer(buffer))
+	rd, err := r.decode(io.NopCloser(bytes.NewBuffer(buffer)))
 	if err != nil {
 		return nil, err
 	}
@@ -513,7 +517,7 @@ func (r *Repository) GetStates() ([]objects.MAC, error) {
 	return r.store.GetStates()
 }
 
-func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.Reader, error) {
+func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
@@ -588,6 +592,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 		return nil, err
 	}
 
+	defer rd.Close()
 	packfileVersion, rd, err := storage.Deserialize(hasher, resources.RT_PACKFILE, rd)
 	if err != nil {
 		return nil, err
@@ -704,6 +709,7 @@ func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) 
 	// discard the first offsetDelta bytes
 	data := make([]byte, realLen)
 	_, err = io.ReadFull(rd, data)
+	rd.Close()
 	if err != nil {
 		return nil, err
 	}
@@ -923,7 +929,7 @@ func (r *Repository) GetLocks() ([]objects.MAC, error) {
 	return r.store.GetLocks()
 }
 
-func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.Reader, error) {
+func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
