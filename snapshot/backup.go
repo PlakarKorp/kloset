@@ -181,7 +181,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := backupCtx.imp.Scan()
+	scanner, err := backupCtx.imp.Scan(snap.AppContext())
 	if err != nil {
 		return err
 	}
@@ -308,12 +308,12 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	defer snap.Unlock(done)
 
-	snap.Header.GetSource(0).Importer.Origin = imp.Origin()
-	snap.Header.GetSource(0).Importer.Type = imp.Type()
+	snap.Header.GetSource(0).Importer.Origin = imp.Origin(snap.AppContext())
+	snap.Header.GetSource(0).Importer.Type = imp.Type(snap.AppContext())
 	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
 
 	if options.Name == "" {
-		snap.Header.Name = imp.Root() + " @ " + snap.Header.GetSource(0).Importer.Origin
+		snap.Header.Name = imp.Root(snap.AppContext()) + " @ " + snap.Header.GetSource(0).Importer.Origin
 	} else {
 		snap.Header.Name = options.Name
 	}
@@ -344,7 +344,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
-	snap.Header.GetSource(0).Importer.Directory = imp.Root()
+	snap.Header.GetSource(0).Importer.Directory = imp.Root(snap.AppContext())
 	snap.Header.GetSource(0).VFS = *vfsHeader
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
@@ -561,7 +561,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
 	}
 
-	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, imp.Type(), imp.Origin(), backupOpts.CleanupVFSCache)
+	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, imp.Type(snap.AppContext()), imp.Origin(snap.AppContext()), backupOpts.CleanupVFSCache)
 	if err != nil {
 		return nil, err
 	}

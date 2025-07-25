@@ -52,15 +52,15 @@ func (p *MockImporter) SetGenerator(gen func(chan<- *importer.ScanResult)) {
 	p.gen = gen
 }
 
-func (p *MockImporter) Origin() string {
+func (p *MockImporter) Origin(context context.Context) string {
 	return "mock"
 }
 
-func (p *MockImporter) Type() string {
+func (p *MockImporter) Type(context context.Context) string {
 	return "mock"
 }
 
-func (p *MockImporter) Scan() (<-chan *importer.ScanResult, error) {
+func (p *MockImporter) Scan(context context.Context) (<-chan *importer.ScanResult, error) {
 	ch := make(chan *importer.ScanResult)
 	if p.gen != nil {
 		go p.gen(ch)
@@ -75,10 +75,10 @@ func (p *MockImporter) Scan() (<-chan *importer.ScanResult, error) {
 	return ch, nil
 }
 
-func (p *MockImporter) Close() error {
+func (p *MockImporter) Close(context context.Context) error {
 	return nil
 }
 
-func (p *MockImporter) Root() string {
+func (p *MockImporter) Root(context context.Context) string {
 	return "/"
 }

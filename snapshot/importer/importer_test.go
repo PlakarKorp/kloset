@@ -15,23 +15,23 @@ import (
 
 type MockedImporter struct{}
 
-func (m MockedImporter) Origin() string {
+func (m MockedImporter) Origin(context.Context) string {
 	return ""
 }
 
-func (m MockedImporter) Type() string {
+func (m MockedImporter) Type(context.Context) string {
 	return ""
 }
 
-func (m MockedImporter) Root() string {
+func (m MockedImporter) Root(context.Context) string {
 	return ""
 }
 
-func (m MockedImporter) Scan() (<-chan *ScanResult, error) {
+func (m MockedImporter) Scan(context.Context) (<-chan *ScanResult, error) {
 	return nil, nil
 }
 
-func (m MockedImporter) NewReader(string) (io.ReadCloser, error) {
+func (m MockedImporter) NewReader(context.Context, string) (io.ReadCloser, error) {
 	return nil, nil
 }
 
@@ -39,7 +39,7 @@ func (m MockedImporter) NewExtendedAttributeReader(string, string) (io.ReadClose
 	return nil, nil
 }
 
-func (m MockedImporter) Close() error {
+func (m MockedImporter) Close(context.Context) error {
 	return nil
 }
 
