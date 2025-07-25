@@ -3,6 +3,7 @@ package vfs
 import (
 	"bytes"
 	"io"
+	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -35,7 +36,6 @@ func NewObjectReader(repo *repository.Repository, object *objects.Object, size i
 }
 
 func (or *ObjectReader) prefetch() error {
-
 	if or.prefetchBuffer.Len() == 0 {
 		or.dirty = true
 	}
@@ -47,6 +47,11 @@ func (or *ObjectReader) prefetch() error {
 	if or.objoff >= len(or.object.Chunks) {
 		return nil
 	}
+
+	t0 := time.Now()
+	defer func() {
+		or.repo.AppContext().GetLogger().Trace("repository", "object-rd-prefect %x %v", or.object.ContentMAC, time.Since(t0))
+	}()
 
 	for data, err := range or.repo.GetObjectContent(or.object, or.objoff, prefetchSize) {
 		if err != nil {

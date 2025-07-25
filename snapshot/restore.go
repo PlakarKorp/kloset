@@ -2,10 +2,12 @@ package snapshot
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
@@ -23,16 +25,27 @@ type restoreContext struct {
 	hardlinksMutex sync.Mutex
 }
 
-func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *errgroup.Group) func(entrypath string, e *vfs.Entry, err error) error {
-	return func(entrypath string, e *vfs.Entry, err error) error {
-		if err != nil {
-			snap.Event(events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			return err
+var t atomic.Int64
+
+func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, it chan vfs.Item) error {
+	vfs, err := snap.Filesystem()
+	if err != nil {
+		return err
+	}
+
+	for item := range it {
+		if item.Err != nil {
+			// XXX
+			snap.Event(events.PathErrorEvent(snap.Header.Identifier, target, item.Err.Error()))
+			return item.Err
 		}
 
 		if err := snap.AppContext().Err(); err != nil {
 			return err
 		}
+
+		e := item.Entry
+		entrypath := e.Path()
 
 		snap.Event(events.PathEvent(snap.Header.Identifier, entrypath))
 
@@ -40,7 +53,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		dest := path.Join(target, strings.TrimPrefix(entrypath, opts.Strip))
 
 		// Directory processing.
-		if e.IsDir() {
+		if false && e.IsDir() {
 			snap.Event(events.DirectoryEvent(snap.Header.Identifier, entrypath))
 			// Create directory if not root.
 			if entrypath != "/" {
@@ -60,67 +73,65 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				}
 			}
 			snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, entrypath))
-			return nil
+			continue
 		}
 
 		// For non-directory entries, only process regular files.
 		if !e.Stat().Mode().IsRegular() {
-			snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, "unexpected vfs entry type"))
-			return nil
+			//snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, "unexpected vfs entry type"))
+			continue
 		}
 
 		snap.Event(events.FileEvent(snap.Header.Identifier, entrypath))
-		wg.Go(func() error {
-			// Handle hard links.
-			if e.Stat().Nlink() > 1 {
-				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
-				restoreContext.hardlinksMutex.Lock()
-				v, ok := restoreContext.hardlinks[key]
-				restoreContext.hardlinksMutex.Unlock()
-				if ok {
-					// Create a new link and return.
-					if err := os.Link(v, dest); err != nil {
-						snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-					}
-					return nil
-				} else {
-					restoreContext.hardlinksMutex.Lock()
-					restoreContext.hardlinks[key] = dest
-					restoreContext.hardlinksMutex.Unlock()
+		// Handle hard links.
+		if e.Stat().Nlink() > 1 {
+			key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
+			restoreContext.hardlinksMutex.Lock()
+			v, ok := restoreContext.hardlinks[key]
+			restoreContext.hardlinksMutex.Unlock()
+			if ok {
+				// Create a new link and return.
+				if err := os.Link(v, dest); err != nil {
+					snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 				}
-			}
-
-			rd, err := snap.NewReader(entrypath)
-			if err != nil {
-				err := fmt.Errorf("failed to open file in the snapshot %q: %w", entrypath, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 				return nil
-			}
-			defer rd.Close()
-
-			// Ensure the parent directory exists.
-			if err := exp.CreateDirectory(path.Dir(dest)); err != nil {
-				err := fmt.Errorf("failed to create directory %q: %w", dest, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			}
-
-			// Restore the file content.
-			if err := exp.StoreFile(dest, rd, e.Size()); err != nil {
-				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			} else if err := exp.SetPermissions(dest, e.Stat()); err != nil {
-				err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 			} else {
-				snap.Event(events.FileOKEvent(snap.Header.Identifier, entrypath, e.Size()))
+				restoreContext.hardlinksMutex.Lock()
+				restoreContext.hardlinks[key] = dest
+				restoreContext.hardlinksMutex.Unlock()
 			}
-			return nil
-		})
-		return nil
+		}
+
+		rd := e.Open(vfs)
+
+		// Ensure the parent directory exists.
+		if err := exp.CreateDirectory(path.Dir(dest)); err != nil {
+			err := fmt.Errorf("failed to create directory %q: %w", dest, err)
+			snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+		}
+
+		// Restore the file content.
+		if err := exp.StoreFile(dest, rd, e.Size()); err != nil {
+			err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
+			snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+		} else if err := exp.SetPermissions(dest, e.Stat()); err != nil {
+			err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
+			snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+		} else {
+			snap.Event(events.FileOKEvent(snap.Header.Identifier, entrypath, e.Size()))
+		}
+
+		rd.Close()
 	}
+
+	log.Println("quitting from one restore worker")
+
+	return nil
 }
 
 func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname string, opts *RestoreOptions) error {
+	opts.MaxConcurrency = max(opts.MaxConcurrency, 1)
+
 	snap.Event(events.StartEvent())
 	defer snap.Event(events.DoneEvent())
 
@@ -146,7 +157,30 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 
 	wg := errgroup.Group{}
 	wg.SetLimit(int(maxConcurrency))
-	defer wg.Wait()
 
-	return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
+	it := fs.Walk(pathname, int(opts.MaxConcurrency))
+
+	for range opts.MaxConcurrency {
+		wg.Go(func() error {
+			err := snapshotRestorePath(snap, exp, base, opts, restoreContext, it)
+			if err != nil {
+				log.Println("error during restore:", err)
+			}
+			return err
+		})
+	}
+
+	log.Println("restore pool started", len(it))
+	err = wg.Wait()
+	log.Println("restore pool closed", len(it))
+
+	print := false
+	for range it {
+		if !print {
+			print = true
+			log.Println("draining?")
+		}
+	}
+
+	return err
 }
