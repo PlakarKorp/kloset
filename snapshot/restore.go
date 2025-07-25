@@ -44,7 +44,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			snap.Event(events.DirectoryEvent(snap.Header.Identifier, entrypath))
 			// Create directory if not root.
 			if entrypath != "/" {
-				if err := exp.CreateDirectory(dest); err != nil {
+				if err := exp.CreateDirectory(snap.AppContext(), dest); err != nil {
 					err := fmt.Errorf("failed to create directory %q: %w", dest, err)
 					snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 					return err
@@ -53,7 +53,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			// WalkDir handles recursion so we don’t need to iterate children manually.
 			if entrypath != "/" {
-				if err := exp.SetPermissions(dest, e.Stat()); err != nil {
+				if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
 					err := fmt.Errorf("failed to set permissions on directory %q: %w", dest, err)
 					snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 					return err
@@ -99,16 +99,16 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			defer rd.Close()
 
 			// Ensure the parent directory exists.
-			if err := exp.CreateDirectory(path.Dir(dest)); err != nil {
+			if err := exp.CreateDirectory(snap.AppContext(), path.Dir(dest)); err != nil {
 				err := fmt.Errorf("failed to create directory %q: %w", dest, err)
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 			}
 
 			// Restore the file content.
-			if err := exp.StoreFile(dest, rd, e.Size()); err != nil {
+			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			} else if err := exp.SetPermissions(dest, e.Stat()); err != nil {
+			} else if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
 				err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 			} else {
