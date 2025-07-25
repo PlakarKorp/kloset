@@ -91,7 +91,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				}
 			}
 
-			rd := entry.Open(vfs)
+			rd := e.Open(vfs)
 			defer rd.Close()
 
 			// Ensure the parent directory exists.
