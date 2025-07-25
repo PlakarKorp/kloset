@@ -931,7 +931,16 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 	}
 }
 
+var seen sync.Map
+
 func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeker, error) {
+	if Type == resources.RT_VFS_ENTRY {
+		_, loaded := seen.LoadOrStore(mac, struct{}{})
+		if loaded {
+			panic("dup?")
+		}
+	}
+
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetBlob(%s, %x): %s", Type, mac, time.Since(t0))
