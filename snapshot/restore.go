@@ -21,6 +21,7 @@ type RestoreOptions struct {
 type restoreContext struct {
 	hardlinks      map[string]string
 	hardlinksMutex sync.Mutex
+	vfs            *vfs.Filesystem
 }
 
 func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *errgroup.Group) func(entrypath string, e *vfs.Entry, err error) error {
@@ -90,12 +91,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				}
 			}
 
-			rd, err := snap.NewReader(entrypath)
-			if err != nil {
-				err := fmt.Errorf("failed to open file in the snapshot %q: %w", entrypath, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-				return nil
-			}
+			rd := e.Open(restoreContext.vfs)
 			defer rd.Close()
 
 			// Ensure the parent directory exists.
@@ -137,6 +133,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	restoreContext := &restoreContext{
 		hardlinks:      make(map[string]string),
 		hardlinksMutex: sync.Mutex{},
+		vfs:            fs,
 	}
 
 	base = path.Clean(base)
