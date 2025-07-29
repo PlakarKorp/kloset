@@ -121,9 +121,9 @@ const (
 type Store interface {
 	Create(ctx context.Context, config []byte) error
 	Open(ctx context.Context) ([]byte, error)
-	Location() string
-	Mode() Mode
-	Size(ctx context.Context) int64 // this can be costly, call with caution
+	Location(ctx context.Context) (string, error)
+	Mode(ctx context.Context) (Mode, error)
+	Size(ctx context.Context) (int64, error) // this can be costly, call with caution
 
 	GetStates(ctx context.Context) ([]objects.MAC, error)
 	PutState(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error)
@@ -141,7 +141,7 @@ type Store interface {
 	GetLock(ctx context.Context, lockID objects.MAC) (io.ReadCloser, error)
 	DeleteLock(ctx context.Context, lockID objects.MAC) error
 
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type StoreFn func(context.Context, string, map[string]string) (Store, error)

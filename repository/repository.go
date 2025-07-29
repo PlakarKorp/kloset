@@ -296,12 +296,17 @@ func (r *Repository) Store() storage.Store {
 	return r.store
 }
 
-func (r *Repository) StorageSize() int64 {
+func (r *Repository) StorageSize() (int64, error) {
 	if r.storageSizeDirty {
-		r.storageSize = r.store.Size(r.appContext)
+		size, err := r.store.Size(r.appContext)
+		if err != nil {
+			return 0, err
+		}
+
+		r.storageSize = size
 		r.storageSizeDirty = false
 	}
-	return r.storageSize
+	return r.storageSize, nil
 }
 
 func (r *Repository) RBytes() int64 {
@@ -455,8 +460,8 @@ func (r *Repository) NewRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	return r.newRepositoryWriter(cache, id, typ)
 }
 
-func (r *Repository) Location() string {
-	return r.store.Location()
+func (r *Repository) Location() (string, error) {
+	return r.store.Location(r.appContext)
 }
 
 func (r *Repository) Configuration() storage.Configuration {

@@ -179,7 +179,7 @@ func (mb *MockBackend) DeletePackfile(ctx context.Context, MAC objects.MAC) erro
 	return nil
 }
 
-func (mb *MockBackend) Close() error {
+func (mb *MockBackend) Close(ctx context.Context) error {
 	return nil
 }
 

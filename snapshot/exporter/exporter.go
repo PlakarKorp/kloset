@@ -20,11 +20,11 @@ type Options struct {
 }
 
 type Exporter interface {
-	Root() string
+	Root(ctx context.Context) (string, error)
 	CreateDirectory(ctx context.Context, pathname string) error
 	StoreFile(ctx context.Context, pathname string, fp io.Reader, size int64) error
 	SetPermissions(ctx context.Context, pathname string, fileinfo *objects.FileInfo) error
-	Close() error
+	Close(ctx context.Context) error
 }
 
 type ExporterFn func(context.Context, *Options, string, map[string]string) (Exporter, error)
