@@ -53,11 +53,11 @@ func TestLogger(t *testing.T) {
 	if bufErr.String() != "debug: Test message\n" {
 		t.Errorf("Debug did not produce expected output")
 	}
-	bufErr.Reset()
+	bufOut.Reset()
 
 	// Test Info without enabling info
 	logger.Info("Test message")
-	if bufErr.String() != "" {
+	if bufOut.String() != "" {
 		t.Errorf("Info should not produce output")
 	}
 
@@ -69,17 +69,17 @@ func TestLogger(t *testing.T) {
 
 	// Test Info
 	logger.Info("Test message")
-	if bufErr.String() != "info: Test message\n" {
+	if bufOut.String() != "info: Test message\n" {
 		t.Errorf("Info did not produce expected output")
 	}
-	bufErr.Reset()
+	bufOut.Reset()
 
 	// Test Trace without enabling trace
 	logger.Trace("subsystem", "Test message")
-	if bufErr.String() != "" {
+	if bufOut.String() != "" {
 		t.Errorf("Trace should not produce output")
 	}
-	bufErr.Reset()
+	bufOut.Reset()
 
 	// Test EnableTrace
 	logger.EnableTracing("subsystem")
@@ -91,23 +91,24 @@ func TestLogger(t *testing.T) {
 	}
 
 	// Test Trace
+	bufOut.Reset()
 	logger.Trace("subsystem", "Test message")
-	if bufErr.String() != "trace: subsystem: Test message\n" {
+	if bufOut.String() != "trace: subsystem: Test message\n" {
 		t.Errorf("Trace did not produce expected output")
 	}
-	bufErr.Reset()
 
 	// Test Trace with unknown subsystem but not all tracing subsystem enabled
+	bufOut.Reset()
 	logger.Trace("unknown", "Test message")
-	if bufErr.String() != "" {
+	if bufOut.String() != "" {
 		t.Errorf("Trace should not produce output")
 	}
 	logger.EnableTracing("all")
 	logger.Trace("unknown", "Test message")
-	if bufErr.String() != "trace: unknown: Test message\n" {
+	if bufOut.String() != "trace: unknown: Test message\n" {
 		t.Errorf("Trace did not produce expected output")
 	}
-	bufErr.Reset()
+	bufOut.Reset()
 }
 
 func TestLoggerConcurrency(t *testing.T) {
