@@ -50,20 +50,20 @@ func (l *Logger) Stderr(format string, args ...interface{}) {
 
 func (l *Logger) Info(format string, args ...interface{}) {
 	if l.EnabledInfo {
-		l.stdoutLogger.Printf(format, args...)
+		l.stdoutLogger.Printf("info: "+format, args...)
 	}
 }
 
 func (l *Logger) Warn(format string, args ...interface{}) {
-	l.stderrLogger.Printf(format, args...)
+	l.stderrLogger.Printf("warn: "+format, args...)
 }
 
 func (l *Logger) Error(format string, args ...interface{}) {
-	l.stderrLogger.Printf(format, args...)
+	l.stderrLogger.Printf("error: "+format, args...)
 }
 
 func (l *Logger) Debug(format string, args ...interface{}) {
-	l.stderrLogger.Printf(format, args...)
+	l.stderrLogger.Printf("debug: "+format, args...)
 }
 
 func (l *Logger) Trace(subsystem string, format string, args ...interface{}) {
@@ -75,7 +75,7 @@ func (l *Logger) Trace(subsystem string, format string, args ...interface{}) {
 		}
 		l.mutraceSubsystems.Unlock()
 		if exists {
-			l.stdoutLogger.Printf(subsystem+": "+format, args...)
+			l.stdoutLogger.Printf("trace: "+subsystem+": "+format, args...)
 		}
 	}
 }
