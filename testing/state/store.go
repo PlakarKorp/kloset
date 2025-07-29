@@ -105,6 +105,6 @@ func (s *store) DeleteLock(ctx context.Context, lockID objects.MAC) error {
 	return nil
 }
 
-func (s *store) Close() error {
+func (s *store) Close(ctx context.Context) error {
 	return nil
 }
