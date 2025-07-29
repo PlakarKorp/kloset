@@ -60,7 +60,7 @@ func (p *MockImporter) Type() string {
 	return "mock"
 }
 
-func (p *MockImporter) Scan() (<-chan *importer.ScanResult, error) {
+func (p *MockImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, error) {
 	ch := make(chan *importer.ScanResult)
 	if p.gen != nil {
 		go p.gen(ch)

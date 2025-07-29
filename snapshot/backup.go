@@ -181,7 +181,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := backupCtx.imp.Scan()
+	scanner, err := backupCtx.imp.Scan(snap.AppContext())
 	if err != nil {
 		return err
 	}

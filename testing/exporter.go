@@ -34,11 +34,11 @@ func (e *MockExporter) Root() string {
 	return e.rootDir
 }
 
-func (e *MockExporter) CreateDirectory(pathname string) error {
+func (e *MockExporter) CreateDirectory(ctx context.Context, pathname string) error {
 	return nil
 }
 
-func (e *MockExporter) StoreFile(pathname string, fp io.Reader, size int64) error {
+func (e *MockExporter) StoreFile(ctx context.Context, pathname string, fp io.Reader, size int64) error {
 	if len(pathname) > 5 && pathname[:5] == "mock:" {
 		pathname = pathname[5:]
 	}
@@ -51,7 +51,7 @@ func (e *MockExporter) StoreFile(pathname string, fp io.Reader, size int64) erro
 	return nil
 }
 
-func (e *MockExporter) SetPermissions(pathname string, fileinfo *objects.FileInfo) error {
+func (e *MockExporter) SetPermissions(ctx context.Context, pathname string, fileinfo *objects.FileInfo) error {
 	return nil
 }
 

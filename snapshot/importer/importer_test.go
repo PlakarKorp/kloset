@@ -27,7 +27,7 @@ func (m MockedImporter) Root() string {
 	return ""
 }
 
-func (m MockedImporter) Scan() (<-chan *ScanResult, error) {
+func (m MockedImporter) Scan(ctx context.Context) (<-chan *ScanResult, error) {
 	return nil, nil
 }
 
