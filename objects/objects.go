@@ -21,6 +21,10 @@ func init() {
 
 type MAC [32]byte
 
+var (
+	NilMac MAC
+)
+
 func (m MAC) MarshalJSON() ([]byte, error) {
 	return json.Marshal(fmt.Sprintf("%0x", m[:]))
 }
