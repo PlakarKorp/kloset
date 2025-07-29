@@ -21,9 +21,9 @@ type Options struct {
 
 type Exporter interface {
 	Root() string
-	CreateDirectory(pathname string) error
-	StoreFile(pathname string, fp io.Reader, size int64) error
-	SetPermissions(pathname string, fileinfo *objects.FileInfo) error
+	CreateDirectory(ctx context.Context, pathname string) error
+	StoreFile(ctx context.Context, pathname string, fp io.Reader, size int64) error
+	SetPermissions(ctx context.Context, pathname string, fileinfo *objects.FileInfo) error
 	Close() error
 }
 

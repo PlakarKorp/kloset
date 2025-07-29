@@ -68,7 +68,7 @@ type Importer interface {
 	Origin() string
 	Type() string
 	Root() string
-	Scan() (<-chan *ScanResult, error)
+	Scan(context.Context) (<-chan *ScanResult, error)
 	Close() error
 }
 

@@ -37,11 +37,11 @@ func (s *store) Mode() storage.Mode {
 	return storage.ModeWrite
 }
 
-func (s *store) Size() int64 {
+func (s *store) Size(ctx context.Context) int64 {
 	return 0
 }
 
-func (s *store) GetStates() ([]objects.MAC, error) {
+func (s *store) GetStates(ctx context.Context) ([]objects.MAC, error) {
 	var all []objects.MAC
 	for k := range s.states {
 		all = append(all, k)
@@ -49,7 +49,7 @@ func (s *store) GetStates() ([]objects.MAC, error) {
 	return all, nil
 }
 
-func (s *store) PutState(mac objects.MAC, rd io.Reader) (int64, error) {
+func (s *store) PutState(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error) {
 	data, err := io.ReadAll(rd)
 	if err != nil {
 		return 0, err
@@ -59,49 +59,49 @@ func (s *store) PutState(mac objects.MAC, rd io.Reader) (int64, error) {
 	return int64(len(data)), nil
 }
 
-func (s *store) GetState(mac objects.MAC) (io.ReadCloser, error) {
+func (s *store) GetState(ctx context.Context, mac objects.MAC) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(s.states[mac])), nil
 }
 
-func (s *store) DeleteState(mac objects.MAC) error {
+func (s *store) DeleteState(ctx context.Context, mac objects.MAC) error {
 	panic("!!!")
 }
 
-func (s *store) GetPackfiles() ([]objects.MAC, error) {
+func (s *store) GetPackfiles(ctx context.Context) ([]objects.MAC, error) {
 	return nil, unsupported
 }
 
-func (s *store) PutPackfile(mac objects.MAC, rd io.Reader) (int64, error) {
+func (s *store) PutPackfile(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error) {
 	return 0, unsupported
 }
 
-func (s *store) GetPackfile(mac objects.MAC) (io.ReadCloser, error) {
+func (s *store) GetPackfile(ctx context.Context, mac objects.MAC) (io.ReadCloser, error) {
 	return nil, unsupported
 }
 
-func (s *store) GetPackfileBlob(mac objects.MAC, offset uint64, length uint32) (io.ReadCloser, error) {
+func (s *store) GetPackfileBlob(ctx context.Context, mac objects.MAC, offset uint64, length uint32) (io.ReadCloser, error) {
 	return nil, unsupported
 }
 
-func (s *store) DeletePackfile(mac objects.MAC) error {
+func (s *store) DeletePackfile(ctx context.Context, mac objects.MAC) error {
 	return unsupported
 }
 
 // pretend to be lockless
 
-func (s *store) GetLocks() ([]objects.MAC, error) {
+func (s *store) GetLocks(ctx context.Context) ([]objects.MAC, error) {
 	return nil, nil
 }
 
-func (s *store) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
+func (s *store) PutLock(ctx context.Context, lockID objects.MAC, rd io.Reader) (int64, error) {
 	return 0, nil
 }
 
-func (s *store) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
+func (s *store) GetLock(ctx context.Context, lockID objects.MAC) (io.ReadCloser, error) {
 	return nil, nil
 }
 
-func (s *store) DeleteLock(lockID objects.MAC) error {
+func (s *store) DeleteLock(ctx context.Context, lockID objects.MAC) error {
 	return nil
 }
 

@@ -204,7 +204,7 @@ func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
 		return err
 	}
 
-	nbytes, err := r.store.PutPackfile(mac, rd)
+	nbytes, err := r.store.PutPackfile(r.appContext, mac, rd)
 	r.wBytes.Add(nbytes)
 	if err != nil {
 		return err
@@ -256,7 +256,7 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 		return err
 	}
 
-	nbytes, err := r.store.PutPackfile(mac, rd)
+	nbytes, err := r.store.PutPackfile(r.appContext, mac, rd)
 	r.wBytes.Add(nbytes)
 	if err != nil {
 		return err

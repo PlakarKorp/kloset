@@ -16,15 +16,15 @@ func (m MockedExporter) Root() string {
 	return ""
 }
 
-func (m MockedExporter) CreateDirectory(pathname string) error {
+func (m MockedExporter) CreateDirectory(ctx context.Context, pathname string) error {
 	return nil
 }
 
-func (m MockedExporter) StoreFile(pathname string, fp io.Reader, size int64) error {
+func (m MockedExporter) StoreFile(ctx context.Context, pathname string, fp io.Reader, size int64) error {
 	return nil
 }
 
-func (m MockedExporter) SetPermissions(pathname string, fileinfo *objects.FileInfo) error {
+func (m MockedExporter) SetPermissions(ctx context.Context, pathname string, fileinfo *objects.FileInfo) error {
 	return nil
 }
 
