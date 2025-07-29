@@ -104,7 +104,7 @@ func NewFileInfo(name string, size int64, mode os.FileMode, modTime time.Time, d
 }
 
 func (fileinfo *FileInfo) HumanSize() string {
-	return humanize.Bytes(uint64(fileinfo.Size()))
+	return humanize.IBytes(uint64(fileinfo.Size()))
 }
 
 func (fileinfo *FileInfo) Equal(fi *FileInfo) bool {

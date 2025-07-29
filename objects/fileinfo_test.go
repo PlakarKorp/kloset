@@ -167,7 +167,7 @@ func TestNewFileInfo(t *testing.T) {
 		t.Errorf("expected %#v but got %#v", reference, file)
 	}
 
-	if file.HumanSize() != "300 kB" {
+	if file.HumanSize() != "293 KiB" {
 		t.Errorf("expected %#v but got %#v", "300 kB", file.HumanSize())
 	}
 
