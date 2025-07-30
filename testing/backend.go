@@ -108,16 +108,16 @@ func (mb *MockBackend) Open(ctx context.Context) ([]byte, error) {
 	return mb.configuration, nil
 }
 
-func (mb *MockBackend) Location() string {
-	return mb.location
+func (mb *MockBackend) Location(ctx context.Context) (string, error) {
+	return mb.location, nil
 }
 
-func (mb *MockBackend) Mode() storage.Mode {
-	return storage.ModeRead | storage.ModeWrite
+func (mb *MockBackend) Mode(ctx context.Context) (storage.Mode, error) {
+	return storage.ModeRead | storage.ModeWrite, nil
 }
 
-func (mb *MockBackend) Size(ctx context.Context) int64 {
-	return 0
+func (mb *MockBackend) Size(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 
 func (mb *MockBackend) GetStates(ctx context.Context) ([]objects.MAC, error) {

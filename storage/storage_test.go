@@ -23,8 +23,8 @@ func TestNewStore(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if store.Location() != "mock:///test/location" {
-		t.Errorf("expected location to be '/test/location', got %v", store.Location())
+	if loc, _ := store.Location(ctx); loc != "mock:///test/location" {
+		t.Errorf("expected location to be '/test/location', got %v", loc)
 	}
 
 	// should return an error as the backend does not exist
@@ -73,8 +73,8 @@ func TestOpenStore(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if store.Location() != "mock:///test/location" {
-		t.Errorf("expected location to be '/test/location', got %v", store.Location())
+	if loc, _ := store.Location(ctx); loc != "mock:///test/location" {
+		t.Errorf("expected location to be '/test/location', got %v", loc)
 	}
 
 	// should return an error as the backend Open will return an error
@@ -129,8 +129,8 @@ func TestNew(t *testing.T) {
 				t.Fatalf("expected no error, got %v", err)
 			}
 
-			if store.Location() != location {
-				t.Errorf("expected location to be '%s', got %v", location, store.Location())
+			if loc, _ := store.Location(ctx); loc != location {
+				t.Errorf("expected location to be '%s', got %v", location, loc)
 			}
 		})
 	}

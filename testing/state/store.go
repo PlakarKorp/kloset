@@ -29,16 +29,16 @@ func (s *store) Open(ctx context.Context) ([]byte, error) {
 	return nil, unsupported
 }
 
-func (s *store) Location() string {
-	return "fake"
+func (s *store) Location(ctx context.Context) (string, error) {
+	return "fake", nil
 }
 
-func (s *store) Mode() storage.Mode {
-	return storage.ModeWrite
+func (s *store) Mode(ctx context.Context) (storage.Mode, error) {
+	return storage.ModeWrite, nil
 }
 
-func (s *store) Size(ctx context.Context) int64 {
-	return 0
+func (s *store) Size(ctx context.Context) (int64, error) {
+	return 0, nil
 }
 
 func (s *store) GetStates(ctx context.Context) ([]objects.MAC, error) {

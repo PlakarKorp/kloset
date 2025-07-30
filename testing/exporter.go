@@ -30,8 +30,8 @@ func NewMockExporter(appCtx context.Context, opt *exporter.Options, name string,
 	}, nil
 }
 
-func (e *MockExporter) Root() string {
-	return e.rootDir
+func (e *MockExporter) Root(ctx context.Context) (string, error) {
+	return e.rootDir, nil
 }
 
 func (e *MockExporter) CreateDirectory(ctx context.Context, pathname string) error {
@@ -55,7 +55,7 @@ func (e *MockExporter) SetPermissions(ctx context.Context, pathname string, file
 	return nil
 }
 
-func (e *MockExporter) Close() error {
+func (e *MockExporter) Close(ctx context.Context) error {
 	return nil
 }
 

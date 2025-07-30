@@ -12,8 +12,8 @@ import (
 
 type MockedExporter struct{}
 
-func (m MockedExporter) Root() string {
-	return ""
+func (m MockedExporter) Root(ctx context.Context) (string, error) {
+	return "", nil
 }
 
 func (m MockedExporter) CreateDirectory(ctx context.Context, pathname string) error {
@@ -28,7 +28,7 @@ func (m MockedExporter) SetPermissions(ctx context.Context, pathname string, fil
 	return nil
 }
 
-func (m MockedExporter) Close() error {
+func (m MockedExporter) Close(ctx context.Context) error {
 	return nil
 }
 

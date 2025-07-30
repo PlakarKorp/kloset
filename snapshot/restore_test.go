@@ -27,7 +27,7 @@ func TestRestore(t *testing.T) {
 	ctx := context.Background()
 	exporterInstance, err = ptesting.NewMockExporter(ctx, nil, "mock", map[string]string{"location": "mock://" + tmpRestoreDir})
 	require.NoError(t, err)
-	defer exporterInstance.Close()
+	defer exporterInstance.Close(ctx)
 
 	opts := &snapshot.RestoreOptions{
 		MaxConcurrency: 1,
@@ -46,7 +46,9 @@ func TestRestore(t *testing.T) {
 	}
 	require.NotEmpty(t, filepath)
 
-	err = snap.Restore(exporterInstance, exporterInstance.Root(), filepath, opts)
+	root, err := exporterInstance.Root(ctx)
+	require.NoError(t, err)
+	err = snap.Restore(exporterInstance, root, filepath, opts)
 	require.NoError(t, err)
 
 	mockExporter, ok := exporterInstance.(*ptesting.MockExporter)
@@ -55,7 +57,7 @@ func TestRestore(t *testing.T) {
 	files := mockExporter.Files()
 	require.Equal(t, 1, len(files))
 
-	contents, ok := files[fmt.Sprintf("%s/dummy.txt", exporterInstance.Root())]
+	contents, ok := files[fmt.Sprintf("%s/dummy.txt", root)]
 	require.True(t, ok)
 	require.Equal(t, "hello", string(contents))
 }
