@@ -68,7 +68,7 @@ type Importer interface {
 	Origin(ctx context.Context) (string, error)
 	Type(ctx context.Context) (string, error)
 	Root(ctx context.Context) (string, error)
-	Scan(context.Context) (<-chan *ScanResult, error)
+	Scan(ctx context.Context) (<-chan *ScanResult, error)
 	Close(ctx context.Context) error
 }
 
