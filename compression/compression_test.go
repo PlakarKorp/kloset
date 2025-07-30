@@ -18,7 +18,7 @@ func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
 	}
 
 	// Decompress data
-	decompressedReader, err := InflateStream(algorithm, compressedReader)
+	decompressedReader, err := InflateStream(algorithm, io.NopCloser(compressedReader))
 	if err != nil {
 		t.Fatalf("InflateStream failed for %s: %v", algorithm, err)
 	}
@@ -68,7 +68,7 @@ func TestUnsupportedAlgorithm(t *testing.T) {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
 
-	_, err = InflateStream("unsupported", bytes.NewReader([]byte("test data")))
+	_, err = InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
@@ -93,12 +93,12 @@ func TestDeflateStreamErrorHandling(t *testing.T) {
 }
 
 func TestInflateStreamErrorHandling(t *testing.T) {
-	_, err := InflateStream("unsupported", bytes.NewReader([]byte("test data")))
+	_, err := InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
 
-	_, err = InflateStream("gzip", &errorReader{})
+	_, err = InflateStream("gzip", io.NopCloser(&errorReader{}))
 	if err == nil {
 		t.Error("Expected error for reader failure, got nil")
 	}
@@ -129,7 +129,7 @@ func TestLargeDataCompression(t *testing.T) {
 		t.Fatalf("DeflateStream failed for large data: %v", err)
 	}
 
-	decompressedReader, err := InflateStream("LZ4", compressedReader)
+	decompressedReader, err := InflateStream("LZ4", io.NopCloser(compressedReader))
 	if err != nil {
 		t.Fatalf("InflateStream failed for large data: %v", err)
 	}

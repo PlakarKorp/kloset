@@ -56,7 +56,7 @@ func TestEncryptDecryptStream(t *testing.T) {
 	}
 
 	// Decrypt the data
-	decryptedReader, err := DecryptStream(config, key, encryptedReader)
+	decryptedReader, err := DecryptStream(config, key, io.NopCloser(encryptedReader))
 	if err != nil {
 		t.Fatalf("Failed to decrypt data: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestEncryptDecryptEmptyStream(t *testing.T) {
 	}
 
 	// Decrypt the data
-	decryptedReader, err := DecryptStream(config, key, encryptedReader)
+	decryptedReader, err := DecryptStream(config, key, io.NopCloser(encryptedReader))
 	if err != nil {
 		t.Fatalf("Failed to decrypt data: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestEncryptDecryptStreamWithIncorrectKey(t *testing.T) {
 	}
 
 	// Attempt to decrypt the data with the incorrect key
-	decryptedReader, err := DecryptStream(config, incorrectKey, encryptedReader)
+	decryptedReader, err := DecryptStream(config, incorrectKey, io.NopCloser(encryptedReader))
 	if err == nil {
 		// Attempt to read the (likely) invalid decrypted data to trigger an error
 		if _, readErr := io.ReadAll(decryptedReader); readErr == nil {
@@ -192,7 +192,7 @@ func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
 	}
 
 	// Step 3: Decrypt the data
-	decryptedReader, err := DecryptStream(config, key, encryptedReader)
+	decryptedReader, err := DecryptStream(config, key, io.NopCloser(encryptedReader))
 	if err != nil {
 		t.Fatalf("Failed to decrypt data: %v", err)
 	}

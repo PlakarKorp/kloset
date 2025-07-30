@@ -59,8 +59,8 @@ func (s *store) PutState(mac objects.MAC, rd io.Reader) (int64, error) {
 	return int64(len(data)), nil
 }
 
-func (s *store) GetState(mac objects.MAC) (io.Reader, error) {
-	return bytes.NewReader(s.states[mac]), nil
+func (s *store) GetState(mac objects.MAC) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(s.states[mac])), nil
 }
 
 func (s *store) DeleteState(mac objects.MAC) error {
@@ -75,11 +75,11 @@ func (s *store) PutPackfile(mac objects.MAC, rd io.Reader) (int64, error) {
 	return 0, unsupported
 }
 
-func (s *store) GetPackfile(mac objects.MAC) (io.Reader, error) {
+func (s *store) GetPackfile(mac objects.MAC) (io.ReadCloser, error) {
 	return nil, unsupported
 }
 
-func (s *store) GetPackfileBlob(mac objects.MAC, offset uint64, length uint32) (io.Reader, error) {
+func (s *store) GetPackfileBlob(mac objects.MAC, offset uint64, length uint32) (io.ReadCloser, error) {
 	return nil, unsupported
 }
 
@@ -97,7 +97,7 @@ func (s *store) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
 	return 0, nil
 }
 
-func (s *store) GetLock(lockID objects.MAC) (io.Reader, error) {
+func (s *store) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 	return nil, nil
 }
 
