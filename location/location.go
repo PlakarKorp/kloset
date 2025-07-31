@@ -47,6 +47,16 @@ func (l *Location[T]) Register(name string, item T, flags Flags) bool {
 	return true
 }
 
+func (l *Location[T]) Unregister(name string) bool {
+	l.mtx.Lock()
+	defer l.mtx.Unlock()
+	if _, ok := l.items[name]; ok {
+		delete(l.items, name)
+		return true
+	}
+	return false
+}
+
 func (l *Location[T]) Names() []string {
 	l.mtx.Lock()
 	defer l.mtx.Unlock()

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -88,10 +87,18 @@ type ImporterFn func(context.Context, *Options, string, map[string]string) (Impo
 
 var backends = location.New[ImporterFn]("fs")
 
-func Register(name string, flags location.Flags, backend ImporterFn) {
+func Register(name string, flags location.Flags, backend ImporterFn) error {
 	if !backends.Register(name, backend, flags) {
-		log.Fatalf("backend '%s' registered twice", name)
+		return fmt.Errorf("importer backend '%s' already registered", name)
 	}
+	return nil
+}
+
+func Unregister(name string) error {
+	if !backends.Unregister(name) {
+		return fmt.Errorf("importer backend '%s' not registered", name)
+	}
+	return nil
 }
 
 func Backends() []string {
