@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -31,10 +30,18 @@ type ExporterFn func(context.Context, *Options, string, map[string]string) (Expo
 
 var backends = location.New[ExporterFn]("fs")
 
-func Register(name string, flags location.Flags, backend ExporterFn) {
+func Register(name string, flags location.Flags, backend ExporterFn) error {
 	if !backends.Register(name, backend, flags) {
-		log.Fatalf("backend '%s' registered twice", name)
+		return fmt.Errorf("exporter backend '%s' already registered", name)
 	}
+	return nil
+}
+
+func Unregister(name string) error {
+	if !backends.Unregister(name) {
+		return fmt.Errorf("exporter backend '%s' not registered", name)
+	}
+	return nil
 }
 
 func Backends() []string {

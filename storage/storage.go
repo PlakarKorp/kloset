@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,10 +147,18 @@ type StoreFn func(context.Context, string, map[string]string) (Store, error)
 
 var backends = location.New[StoreFn]("fs")
 
-func Register(name string, flags location.Flags, backend StoreFn) {
+func Register(name string, flags location.Flags, backend StoreFn) error {
 	if !backends.Register(name, backend, flags) {
-		log.Fatalf("backend '%s' registered twice", name)
+		return fmt.Errorf("storage backend '%s' already registered", name)
 	}
+	return nil
+}
+
+func Unregister(name string) error {
+	if !backends.Unregister(name) {
+		return fmt.Errorf("storage backend '%s' not registered", name)
+	}
+	return nil
 }
 
 func Backends() []string {
