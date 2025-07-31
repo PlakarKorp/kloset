@@ -7,7 +7,6 @@ import (
 	"mime"
 	"path"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -22,6 +21,7 @@ import (
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/gabriel-vasile/mimetype"
 	"github.com/gobwas/glob"
+	"golang.org/x/sync/errgroup"
 )
 
 type BackupIndexes struct {
@@ -192,7 +192,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		return err
 	}
 
-	wg := sync.WaitGroup{}
+	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
 	startEvent := events.StartImporterEvent()
@@ -201,17 +201,16 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 
 	var stats scanStats
 	for _, cker := range ckers {
-		wg.Add(1)
-		go func(ck *chunkers.Chunker) {
-			defer wg.Done()
+		ck := cker
+		wg.Go(func() error {
 			for {
 				select {
 				case <-ctx.Done():
-					return
+					return ctx.Err()
 
 				case record, ok := <-scanner:
 					if !ok {
-						return
+						return nil
 					}
 
 					if snap.skipExcludedPathname(backupCtx, record) {
@@ -224,9 +223,12 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 					snap.processRecord(backupCtx, record, &stats, ck)
 				}
 			}
-		}(cker)
+		})
 	}
-	wg.Wait()
+
+	if err := wg.Wait(); err != nil {
+		return err
+	}
 
 	for range scanner {
 		// drain the importer channel since we might
