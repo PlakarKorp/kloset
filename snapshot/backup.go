@@ -134,7 +134,13 @@ func (snap *Builder) processRecord(backupCtx *BackupContext, record *importer.Sc
 		snap.Event(events.PathEvent(snap.Header.Identifier, record.Pathname))
 
 		// XXX: Remove this when we introduce the Location object.
-		repoLocation := snap.repository.Location()
+		repoLocation, err := snap.repository.Location()
+		if err != nil {
+			snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
+			backupCtx.recordError(record.Pathname, err)
+			return
+		}
+
 		repoLocation = strings.TrimPrefix(repoLocation, "fs://")
 		repoLocation = strings.TrimPrefix(repoLocation, "ptar://")
 		if record.Pathname == repoLocation || strings.HasPrefix(record.Pathname, repoLocation+"/") {
@@ -181,7 +187,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := backupCtx.imp.Scan()
+	scanner, err := backupCtx.imp.Scan(snap.AppContext())
 	if err != nil {
 		return err
 	}
@@ -308,12 +314,30 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	defer snap.Unlock(done)
 
-	snap.Header.GetSource(0).Importer.Origin = imp.Origin()
-	snap.Header.GetSource(0).Importer.Type = imp.Type()
+	origin, err := imp.Origin(snap.AppContext())
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	typ, err := imp.Type(snap.AppContext())
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	root, err := imp.Root(snap.AppContext())
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	snap.Header.GetSource(0).Importer.Origin = origin
+	snap.Header.GetSource(0).Importer.Type = typ
 	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
 
 	if options.Name == "" {
-		snap.Header.Name = imp.Root() + " @ " + snap.Header.GetSource(0).Importer.Origin
+		snap.Header.Name = root + " @ " + snap.Header.GetSource(0).Importer.Origin
 	} else {
 		snap.Header.Name = options.Name
 	}
@@ -344,7 +368,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
-	snap.Header.GetSource(0).Importer.Directory = imp.Root()
+	snap.Header.GetSource(0).Importer.Directory = root
 	snap.Header.GetSource(0).VFS = *vfsHeader
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
@@ -561,7 +585,17 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
 	}
 
-	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, imp.Type(), imp.Origin(), backupOpts.CleanupVFSCache)
+	typ, err := imp.Type(snap.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	origin, err := imp.Origin(snap.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, typ, origin, backupOpts.CleanupVFSCache)
 	if err != nil {
 		return nil, err
 	}

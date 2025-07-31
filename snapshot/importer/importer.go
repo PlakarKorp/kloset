@@ -65,11 +65,11 @@ type ScanError struct {
 }
 
 type Importer interface {
-	Origin() string
-	Type() string
-	Root() string
-	Scan() (<-chan *ScanResult, error)
-	Close() error
+	Origin(ctx context.Context) (string, error)
+	Type(ctx context.Context) (string, error)
+	Root(ctx context.Context) (string, error)
+	Scan(ctx context.Context) (<-chan *ScanResult, error)
+	Close(ctx context.Context) error
 }
 
 type Options struct {

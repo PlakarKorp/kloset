@@ -108,8 +108,13 @@ func (src *Snapshot) Fork() (*Builder, error) {
 		return nil, err
 	}
 
+	location, err := src.repository.Location()
+	if err != nil {
+		return nil, err
+	}
+
 	var packingStrategy repository.RepositoryType
-	if strings.HasPrefix(src.repository.Location(), "ptar:") {
+	if strings.HasPrefix(location, "ptar:") {
 		packingStrategy = repository.PtarType
 	} else {
 		packingStrategy = repository.DefaultType

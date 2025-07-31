@@ -94,7 +94,8 @@ func TestRepository(t *testing.T) {
 	})
 
 	t.Run("StorageSize", func(t *testing.T) {
-		size := repo.StorageSize()
+		size, err := repo.StorageSize()
+		require.NoError(t, err)
 		require.GreaterOrEqual(t, size, int64(0))
 	})
 
@@ -237,7 +238,9 @@ func TestRepositoryCreation(t *testing.T) {
 		repo, err := repository.Inexistent(ctx, storeConfig)
 		require.NoError(t, err)
 		require.NotNil(t, repo)
-		require.Equal(t, int64(0), repo.StorageSize())
+		size, err := repo.StorageSize()
+		require.NoError(t, err)
+		require.Equal(t, int64(0), size)
 	})
 
 	t.Run("NewNoRebuild", func(t *testing.T) {
@@ -269,6 +272,8 @@ func TestRepositoryCreation(t *testing.T) {
 		repo, err := repository.NewNoRebuild(ctx, key, r, wrappedConfig)
 		require.NoError(t, err)
 		require.NotNil(t, repo)
-		require.Equal(t, int64(0), repo.StorageSize())
+		size, err := repo.StorageSize()
+		require.NoError(t, err)
+		require.Equal(t, int64(0), size)
 	})
 }
