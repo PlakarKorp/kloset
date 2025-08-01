@@ -28,6 +28,10 @@ func (m MockedExporter) SetPermissions(ctx context.Context, pathname string, fil
 	return nil
 }
 
+func (m MockedExporter) CreateLink(ctx context.Context, oldname string, newname string, ltype LinkType) error {
+	return nil
+}
+
 func (m MockedExporter) Close(ctx context.Context) error {
 	return nil
 }
