@@ -18,7 +18,6 @@ package classifier
 
 import (
 	"fmt"
-	"log"
 	"sync"
 
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -70,14 +69,15 @@ func NewClassifier(ctx *kcontext.KContext) (*Classifier, error) {
 	return cf, nil
 }
 
-func Register(name string, backend func() Backend) {
+func Register(name string, backend func() Backend) error {
 	muBackends.Lock()
 	defer muBackends.Unlock()
 
 	if _, ok := backends[name]; ok {
-		log.Fatalf("backend '%s' registered twice", name)
+		return fmt.Errorf("backend '%s' already registered", name)
 	}
 	backends[name] = backend
+	return nil
 }
 
 func (cf *Classifier) Close() error {
