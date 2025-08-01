@@ -51,6 +51,10 @@ func (e *MockExporter) StoreFile(ctx context.Context, pathname string, fp io.Rea
 	return nil
 }
 
+func (e *MockExporter) CreateLink(ctx context.Context, oldname string, newname string, ltype exporter.LinkType) error {
+	return nil
+}
+
 func (e *MockExporter) SetPermissions(ctx context.Context, pathname string, fileinfo *objects.FileInfo) error {
 	return nil
 }
