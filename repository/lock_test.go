@@ -49,7 +49,7 @@ func TestLock(t *testing.T) {
 		require.NoError(t, err)
 
 		// Deserialize the lock
-		deserializedLock, err := repository.NewLockFromStream(originalLock.Version, &buf)
+		deserializedLock, err := repository.NewLockFromStream(&buf)
 		require.NoError(t, err)
 		require.NotNil(t, deserializedLock)
 
@@ -62,7 +62,7 @@ func TestLock(t *testing.T) {
 
 	t.Run("DeserializeInvalidData", func(t *testing.T) {
 		invalidData := []byte("invalid data")
-		_, err := repository.NewLockFromStream(versioning.FromString(repository.LOCK_VERSION), bytes.NewReader(invalidData))
+		_, err := repository.NewLockFromStream(bytes.NewReader(invalidData))
 		require.Error(t, err)
 	})
 

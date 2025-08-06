@@ -47,9 +47,9 @@ func TestVersionString(t *testing.T) {
 		v    Version
 		want string
 	}{
-		{"basic version", NewVersion(1, 2, 3), "1.2.3"},
-		{"zero version", NewVersion(0, 0, 0), "0.0.0"},
-		{"max single byte", NewVersion(255, 255, 255), "255.255.255"},
+		{"basic version", NewVersion(1, 2, 3), "v1.2.3"},
+		{"zero version", NewVersion(0, 0, 0), "v0.0.0"},
+		{"max single byte", NewVersion(255, 255, 255), "v255.255.255"},
 	}
 
 	for _, tt := range tests {
