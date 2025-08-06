@@ -50,6 +50,10 @@ func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string,
 			if entry.FileInfo.Mode()&fs.ModeSymlink != 0 {
 				return nil, nil
 			}
+			// ignore non-regular files
+			if !entry.FileInfo.Lmode.IsRegular() {
+				return nil, nil
+			}
 			header, err := tar.FileInfoHeader(entry.Stat(), "")
 			if err != nil {
 				return nil, err
