@@ -41,7 +41,7 @@ func NewSharedLock(hostname string) *Lock {
 	return newLock(hostname, false)
 }
 
-func NewLockFromStream(version versioning.Version, rd io.Reader) (*Lock, error) {
+func NewLockFromStream(rd io.Reader) (*Lock, error) {
 	var lock Lock
 	if err := msgpack.NewDecoder(rd).Decode(&lock); err != nil {
 		return nil, err

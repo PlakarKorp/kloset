@@ -222,13 +222,13 @@ func (snap *Builder) Lock() (chan bool, error) {
 	}
 
 	for _, lockID := range locksID {
-		version, rd, err := snap.repository.GetLock(lockID)
+		rd, err := snap.repository.GetLock(lockID)
 		if err != nil {
 			snap.repository.DeleteLock(snap.Header.Identifier)
 			return nil, err
 		}
 
-		lock, err := repository.NewLockFromStream(version, rd)
+		lock, err := repository.NewLockFromStream(rd)
 		rd.Close()
 		if err != nil {
 			snap.repository.DeleteLock(snap.Header.Identifier)

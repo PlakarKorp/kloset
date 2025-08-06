@@ -120,6 +120,11 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		return nil, err
 	}
 
+	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_CONFIG, version) {
+		return nil, fmt.Errorf("config version %q is newer than current version %q",
+			version, versioning.GetCurrentVersion(resources.RT_CONFIG))
+	}
+
 	unwrappedConfig, err := io.ReadAll(unwrappedConfigRd)
 	if err != nil {
 		return nil, err
@@ -168,6 +173,11 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 	version, unwrappedConfigRd, err := storage.Deserialize(hasher, resources.RT_CONFIG, io.NopCloser(bytes.NewReader(config)))
 	if err != nil {
 		return nil, err
+	}
+
+	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_CONFIG, version) {
+		return nil, fmt.Errorf("config version %q is newer than current version %q",
+			version, versioning.GetCurrentVersion(resources.RT_CONFIG))
 	}
 
 	unwrappedConfig, err := io.ReadAll(unwrappedConfigRd)
@@ -252,12 +262,12 @@ func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) err
 
 	rebuilt := false
 	for _, stateID := range missingStates {
-		version, remoteStateRd, err := r.GetState(stateID)
+		remoteStateRd, err := r.GetState(stateID)
 		if err != nil {
 			return err
 		}
 
-		err = aggregatedState.MergeState(version, stateID, remoteStateRd)
+		err = aggregatedState.MergeState(stateID, remoteStateRd)
 		remoteStateRd.Close()
 
 		if err != nil {
@@ -522,7 +532,7 @@ func (r *Repository) GetStates() ([]objects.MAC, error) {
 	return r.store.GetStates(r.appContext)
 }
 
-func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.ReadCloser, error) {
+func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
@@ -530,19 +540,24 @@ func (r *Repository) GetState(mac objects.MAC) (versioning.Version, io.ReadClose
 
 	rd, err := r.store.GetState(r.appContext, mac)
 	if err != nil {
-		return versioning.Version(0), nil, err
+		return nil, err
 	}
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, rd)
 	if err != nil {
-		return versioning.Version(0), nil, err
+		return nil, err
+	}
+
+	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
+		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
+			mac, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
 
 	rd, err = r.decode(rd)
 	if err != nil {
-		return versioning.Version(0), nil, err
+		return nil, err
 	}
-	return version, rd, err
+	return rd, err
 }
 
 func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
@@ -601,6 +616,11 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 	packfileVersion, rd, err := storage.Deserialize(hasher, resources.RT_PACKFILE, rd)
 	if err != nil {
 		return nil, err
+	}
+
+	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_PACKFILE, packfileVersion) {
+		return nil, fmt.Errorf("packfile(%x) version %q is newer than current version %q",
+			mac, packfileVersion, versioning.GetCurrentVersion(resources.RT_PACKFILE))
 	}
 
 	rawPackfile, err := io.ReadAll(rd)
@@ -934,7 +954,7 @@ func (r *Repository) GetLocks() ([]objects.MAC, error) {
 	return r.store.GetLocks(r.appContext)
 }
 
-func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.ReadCloser, error) {
+func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
@@ -942,19 +962,24 @@ func (r *Repository) GetLock(lockID objects.MAC) (versioning.Version, io.ReadClo
 
 	rd, err := r.store.GetLock(r.appContext, lockID)
 	if err != nil {
-		return versioning.Version(0), nil, err
+		return nil, err
 	}
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_LOCK, rd)
 	if err != nil {
-		return versioning.Version(0), nil, err
+		return nil, err
+	}
+
+	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_LOCK, version) {
+		return nil, fmt.Errorf("lock version %q is newer than current version %q",
+			version, versioning.GetCurrentVersion(resources.RT_LOCK))
 	}
 
 	rd, err = r.decode(rd)
 	if err != nil {
-		return versioning.Version(0), nil, err
+		return nil, err
 	}
-	return version, rd, err
+	return rd, err
 }
 
 func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {

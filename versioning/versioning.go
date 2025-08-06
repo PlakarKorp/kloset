@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/PlakarKorp/kloset/resources"
+	"golang.org/x/mod/semver"
 )
 
 type Version uint32
@@ -26,7 +27,7 @@ func (v Version) Patch() uint32 {
 }
 
 func (v Version) String() string {
-	return fmt.Sprintf("%d.%d.%d", v.Major(), v.Minor(), v.Patch())
+	return fmt.Sprintf("v%d.%d.%d", v.Major(), v.Minor(), v.Patch())
 }
 
 func FromString(s string) Version {
@@ -60,4 +61,10 @@ func GetCurrentVersion(Type resources.Type) Version {
 	} else {
 		return version
 	}
+}
+
+func IsCompatibleWithCurrentVersion(resourceType resources.Type, with Version) bool {
+	currVersion := GetCurrentVersion(resourceType)
+
+	return semver.Compare(with.String(), currVersion.String()) <= 0
 }
