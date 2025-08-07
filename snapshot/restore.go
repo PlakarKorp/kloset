@@ -76,7 +76,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 		snap.Event(events.FileEvent(snap.Header.Identifier, entrypath))
 		wg.Go(func() error {
-			if e.Stat().Mode().IsRegular() && e.Stat().Nlink() > 1 {
+			if e.Stat().Nlink() > 1 {
 				restoreContext.hardlinksMutex.Lock()
 				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
 				v, ok := restoreContext.hardlinks[key]
@@ -99,7 +99,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			}
 
 			// Restore the file content.
-			if e.Stat().Mode().IsRegular() && e.Stat().Nlink() > 1 {
+			if e.Stat().Nlink() > 1 {
 				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
 				restoreContext.hardlinks[key] = dest
 				defer restoreContext.hardlinksMutex.Unlock()
