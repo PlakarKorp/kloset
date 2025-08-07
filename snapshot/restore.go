@@ -2,7 +2,7 @@ package snapshot
 
 import (
 	"fmt"
-	"os"
+	"io/fs"
 	"path"
 	"strings"
 	"sync"
@@ -66,28 +66,26 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 		// For non-directory entries, only process regular files.
 		if !e.Stat().Mode().IsRegular() {
-			snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, "unexpected vfs entry type"))
+			if e.Stat().Mode().Type()&fs.ModeSymlink != 0 {
+				if err := exp.CreateLink(snap.AppContext(), e.SymlinkTarget, dest, exporter.SYMLINK); err != nil {
+					snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, fmt.Sprintf("failed to restore symlink: %s\n", err.Error())))
+				}
+			}
 			return nil
 		}
 
 		snap.Event(events.FileEvent(snap.Header.Identifier, entrypath))
 		wg.Go(func() error {
-			// Handle hard links.
 			if e.Stat().Nlink() > 1 {
-				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
 				restoreContext.hardlinksMutex.Lock()
+				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
 				v, ok := restoreContext.hardlinks[key]
-				restoreContext.hardlinksMutex.Unlock()
 				if ok {
-					// Create a new link and return.
-					if err := os.Link(v, dest); err != nil {
+					if err := exp.CreateLink(snap.AppContext(), v, dest, exporter.HARDLINK); err != nil {
 						snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 					}
-					return nil
-				} else {
-					restoreContext.hardlinksMutex.Lock()
-					restoreContext.hardlinks[key] = dest
 					restoreContext.hardlinksMutex.Unlock()
+					return nil
 				}
 			}
 
@@ -101,6 +99,12 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			}
 
 			// Restore the file content.
+			if e.Stat().Nlink() > 1 {
+				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
+				restoreContext.hardlinks[key] = dest
+				defer restoreContext.hardlinksMutex.Unlock()
+			}
+
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
