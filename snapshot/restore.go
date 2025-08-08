@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/exporter"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"golang.org/x/sync/errgroup"
@@ -22,6 +24,12 @@ type restoreContext struct {
 	hardlinks      map[string]string
 	hardlinksMutex sync.Mutex
 	vfs            *vfs.Filesystem
+	directories    []dirRec
+}
+
+type dirRec struct {
+	path string
+	mode *objects.FileInfo
 }
 
 func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *errgroup.Group) func(entrypath string, e *vfs.Entry, err error) error {
@@ -54,11 +62,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			// WalkDir handles recursion so we don’t need to iterate children manually.
 			if entrypath != "/" {
-				if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
-					err := fmt.Errorf("failed to set permissions on directory %q: %w", dest, err)
-					snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-					return err
-				}
+				restoreContext.directories = append(restoreContext.directories, dirRec{path: dest, mode: e.Stat()})
 			}
 			snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, entrypath))
 			return nil
@@ -138,6 +142,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		hardlinks:      make(map[string]string),
 		hardlinksMutex: sync.Mutex{},
 		vfs:            fs,
+		directories:    make([]dirRec, 0, 256),
 	}
 
 	base = path.Clean(base)
@@ -147,7 +152,24 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 
 	wg := errgroup.Group{}
 	wg.SetLimit(int(maxConcurrency))
-	defer wg.Wait()
 
-	return fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg))
+	if err := fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
+		wg.Wait()
+		return err
+	}
+
+	wg.Wait()
+	sort.Slice(restoreContext.directories, func(i, j int) bool {
+		di := strings.Count(restoreContext.directories[i].path, "/")
+		dj := strings.Count(restoreContext.directories[j].path, "/")
+		return di > dj
+	})
+
+	for _, d := range restoreContext.directories {
+		if d.path == "/" {
+			continue // Skip the root directory
+		}
+		_ = exp.SetPermissions(snap.AppContext(), d.path, d.mode)
+	}
+	return nil
 }
