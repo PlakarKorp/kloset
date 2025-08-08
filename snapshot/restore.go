@@ -29,7 +29,7 @@ type restoreContext struct {
 
 type dirRec struct {
 	path string
-	mode *objects.FileInfo
+	info *objects.FileInfo
 }
 
 func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *errgroup.Group) func(entrypath string, e *vfs.Entry, err error) error {
@@ -62,7 +62,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			// WalkDir handles recursion so we don’t need to iterate children manually.
 			if entrypath != "/" {
-				restoreContext.directories = append(restoreContext.directories, dirRec{path: dest, mode: e.Stat()})
+				restoreContext.directories = append(restoreContext.directories, dirRec{path: dest, info: e.Stat()})
 			}
 			snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, entrypath))
 			return nil
@@ -169,7 +169,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		if d.path == "/" {
 			continue // Skip the root directory
 		}
-		if err := exp.SetPermissions(snap.AppContext(), d.path, d.mode); err != nil {
+		if err := exp.SetPermissions(snap.AppContext(), d.path, d.info); err != nil {
 			err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
 			snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, d.path, err.Error()))
 		}
