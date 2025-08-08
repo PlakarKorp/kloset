@@ -169,7 +169,10 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		if d.path == "/" {
 			continue // Skip the root directory
 		}
-		_ = exp.SetPermissions(snap.AppContext(), d.path, d.mode)
+		if err := exp.SetPermissions(snap.AppContext(), d.path, d.mode); err != nil {
+			err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
+			snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, d.path, err.Error()))
+		}
 	}
 	return nil
 }
