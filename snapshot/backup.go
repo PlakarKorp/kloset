@@ -635,47 +635,59 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*vfs.Entry, objects.MAC, *objects.Object, objects.MAC, error) {
 	vfsCache := backupCtx.vfsCache
 
-	var err error
 	var fileEntry *vfs.Entry
+	var fileEntryMAC objects.MAC
 	var object *objects.Object
 	var objectMAC objects.MAC
-	var objectSerialized []byte
 
-	var cachedFileEntry *vfs.Entry
-	var cachedFileEntryMAC objects.MAC
-
-	// Check if the file entry and underlying objects are already in the cache
 	if !record.IsXattr {
 		if data, err := vfsCache.GetFilename(record.Pathname); err != nil {
-			snap.Logger().Warn("VFS CACHE: Error getting filename: %v", err)
+			return nil, objects.MAC{}, nil, objects.MAC{}, err
 		} else if data != nil {
-			cachedFileEntry, err = vfs.EntryFromBytes(data)
-			if err != nil {
-				snap.Logger().Warn("VFS CACHE: Error unmarshaling filename: %v", err)
+			if cachedFileEntry, err := vfs.EntryFromBytes(data); err != nil {
+				return nil, objects.MAC{}, nil, objects.MAC{}, err
 			} else {
-				cachedFileEntryMAC = snap.repository.ComputeMAC(data)
+				fileEntryMAC = snap.repository.ComputeMAC(data)
 				if (record.FileInfo.Size() == -1 && cachedFileEntry.Stat().EqualIgnoreSize(&record.FileInfo)) || cachedFileEntry.Stat().Equal(&record.FileInfo) {
 					fileEntry = cachedFileEntry
 					if fileEntry.FileInfo.Mode().IsRegular() {
-						data, err := vfsCache.GetObject(cachedFileEntry.Object)
+						data, err := vfsCache.GetObject(fileEntry.Object)
 						if err != nil {
-							snap.Logger().Warn("VFS CACHE: Error getting object: %v", err)
+							return nil, objects.MAC{}, nil, objects.MAC{}, err
 						} else if data != nil {
 							cachedObject, err := objects.NewObjectFromBytes(data)
 							if err != nil {
-								snap.Logger().Warn("VFS CACHE: Error unmarshaling object: %v", err)
+								return nil, objects.MAC{}, nil, objects.MAC{}, err
 							} else {
 								object = cachedObject
 								objectMAC = snap.repository.ComputeMAC(data)
-								objectSerialized = data
 							}
 						}
 					}
 				}
 			}
+		}
+	}
+	return fileEntry, fileEntryMAC, object, objectMAC, nil
+}
+
+func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+	vfsCache := backupCtx.vfsCache
+
+	var err error
+	var fileEntry *vfs.Entry
+	var fileEntryMAC objects.MAC
+	var object *objects.Object
+	var objectMAC objects.MAC
+
+	// Check if the file entry and underlying objects are already in the cache
+	if !record.IsXattr {
+		fileEntry, fileEntryMAC, object, objectMAC, err = snap.checkVFSCache(backupCtx, record)
+		if err != nil {
+			snap.Logger().Warn("VFS CACHE: %v", err)
 		}
 	}
 
@@ -695,7 +707,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 			// file size may have changed between the scan and chunkify
 			record.FileInfo.Lsize = dataSize
 
-			objectSerialized, err = object.Serialize()
+			objectSerialized, err := object.Serialize()
 			if err != nil {
 				return err
 			}
@@ -719,7 +731,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 		return nil
 	}
 
-	if fileEntry == nil || !snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedFileEntryMAC) {
+	if fileEntry == nil || !snap.repository.BlobExists(resources.RT_VFS_ENTRY, fileEntryMAC) {
 		fileEntry = vfs.NewEntry(path.Dir(record.Pathname), record)
 		if object != nil {
 			fileEntry.Object = objectMAC
