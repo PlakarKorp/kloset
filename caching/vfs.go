@@ -1,7 +1,6 @@
 package caching
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -43,14 +42,6 @@ func (c *VFSCache) Close() error {
 	} else {
 		return nil
 	}
-}
-
-func (c *VFSCache) PutCachedObject(mac [32]byte, data []byte) error {
-	return c.put("__cobj__", fmt.Sprintf("%x", mac), data)
-}
-
-func (c *VFSCache) GetCachedObject(mac [32]byte) ([]byte, error) {
-	return c.get("__cobj__", fmt.Sprintf("%x", mac))
 }
 
 func (c *VFSCache) PutCachedPath(pathname string, data []byte) error {

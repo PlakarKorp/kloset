@@ -120,26 +120,3 @@ func (c *Chunk) MarshalJSON() ([]byte, error) {
 	type Alias Chunk
 	return json.Marshal((*Alias)(c))
 }
-
-type CachedObject struct {
-	Version     versioning.Version `msgpack:"version"`
-	ContentMAC  MAC                `msgpack:"contentMAC"`
-	MAC         MAC                `msgpack:"MAC"`
-	Size        int64              `msgpack:"size"`
-	Chunks      uint64             `msgpack:"chunks"`
-	ContentType string             `msgpack:"content_type,omitempty"`
-	Entropy     float64            `msgpack:"entropy,omitempty"`
-	Flags       uint32             `msgpack:"flags"`
-}
-
-func NewCachedObjectFromBytes(serialized []byte) (*CachedObject, error) {
-	var o CachedObject
-	if err := msgpack.Unmarshal(serialized, &o); err != nil {
-		return nil, err
-	}
-	return &o, nil
-}
-
-func (o *CachedObject) Serialize() ([]byte, error) {
-	return msgpack.Marshal(o)
-}
