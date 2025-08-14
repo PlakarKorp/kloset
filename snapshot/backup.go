@@ -680,21 +680,9 @@ type contentMeta struct {
 	ContentType string
 }
 
-func (snap *Builder) computeContentMeta(idx int, backupCtx *BackupContext, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
-	// Non-regular: nothing to compute
+func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
 		return &contentMeta{}, nil
-	}
-
-	// If we trust cache, reuse it
-	if cachedPath != nil && cachedPath.ObjectMAC != (objects.MAC{}) {
-		return &contentMeta{
-			ObjectMAC:   cachedPath.ObjectMAC,
-			Size:        cachedPath.FileInfo.Size(),
-			Chunks:      cachedPath.Chunks,
-			Entropy:     cachedPath.Entropy,
-			ContentType: cachedPath.ContentType,
-		}, nil
 	}
 
 	if cachedPath != nil && cachedPath.ObjectMAC != (objects.MAC{}) {
@@ -734,10 +722,8 @@ func (snap *Builder) computeContentMeta(idx int, backupCtx *BackupContext, chunk
 func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
 	vfsCache := backupCtx.vfsCache
 
-	var (
-		err        error
-		cachedPath *objects.CachedPath
-	)
+	var err error
+	var cachedPath *objects.CachedPath
 
 	if !record.IsXattr {
 		cachedPath, err = snap.checkVFSCache(backupCtx, record)
@@ -746,7 +732,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 		}
 	}
 
-	meta, err := snap.computeContentMeta(idx, backupCtx, chunker, cachedPath, record)
+	meta, err := snap.computeContentMeta(idx, chunker, cachedPath, record)
 	if err != nil {
 		return err
 	}
@@ -775,7 +761,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 		}
 
 		fileEntryMAC = snap.repository.ComputeMAC(serialized)
-		if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
+		if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
 			return err
 		}
 
