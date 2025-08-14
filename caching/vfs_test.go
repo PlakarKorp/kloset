@@ -40,25 +40,6 @@ func TestVFSCache(t *testing.T) {
 		require.NoError(t, err) // Returns nil, nil for non-existent paths
 	})
 
-	// Test file summary operations
-	t.Run("File Summary Operations", func(t *testing.T) {
-		pathname := "/test/file.txt"
-		data := []byte("test file summary data")
-
-		// Test PutFileSummary
-		err := cache.PutFileSummary(pathname, data)
-		require.NoError(t, err)
-
-		// Test GetFileSummary
-		retrievedData, err := cache.GetFileSummary(pathname)
-		require.NoError(t, err)
-		require.Equal(t, data, retrievedData)
-
-		// Test GetFileSummary with non-existent path
-		_, err = cache.GetFileSummary("/non/existent/file.txt")
-		require.NoError(t, err) // Returns nil, nil for non-existent paths
-	})
-
 	// Test object operations
 	t.Run("Object Operations", func(t *testing.T) {
 		mac := [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
@@ -84,14 +65,11 @@ func TestVFSCache(t *testing.T) {
 		pathname := "/test/multiple"
 		//dirData := []byte("directory data")
 		filenameData := []byte("filename data")
-		summaryData := []byte("summary data")
 
 		// Test putting different types of data for the same pathname
 		//err := cache.PutDirectory(pathname, dirData)
 		//require.NoError(t, err)
 		err = cache.PutPathinfo(pathname, filenameData)
-		require.NoError(t, err)
-		err = cache.PutFileSummary(pathname, summaryData)
 		require.NoError(t, err)
 
 		// Verify all data can be retrieved correctly
@@ -102,9 +80,5 @@ func TestVFSCache(t *testing.T) {
 		retrievedFilenameData, err := cache.GetPathinfo(pathname)
 		require.NoError(t, err)
 		require.Equal(t, filenameData, retrievedFilenameData)
-
-		retrievedSummaryData, err := cache.GetFileSummary(pathname)
-		require.NoError(t, err)
-		require.Equal(t, summaryData, retrievedSummaryData)
 	})
 }

@@ -45,14 +45,6 @@ func (c *VFSCache) Close() error {
 	}
 }
 
-func (c *VFSCache) PutFileSummary(pathname string, data []byte) error {
-	return c.put("__file_summary__", pathname, data)
-}
-
-func (c *VFSCache) GetFileSummary(pathname string) ([]byte, error) {
-	return c.get("__file_summary__", pathname)
-}
-
 func (c *VFSCache) PutCachedObject(mac [32]byte, data []byte) error {
 	return c.put("__cobj__", fmt.Sprintf("%x", mac), data)
 }
