@@ -684,7 +684,17 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 func (snap *Builder) processObject(idx int, backupCtx *BackupContext, chunker *chunkers.Chunker, cachedObject *objects.CachedObject, record *importer.ScanRecord) (*objects.CachedObject, error) {
 	vfsCache := backupCtx.vfsCache
 
-	if !record.FileInfo.Mode().IsRegular() || (cachedObject != nil && snap.repository.BlobExists(resources.RT_OBJECT, cachedObject.MAC)) {
+	if !record.FileInfo.Mode().IsRegular() {
+		return cachedObject, nil
+	}
+
+	if cachedObject != nil {
+		if !snap.repository.BlobExists(resources.RT_OBJECT, cachedObject.MAC) {
+			cachedObject = nil
+		}
+	}
+
+	if cachedObject != nil {
 		return cachedObject, nil
 	}
 
