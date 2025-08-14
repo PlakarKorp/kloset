@@ -45,22 +45,6 @@ func (c *VFSCache) Close() error {
 	}
 }
 
-func (c *VFSCache) PutDirectory(pathname string, data []byte) error {
-	return c.put("__directory__", pathname, data)
-}
-
-func (c *VFSCache) GetDirectory(pathname string) ([]byte, error) {
-	return c.get("__directory__", pathname)
-}
-
-func (c *VFSCache) PutFilename(pathname string, data []byte) error {
-	return c.put("__filename__", pathname, data)
-}
-
-func (c *VFSCache) GetFilename(pathname string) ([]byte, error) {
-	return c.get("__filename__", pathname)
-}
-
 func (c *VFSCache) PutFileSummary(pathname string, data []byte) error {
 	return c.put("__file_summary__", pathname, data)
 }
@@ -75,4 +59,20 @@ func (c *VFSCache) PutCachedObject(mac [32]byte, data []byte) error {
 
 func (c *VFSCache) GetCachedObject(mac [32]byte) ([]byte, error) {
 	return c.get("__cobj__", fmt.Sprintf("%x", mac))
+}
+
+func (c *VFSCache) PutCachedFilemeta(pathname string, data []byte) error {
+	return c.put("__cfmeta__", pathname, data)
+}
+
+func (c *VFSCache) GetCachedFilemeta(pathname string) ([]byte, error) {
+	return c.get("__cfmeta__", pathname)
+}
+
+func (c *VFSCache) PutPathinfo(pathname string, data []byte) error {
+	return c.put("__pinfo__", pathname, data)
+}
+
+func (c *VFSCache) GetPathinfo(pathname string) ([]byte, error) {
+	return c.get("__pinfo__", pathname)
 }

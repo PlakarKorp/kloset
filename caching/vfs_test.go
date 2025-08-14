@@ -21,41 +21,22 @@ func TestVFSCache(t *testing.T) {
 	require.NoError(t, err)
 	defer cache.Close()
 
-	// Test directory operations
-	t.Run("Directory Operations", func(t *testing.T) {
-		pathname := "/test/directory"
-		data := []byte("test directory data")
-
-		// Test PutDirectory
-		err := cache.PutDirectory(pathname, data)
-		require.NoError(t, err)
-
-		// Test GetDirectory
-		retrievedData, err := cache.GetDirectory(pathname)
-		require.NoError(t, err)
-		require.Equal(t, data, retrievedData)
-
-		// Test GetDirectory with non-existent path
-		_, err = cache.GetDirectory("/non/existent/path")
-		require.NoError(t, err) // Returns nil, nil for non-existent paths
-	})
-
 	// Test filename operations
 	t.Run("Filename Operations", func(t *testing.T) {
 		pathname := "/test/file.txt"
 		data := []byte("test filename data")
 
 		// Test PutFilename
-		err := cache.PutFilename(pathname, data)
+		err := cache.PutPathinfo(pathname, data)
 		require.NoError(t, err)
 
 		// Test GetFilename
-		retrievedData, err := cache.GetFilename(pathname)
+		retrievedData, err := cache.GetPathinfo(pathname)
 		require.NoError(t, err)
 		require.Equal(t, data, retrievedData)
 
 		// Test GetFilename with non-existent path
-		_, err = cache.GetFilename("/non/existent/file.txt")
+		_, err = cache.GetPathinfo("/non/existent/file.txt")
 		require.NoError(t, err) // Returns nil, nil for non-existent paths
 	})
 
@@ -101,24 +82,24 @@ func TestVFSCache(t *testing.T) {
 	// Test multiple operations with same keys
 	t.Run("Multiple Operations", func(t *testing.T) {
 		pathname := "/test/multiple"
-		dirData := []byte("directory data")
+		//dirData := []byte("directory data")
 		filenameData := []byte("filename data")
 		summaryData := []byte("summary data")
 
 		// Test putting different types of data for the same pathname
-		err := cache.PutDirectory(pathname, dirData)
-		require.NoError(t, err)
-		err = cache.PutFilename(pathname, filenameData)
+		//err := cache.PutDirectory(pathname, dirData)
+		//require.NoError(t, err)
+		err = cache.PutPathinfo(pathname, filenameData)
 		require.NoError(t, err)
 		err = cache.PutFileSummary(pathname, summaryData)
 		require.NoError(t, err)
 
 		// Verify all data can be retrieved correctly
-		retrievedDirData, err := cache.GetDirectory(pathname)
-		require.NoError(t, err)
-		require.Equal(t, dirData, retrievedDirData)
+		//retrievedDirData, err := cache.GetDirectory(pathname)
+		//require.NoError(t, err)
+		//require.Equal(t, dirData, retrievedDirData)
 
-		retrievedFilenameData, err := cache.GetFilename(pathname)
+		retrievedFilenameData, err := cache.GetPathinfo(pathname)
 		require.NoError(t, err)
 		require.Equal(t, filenameData, retrievedFilenameData)
 

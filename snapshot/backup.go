@@ -646,31 +646,32 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*vfs.Entry, objects.MAC, *objects.CachedObject, error) {
+func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, *objects.CachedObject, error) {
 	vfsCache := backupCtx.vfsCache
 
-	var fileEntry *vfs.Entry
-	var fileEntryMAC objects.MAC
+	//var fileEntry *vfs.Entry
+	//var fileEntryMAC objects.MAC
+
+	var cachedPath *objects.CachedPath
 	var cachedObject *objects.CachedObject
 
 	if !record.IsXattr {
-		if data, err := vfsCache.GetFilename(record.Pathname); err != nil {
-			return nil, objects.MAC{}, nil, err
+		if data, err := vfsCache.GetPathinfo(record.Pathname); err != nil {
+			return nil, nil, err
 		} else if data != nil {
-			if cachedFileEntry, err := vfs.EntryFromBytes(data); err != nil {
-				return nil, objects.MAC{}, nil, err
+			if pathinfo, err := objects.NewCachedPathFromBytes(data); err != nil {
+				return nil, nil, err
 			} else {
-				fileEntryMAC = snap.repository.ComputeMAC(data)
-				if (record.FileInfo.Size() == -1 && cachedFileEntry.Stat().EqualIgnoreSize(&record.FileInfo)) || cachedFileEntry.Stat().Equal(&record.FileInfo) {
-					fileEntry = cachedFileEntry
-					if fileEntry.FileInfo.Mode().IsRegular() {
-						data, err := vfsCache.GetCachedObject(fileEntry.Object)
+				if (record.FileInfo.Size() == -1 && pathinfo.Stat().EqualIgnoreSize(&record.FileInfo)) || pathinfo.Stat().Equal(&record.FileInfo) {
+					cachedPath = pathinfo
+					if cachedPath.FileInfo.Mode().IsRegular() {
+						data, err := vfsCache.GetCachedObject(cachedPath.ObjectMAC)
 						if err != nil {
-							return nil, objects.MAC{}, nil, err
+							return nil, nil, err
 						} else if data != nil {
 							obj, err := objects.NewCachedObjectFromBytes(data)
 							if err != nil {
-								return nil, objects.MAC{}, nil, err
+								return nil, nil, err
 							} else {
 								cachedObject = obj
 							}
@@ -680,20 +681,19 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 			}
 		}
 	}
-	return fileEntry, fileEntryMAC, cachedObject, nil
+	return cachedPath, cachedObject, nil
 }
 
 func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
 	vfsCache := backupCtx.vfsCache
 
 	var err error
-	var fileEntry *vfs.Entry
-	var fileEntryMAC objects.MAC
+	var cachedPath *objects.CachedPath
 	var cachedObject *objects.CachedObject
 
 	// Check if the file entry and underlying objects are already in the cache
 	if !record.IsXattr {
-		fileEntry, fileEntryMAC, cachedObject, err = snap.checkVFSCache(backupCtx, record)
+		cachedPath, cachedObject, err = snap.checkVFSCache(backupCtx, record)
 		if err != nil {
 			snap.Logger().Warn("VFS CACHE: %v", err)
 		}
@@ -740,8 +740,20 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 		return nil
 	}
 
-	if fileEntry == nil || !snap.repository.BlobExists(resources.RT_VFS_ENTRY, fileEntryMAC) {
-		fileEntry = vfs.NewEntry(path.Dir(record.Pathname), record)
+	var fileEntryMAC objects.MAC
+
+	fileEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
+	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+		// Reuse existing VFS entry (do NOT rewrite the repo blob).
+		// Still build an in-memory entry so we can push it into scanCache via recordEntry.
+		if cachedObject != nil {
+			fileEntry.Object = cachedObject.MAC
+		} else if cachedPath.ObjectMAC != (objects.MAC{}) {
+			fileEntry.Object = cachedPath.ObjectMAC
+		}
+		fileEntryMAC = cachedPath.MAC
+	} else {
+		// Build and write a fresh VFS entry to the repo, then refresh pathinfo in cache.
 		if cachedObject != nil {
 			fileEntry.Object = cachedObject.MAC
 		}
@@ -751,53 +763,82 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 			return err
 		}
 
-		fileEntryMAC := snap.repository.ComputeMAC(serialized)
+		fileEntryMAC = snap.repository.ComputeMAC(serialized)
 		if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
 			return err
 		}
 
-		// Store the newly generated FileEntry in the cache for future runs
-		if err := vfsCache.PutFilename(record.Pathname, serialized); err != nil {
-			return err
+		// NOTE: don't shadow the outer cachedPath variable.
+		cachedPath = &objects.CachedPath{
+			Version:   fileEntry.Version,
+			MAC:       fileEntryMAC,
+			ObjectMAC: fileEntry.Object, // may be zero if no object
+			FileInfo:  fileEntry.FileInfo,
 		}
-
-		fileSummary := &vfs.FileSummary{
-			Size:    uint64(record.FileInfo.Size()),
-			Mode:    record.FileInfo.Mode(),
-			ModTime: record.FileInfo.ModTime().Unix(),
-		}
-		if cachedObject != nil {
-			fileSummary.Objects++
-			fileSummary.Chunks += cachedObject.Chunks
-			fileSummary.ContentType = cachedObject.ContentType
-			fileSummary.Entropy = cachedObject.Entropy
-		}
-
-		seralizedFileSummary, err := fileSummary.Serialize()
+		serializedCachedPath, err := cachedPath.Serialize()
 		if err != nil {
 			return err
 		}
 
-		if err := vfsCache.PutFileSummary(record.Pathname, seralizedFileSummary); err != nil {
+		// Persist pathinfo so we can reuse next run.
+		if err := vfsCache.PutPathinfo(record.Pathname, serializedCachedPath); err != nil {
 			return err
 		}
 	}
 
+	// Build/update the FileSummary.
+	// Prefer cachedObject (fresh build) when available; else try cached summary; else minimal.
+	var fileSummary *vfs.FileSummary
 	if cachedObject != nil {
-		parts := strings.SplitN(cachedObject.ContentType, ";", 2)
-		mime := parts[0]
+		fileSummary = &vfs.FileSummary{
+			Size:        uint64(record.FileInfo.Size()),
+			Mode:        record.FileInfo.Mode(),
+			ModTime:     record.FileInfo.ModTime().Unix(),
+			Objects:     1,
+			Chunks:      cachedObject.Chunks,
+			Entropy:     cachedObject.Entropy,
+			ContentType: cachedObject.ContentType,
+		}
+	} else {
+		if data, err := vfsCache.GetFileSummary(record.Pathname); err == nil && data != nil {
+			if fs, err := vfs.FileSummaryFromBytes(data); err == nil {
+				fileSummary = fs
+			}
+		}
+		if fileSummary == nil {
+			fileSummary = &vfs.FileSummary{
+				Size:    uint64(record.FileInfo.Size()),
+				Mode:    record.FileInfo.Mode(),
+				ModTime: record.FileInfo.ModTime().Unix(),
+			}
+		}
+	}
 
-		k := fmt.Sprintf("/%s%s", mime, fileEntry.Path())
-		bytes, err := fileEntry.ToBytes()
-		if err != nil {
+	if ser, err := fileSummary.Serialize(); err == nil {
+		if err := vfsCache.PutFileSummary(record.Pathname, ser); err != nil {
 			return err
 		}
-		if err := backupCtx.indexes[0].ctidx.Insert(k, snap.repository.ComputeMAC(bytes)); err != nil {
+	}
+
+	// Content-type index: use the *entry MAC* we already have (reused or fresh).
+	if cachedObject != nil && strings.TrimSpace(cachedObject.ContentType) != "" {
+		parts := strings.SplitN(cachedObject.ContentType, ";", 2)
+		mime := parts[0]
+		k := fmt.Sprintf("/%s%s", mime, record.Pathname)
+		if err := backupCtx.indexes[0].ctidx.Insert(k, fileEntryMAC); err != nil {
+			return err
+		}
+	} else if fileSummary.ContentType != "" {
+		parts := strings.SplitN(fileSummary.ContentType, ";", 2)
+		mime := parts[0]
+		k := fmt.Sprintf("/%s%s", mime, record.Pathname)
+		if err := backupCtx.indexes[0].ctidx.Insert(k, fileEntryMAC); err != nil {
 			return err
 		}
 	}
 
 	return backupCtx.recordEntry(fileEntry)
+
 }
 
 func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
