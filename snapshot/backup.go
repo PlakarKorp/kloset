@@ -719,28 +719,8 @@ func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cach
 	}, nil
 }
 
-func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
 	vfsCache := backupCtx.vfsCache
-
-	var err error
-	var cachedPath *objects.CachedPath
-
-	if !record.IsXattr {
-		cachedPath, err = snap.checkVFSCache(backupCtx, record)
-		if err != nil {
-			snap.Logger().Warn("VFS CACHE: %v", err)
-		}
-	}
-
-	meta, err := snap.computeContentMeta(idx, chunker, cachedPath, record)
-	if err != nil {
-		return err
-	}
-
-	if record.IsXattr {
-		backupCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
-		return nil
-	}
 
 	fileEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
 	if record.FileInfo.Mode().IsRegular() && meta.ObjectMAC != (objects.MAC{}) {
@@ -803,6 +783,30 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 	}
 
 	return backupCtx.recordEntry(fileEntry)
+}
+
+func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+	var err error
+	var cachedPath *objects.CachedPath
+
+	if !record.IsXattr {
+		cachedPath, err = snap.checkVFSCache(backupCtx, record)
+		if err != nil {
+			snap.Logger().Warn("VFS CACHE: %v", err)
+		}
+	}
+
+	meta, err := snap.computeContentMeta(idx, chunker, cachedPath, record)
+	if err != nil {
+		return err
+	}
+
+	if record.IsXattr {
+		backupCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
+		return nil
+	}
+
+	return snap.writeFileEntry(idx, backupCtx, meta, cachedPath, record)
 }
 
 func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
