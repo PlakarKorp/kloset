@@ -653,7 +653,7 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 	var cachedObject *objects.CachedObject
 
 	if !record.IsXattr {
-		if data, err := vfsCache.GetPathinfo(record.Pathname); err != nil {
+		if data, err := vfsCache.GetCachedPath(record.Pathname); err != nil {
 			return nil, nil, err
 		} else if data != nil {
 			if pathinfo, err := objects.NewCachedPathFromBytes(data); err != nil {
@@ -802,7 +802,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 		}
 
 		// Persist pathinfo so we can reuse next run.
-		if err := vfsCache.PutPathinfo(record.Pathname, serializedCachedPath); err != nil {
+		if err := vfsCache.PutCachedPath(record.Pathname, serializedCachedPath); err != nil {
 			return err
 		}
 	}
@@ -895,7 +895,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 				return nil, nil, err
 			}
 
-			data, err := backupCtx.vfsCache.GetPathinfo(childPath)
+			data, err := backupCtx.vfsCache.GetCachedPath(childPath)
 			if err != nil {
 				continue
 			}

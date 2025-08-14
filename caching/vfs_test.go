@@ -27,16 +27,16 @@ func TestVFSCache(t *testing.T) {
 		data := []byte("test filename data")
 
 		// Test PutFilename
-		err := cache.PutPathinfo(pathname, data)
+		err := cache.PutCachedPath(pathname, data)
 		require.NoError(t, err)
 
 		// Test GetFilename
-		retrievedData, err := cache.GetPathinfo(pathname)
+		retrievedData, err := cache.GetCachedPath(pathname)
 		require.NoError(t, err)
 		require.Equal(t, data, retrievedData)
 
 		// Test GetFilename with non-existent path
-		_, err = cache.GetPathinfo("/non/existent/file.txt")
+		_, err = cache.GetCachedPath("/non/existent/file.txt")
 		require.NoError(t, err) // Returns nil, nil for non-existent paths
 	})
 
@@ -69,7 +69,7 @@ func TestVFSCache(t *testing.T) {
 		// Test putting different types of data for the same pathname
 		//err := cache.PutDirectory(pathname, dirData)
 		//require.NoError(t, err)
-		err = cache.PutPathinfo(pathname, filenameData)
+		err = cache.PutCachedPath(pathname, filenameData)
 		require.NoError(t, err)
 
 		// Verify all data can be retrieved correctly
@@ -77,7 +77,7 @@ func TestVFSCache(t *testing.T) {
 		//require.NoError(t, err)
 		//require.Equal(t, dirData, retrievedDirData)
 
-		retrievedFilenameData, err := cache.GetPathinfo(pathname)
+		retrievedFilenameData, err := cache.GetCachedPath(pathname)
 		require.NoError(t, err)
 		require.Equal(t, filenameData, retrievedFilenameData)
 	})

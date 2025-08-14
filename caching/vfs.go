@@ -53,18 +53,10 @@ func (c *VFSCache) GetCachedObject(mac [32]byte) ([]byte, error) {
 	return c.get("__cobj__", fmt.Sprintf("%x", mac))
 }
 
-func (c *VFSCache) PutCachedFilemeta(pathname string, data []byte) error {
-	return c.put("__cfmeta__", pathname, data)
+func (c *VFSCache) PutCachedPath(pathname string, data []byte) error {
+	return c.put("__path__", pathname, data)
 }
 
-func (c *VFSCache) GetCachedFilemeta(pathname string) ([]byte, error) {
-	return c.get("__cfmeta__", pathname)
-}
-
-func (c *VFSCache) PutPathinfo(pathname string, data []byte) error {
-	return c.put("__pinfo__", pathname, data)
-}
-
-func (c *VFSCache) GetPathinfo(pathname string) ([]byte, error) {
-	return c.get("__pinfo__", pathname)
+func (c *VFSCache) GetCachedPath(pathname string) ([]byte, error) {
+	return c.get("__path__", pathname)
 }
