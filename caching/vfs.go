@@ -69,10 +69,10 @@ func (c *VFSCache) GetFileSummary(pathname string) ([]byte, error) {
 	return c.get("__file_summary__", pathname)
 }
 
-func (c *VFSCache) PutObject(mac [32]byte, data []byte) error {
-	return c.put("__object__", fmt.Sprintf("%x", mac), data)
+func (c *VFSCache) PutCachedObject(mac [32]byte, data []byte) error {
+	return c.put("__cobj__", fmt.Sprintf("%x", mac), data)
 }
 
-func (c *VFSCache) GetObject(mac [32]byte) ([]byte, error) {
-	return c.get("__object__", fmt.Sprintf("%x", mac))
+func (c *VFSCache) GetCachedObject(mac [32]byte) ([]byte, error) {
+	return c.get("__cobj__", fmt.Sprintf("%x", mac))
 }

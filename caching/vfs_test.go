@@ -84,17 +84,17 @@ func TestVFSCache(t *testing.T) {
 		data := []byte("test object data")
 
 		// Test PutObject
-		err := cache.PutObject(mac, data)
+		err := cache.PutCachedObject(mac, data)
 		require.NoError(t, err)
 
 		// Test GetObject
-		retrievedData, err := cache.GetObject(mac)
+		retrievedData, err := cache.GetCachedObject(mac)
 		require.NoError(t, err)
 		require.Equal(t, data, retrievedData)
 
 		// Test GetObject with non-existent MAC
 		nonExistentMAC := [32]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}
-		_, err = cache.GetObject(nonExistentMAC)
+		_, err = cache.GetCachedObject(nonExistentMAC)
 		require.NoError(t, err) // Returns nil, nil for non-existent MACs
 	})
 
