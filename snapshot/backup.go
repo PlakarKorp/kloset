@@ -889,12 +889,14 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 			fileSummary := &vfs.FileSummary{
 				Size:        uint64(cachedPath.FileInfo.Size()),
-				Objects:     uint64(cachedPath.Objects),
 				Chunks:      cachedPath.Chunks,
 				Mode:        cachedPath.FileInfo.Mode(),
 				ModTime:     cachedPath.FileInfo.ModTime().Unix(),
 				ContentType: cachedPath.ContentType,
 				Entropy:     cachedPath.Entropy,
+			}
+			if cachedPath.ObjectMAC != (objects.MAC{}) {
+				fileSummary.Objects++
 			}
 
 			dirEntry.Summary.Directory.Children++

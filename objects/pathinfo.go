@@ -8,7 +8,6 @@ type CachedPath struct {
 	MAC         MAC      `msgpack:"MAC"`
 	ObjectMAC   MAC      `msgpack:"objectMAC"`
 	FileInfo    FileInfo `msgpack:"fileinfo"`
-	Objects     uint32   `msgpack:"objects"`
 	Chunks      uint64   `msgpack:"chunks"`
 	Entropy     float64  `msgpack:"entropy"`
 	ContentType string   `msgpack:"content_type"`
