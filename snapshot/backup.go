@@ -485,6 +485,9 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 
 	if object.ContentType == "" {
 		object.ContentType = mime.TypeByExtension(path.Ext(pathname))
+		if object.ContentType == "" {
+			object.ContentType = "application/octet-stream"
+		}
 	}
 
 	copy(object_t32[:], objectHasher.Sum(nil))
