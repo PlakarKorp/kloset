@@ -742,7 +742,7 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 		}
 
 		fileEntryMAC = snap.repository.ComputeMAC(serialized)
-		if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
+		if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
 			return err
 		}
 
