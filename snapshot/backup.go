@@ -685,6 +685,10 @@ func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cach
 		return &contentMeta{}, nil
 	}
 
+	if record.Reader == nil {
+		return nil, fmt.Errorf("got a regular file without an associated reader: %s", record.Pathname)
+	}
+
 	if cachedPath != nil && cachedPath.ObjectMAC != (objects.MAC{}) {
 		if snap.repository.BlobExists(resources.RT_OBJECT, cachedPath.ObjectMAC) {
 			return &contentMeta{
@@ -695,10 +699,6 @@ func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cach
 				ContentType: cachedPath.ContentType,
 			}, nil
 		}
-	}
-
-	if record.Reader == nil {
-		return nil, fmt.Errorf("got a regular file without an associated reader: %s", record.Pathname)
 	}
 
 	// Reuse your existing chunkify; just read out what we need
