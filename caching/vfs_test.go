@@ -43,20 +43,13 @@ func TestVFSCache(t *testing.T) {
 	// Test multiple operations with same keys
 	t.Run("Multiple Operations", func(t *testing.T) {
 		pathname := "/test/multiple"
-		//dirData := []byte("directory data")
 		filenameData := []byte("filename data")
 
 		// Test putting different types of data for the same pathname
-		//err := cache.PutDirectory(pathname, dirData)
-		//require.NoError(t, err)
 		err = cache.PutCachedPath(pathname, filenameData)
 		require.NoError(t, err)
 
 		// Verify all data can be retrieved correctly
-		//retrievedDirData, err := cache.GetDirectory(pathname)
-		//require.NoError(t, err)
-		//require.Equal(t, dirData, retrievedDirData)
-
 		retrievedFilenameData, err := cache.GetCachedPath(pathname)
 		require.NoError(t, err)
 		require.Equal(t, filenameData, retrievedFilenameData)
