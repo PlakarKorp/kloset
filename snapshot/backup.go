@@ -682,7 +682,9 @@ type contentMeta struct {
 
 func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
-		return &contentMeta{}, nil
+		return &contentMeta{
+			ContentType: "application/x-not-regular-file",
+		}, nil
 	}
 
 	if record.Reader == nil {
