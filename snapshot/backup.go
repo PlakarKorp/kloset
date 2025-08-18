@@ -723,6 +723,10 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
 	vfsCache := backupCtx.vfsCache
 
+	if meta.ContentType == "" {
+		return fmt.Errorf("content type cannot be empty!")
+	}
+
 	fileEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
 	if record.FileInfo.Mode().IsRegular() && meta.ObjectMAC != (objects.MAC{}) {
 		fileEntry.Object = meta.ObjectMAC
@@ -768,18 +772,11 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 		cachedPath = cp
 	}
 
-	// Content-Type index
-	contentType := strings.TrimSpace(meta.ContentType)
-	if contentType == "" && cachedPath != nil {
-		contentType = strings.TrimSpace(cachedPath.ContentType)
-	}
-	if contentType != "" {
-		parts := strings.SplitN(contentType, ";", 2)
-		mime := parts[0]
-		k := fmt.Sprintf("/%s%s", mime, record.Pathname)
-		if err := backupCtx.indexes[0].ctidx.Insert(k, fileEntryMAC); err != nil {
-			return err
-		}
+	parts := strings.SplitN(meta.ContentType, ";", 2)
+	mime := parts[0]
+	k := fmt.Sprintf("/%s%s", mime, record.Pathname)
+	if err := backupCtx.indexes[0].ctidx.Insert(k, fileEntryMAC); err != nil {
+		return err
 	}
 
 	return backupCtx.recordEntry(fileEntry)
