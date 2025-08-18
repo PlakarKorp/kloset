@@ -1,7 +1,6 @@
 package caching
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -45,34 +44,10 @@ func (c *VFSCache) Close() error {
 	}
 }
 
-func (c *VFSCache) PutDirectory(pathname string, data []byte) error {
-	return c.put("__directory__", pathname, data)
+func (c *VFSCache) PutCachedPath(pathname string, data []byte) error {
+	return c.put("__path__", pathname, data)
 }
 
-func (c *VFSCache) GetDirectory(pathname string) ([]byte, error) {
-	return c.get("__directory__", pathname)
-}
-
-func (c *VFSCache) PutFilename(pathname string, data []byte) error {
-	return c.put("__filename__", pathname, data)
-}
-
-func (c *VFSCache) GetFilename(pathname string) ([]byte, error) {
-	return c.get("__filename__", pathname)
-}
-
-func (c *VFSCache) PutFileSummary(pathname string, data []byte) error {
-	return c.put("__file_summary__", pathname, data)
-}
-
-func (c *VFSCache) GetFileSummary(pathname string) ([]byte, error) {
-	return c.get("__file_summary__", pathname)
-}
-
-func (c *VFSCache) PutObject(mac [32]byte, data []byte) error {
-	return c.put("__object__", fmt.Sprintf("%x", mac), data)
-}
-
-func (c *VFSCache) GetObject(mac [32]byte) ([]byte, error) {
-	return c.get("__object__", fmt.Sprintf("%x", mac))
+func (c *VFSCache) GetCachedPath(pathname string) ([]byte, error) {
+	return c.get("__path__", pathname)
 }
