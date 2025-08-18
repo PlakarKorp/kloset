@@ -647,7 +647,6 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 }
 
 func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
-
 	if record.IsXattr {
 		return nil, nil
 	}
@@ -783,14 +782,9 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 }
 
 func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
-	var err error
-	var cachedPath *objects.CachedPath
-
-	if !record.IsXattr {
-		cachedPath, err = snap.checkVFSCache(backupCtx, record)
-		if err != nil {
-			snap.Logger().Warn("VFS CACHE: %v", err)
-		}
+	cachedPath, err := snap.checkVFSCache(backupCtx, record)
+	if err != nil {
+		snap.Logger().Warn("VFS CACHE: %v", err)
 	}
 
 	meta, err := snap.computeContent(idx, chunker, cachedPath, record)
@@ -799,8 +793,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 	}
 
 	if record.IsXattr {
-		backupCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
-		return nil
+		return backupCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
 	}
 
 	return snap.writeFileEntry(idx, backupCtx, meta, cachedPath, record)
