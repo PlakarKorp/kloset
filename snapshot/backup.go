@@ -703,7 +703,6 @@ func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cach
 		}
 	}
 
-	// Reuse your existing chunkify; just read out what we need
 	obj, objMAC, dataSize, err := snap.chunkify(idx, chunker, record.Pathname, record.Reader)
 	if err != nil {
 		return nil, err
