@@ -680,7 +680,7 @@ type contentMeta struct {
 	ContentType string
 }
 
-func (snap *Builder) computeContentMeta(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
+func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
 		return &contentMeta{
 			ContentType: "application/x-not-regular-file",
@@ -797,7 +797,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 		}
 	}
 
-	meta, err := snap.computeContentMeta(idx, chunker, cachedPath, record)
+	meta, err := snap.computeContent(idx, chunker, cachedPath, record)
 	if err != nil {
 		return err
 	}
