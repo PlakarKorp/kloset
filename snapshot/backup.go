@@ -754,7 +754,6 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 			Entropy:     meta.Entropy,
 			ContentType: meta.ContentType,
 		}
-		cp.FileInfo.Lsize = meta.Size
 
 		serializedCachedPath, err := cp.Serialize()
 		if err != nil {
