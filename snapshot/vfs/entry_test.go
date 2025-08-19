@@ -55,7 +55,7 @@ func TestVfile(t *testing.T) {
 
 	seeked, err := vFile.(io.ReadSeeker).Seek(2, io.SeekCurrent)
 	require.NoError(t, err)
-	require.Equal(t, int64(0), seeked)
+	require.Equal(t, int64(2), seeked)
 
 	dst := make([]byte, 10)
 	require.Implements(t, (*io.ReadSeeker)(nil), vFile)

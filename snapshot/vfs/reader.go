@@ -6,7 +6,6 @@ import (
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
-	"github.com/PlakarKorp/kloset/resources"
 )
 
 const prefetchSize = 20 * 1024 * 1024
@@ -16,12 +15,14 @@ type ObjectReader struct {
 	repo   *repository.Repository
 	size   int64
 
-	objoff int
-	off    int64
-	rd     io.ReadSeeker
+	objoff       int   // Chunk offset at which we currently are reading.
+	bufferOffset int64 // Offset inside the chunk we are currently reading.
+	off          int64 // Global file offset.
 
-	dirty          bool
-	prefetchBuffer bytes.Buffer
+	doSeek bool // Flag to invalidate the prefetchBuffer
+
+	prefetchedObjoff int // Keeps track of the chunk position we prefetched up to.
+	prefetchBuffer   bytes.Buffer
 }
 
 func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64) *ObjectReader {
@@ -29,37 +30,44 @@ func NewObjectReader(repo *repository.Repository, object *objects.Object, size i
 		object:         object,
 		repo:           repo,
 		size:           size,
-		dirty:          true,
 		prefetchBuffer: bytes.Buffer{},
 	}
 }
 
 func (or *ObjectReader) prefetch() error {
-
-	if or.prefetchBuffer.Len() == 0 {
-		or.dirty = true
+	var seekBytes int64
+	if or.doSeek {
+		or.prefetchBuffer.Reset()
+		or.prefetchedObjoff = or.objoff
+		seekBytes = or.bufferOffset
 	}
 
-	if !or.dirty {
+	// We are not seeking and we have data in the prefectBuffer just use it.
+	if or.prefetchBuffer.Len() != 0 {
 		return nil
 	}
 
-	if or.objoff >= len(or.object.Chunks) {
-		return nil
+	// We are past the last chunk, and not seeking so it's the end of the file.
+	if or.prefetchedObjoff >= len(or.object.Chunks) {
+		return io.EOF
 	}
 
-	for data, err := range or.repo.GetObjectContent(or.object, or.objoff, prefetchSize) {
+	for data, err := range or.repo.GetObjectContent(or.object, or.prefetchedObjoff, prefetchSize) {
 		if err != nil {
 			return err
+		}
+
+		if seekBytes != 0 {
+			data = data[seekBytes:]
+			seekBytes = 0
 		}
 
 		if _, err := or.prefetchBuffer.Write(data); err != nil {
 			return err
 		}
-		or.objoff++
+		or.prefetchedObjoff++
 	}
 
-	or.dirty = false
 	return nil
 }
 
@@ -67,18 +75,30 @@ func (or *ObjectReader) Read(p []byte) (int, error) {
 	if err := or.prefetch(); err != nil {
 		return 0, err
 	}
-	return or.prefetchBuffer.Read(p)
+
+	read, err := or.prefetchBuffer.Read(p)
+	// (Ab)use Seek to keep the offset and objoff up to date according to the
+	// Read we did.
+	or.Seek(int64(read), io.SeekCurrent)
+	// It is not a real seek, we did not move.
+	or.doSeek = false
+
+	// EOF on the prefetchBuffer just means we exhausted it not the underlying
+	// file
+	if err == io.EOF {
+		err = nil
+	}
+
+	return read, err
 }
 
 func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 	chunks := or.object.Chunks
 
-	savedOffset := or.off
-
 	switch whence {
 	case io.SeekStart:
-		or.rd = nil
 		or.off = 0
+
 		for or.objoff = 0; or.objoff < len(chunks); or.objoff++ {
 			clen := int64(chunks[or.objoff].Length)
 			if offset > clen {
@@ -86,21 +106,15 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 				offset -= clen
 				continue
 			}
+
+			or.bufferOffset = offset
 			or.off += offset
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			if _, err := rd.Seek(offset, whence); err != nil {
-				return 0, err
-			}
-			or.rd = rd
+			or.doSeek = true
+
 			break
 		}
 
 	case io.SeekEnd:
-		or.rd = nil
 		or.off = or.size
 		for or.objoff = len(chunks) - 1; or.objoff >= 0; or.objoff-- {
 			clen := int64(chunks[or.objoff].Length)
@@ -109,56 +123,38 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 				offset -= clen
 				continue
 			}
+			or.bufferOffset = clen - offset
 			or.off -= offset
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			if _, err := rd.Seek(offset, whence); err != nil {
-				return 0, err
-			}
-			or.rd = rd
+			or.doSeek = true
 			break
 		}
 
 	case io.SeekCurrent:
-		if or.rd != nil {
-			n, err := or.rd.Seek(offset, whence)
-			if err != nil {
-				return 0, err
-			}
-			diff := n - or.off
-			or.off += diff
-			offset -= diff
-		}
-
 		if offset == 0 {
 			break
 		}
 
-		or.objoff++
-		for or.objoff < len(chunks) {
+		left := int64(chunks[or.objoff].Length) - or.bufferOffset
+		if left > offset {
+			or.bufferOffset += offset
+			or.off += offset
+			or.doSeek = true
+			break
+		}
+
+		offset -= left
+		for or.objoff += 1; or.objoff < len(chunks); or.objoff++ {
 			clen := int64(chunks[or.objoff].Length)
 			if offset > clen {
 				or.off += clen
 				offset -= clen
+				continue
 			}
 			or.off += offset
-			rd, err := or.repo.GetBlob(resources.RT_CHUNK,
-				chunks[or.objoff].ContentMAC)
-			if err != nil {
-				return 0, err
-			}
-			if _, err := rd.Seek(offset, whence); err != nil {
-				return 0, err
-			}
-			or.rd = rd
+			or.bufferOffset = offset
+			or.doSeek = true
+			break
 		}
-	}
-
-	if savedOffset != or.off {
-		or.dirty = true
 	}
 
 	return or.off, nil
