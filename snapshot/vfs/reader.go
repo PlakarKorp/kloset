@@ -3,6 +3,7 @@ package vfs
 import (
 	"bytes"
 	"io"
+	"os"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -97,6 +98,10 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 
 	switch whence {
 	case io.SeekStart:
+		if offset < 0 {
+			return 0, os.ErrInvalid
+		}
+
 		or.off = 0
 
 		for or.objoff = 0; or.objoff < len(chunks); or.objoff++ {
@@ -115,6 +120,19 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 		}
 
 	case io.SeekEnd:
+		if offset > 0 {
+			return 0, os.ErrInvalid
+		}
+
+		if offset == 0 {
+			or.objoff = len(chunks)
+			or.bufferOffset = 0
+			or.off = or.size
+			or.doSeek = true
+			break
+		}
+
+		offset *= -1
 		or.off = or.size
 		for or.objoff = len(chunks) - 1; or.objoff >= 0; or.objoff-- {
 			clen := int64(chunks[or.objoff].Length)
@@ -134,27 +152,68 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 			break
 		}
 
-		left := int64(chunks[or.objoff].Length) - or.bufferOffset
-		if left > offset {
-			or.bufferOffset += offset
-			or.off += offset
-			or.doSeek = true
-			break
+		if offset > 0 {
+			var left int64
+			if or.objoff < len(chunks) {
+				left = int64(chunks[or.objoff].Length) - or.bufferOffset
+			}
+			if left > offset {
+				or.bufferOffset += offset
+				or.off += offset
+				or.doSeek = true
+				break
+			}
+
+			or.off += left
+			offset -= left
+
+			if offset == 0 {
+				or.objoff = len(chunks)
+				or.bufferOffset = 0
+				or.off = or.size
+				or.doSeek = true
+				break
+			}
+
+			for or.objoff += 1; or.objoff < len(chunks); or.objoff++ {
+				clen := int64(chunks[or.objoff].Length)
+				if offset > clen {
+					or.off += clen
+					offset -= clen
+					continue
+				}
+				or.off += offset
+				or.bufferOffset = offset
+				or.doSeek = true
+				break
+			}
+		} else {
+			offset *= -1
+
+			left := or.bufferOffset
+			if left > offset {
+				or.bufferOffset -= offset
+				or.off -= offset
+				or.doSeek = true
+				break
+			}
+
+			or.off -= left
+			offset -= left
+			for or.objoff -= 1; or.objoff >= 0; or.objoff-- {
+				clen := int64(chunks[or.objoff].Length)
+				if offset > clen {
+					or.off -= clen
+					offset -= clen
+					continue
+				}
+				or.off -= offset
+				or.bufferOffset = clen - offset
+				or.doSeek = true
+				break
+			}
 		}
 
-		offset -= left
-		for or.objoff += 1; or.objoff < len(chunks); or.objoff++ {
-			clen := int64(chunks[or.objoff].Length)
-			if offset > clen {
-				or.off += clen
-				offset -= clen
-				continue
-			}
-			or.off += offset
-			or.bufferOffset = offset
-			or.doSeek = true
-			break
-		}
 	}
 
 	return or.off, nil
