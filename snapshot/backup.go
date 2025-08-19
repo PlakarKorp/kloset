@@ -464,13 +464,15 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 			return nil, objects.MAC{}, -1, err
 		}
 
-		chunkCopy := make([]byte, len(cdcChunk))
-		copy(chunkCopy, cdcChunk)
+		if cdcChunk != nil {
+			chunkCopy := make([]byte, len(cdcChunk))
+			copy(chunkCopy, cdcChunk)
 
-		objectHasher.Write(chunkCopy)
+			objectHasher.Write(chunkCopy)
 
-		if err := processChunk(i, chunkCopy); err != nil {
-			return nil, objects.MAC{}, -1, err
+			if err := processChunk(i, chunkCopy); err != nil {
+				return nil, objects.MAC{}, -1, err
+			}
 		}
 		if err == io.EOF {
 			break
