@@ -34,7 +34,9 @@ func TestWalk(t *testing.T) {
 			return nil
 		}
 
-		require.Equal(t, "dummy.txt", d.Name())
+		if n := d.Name(); n != "dummy.txt" && n != "big" {
+			t.Error("unexpected file", n)
+		}
 
 		return nil
 	})
