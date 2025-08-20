@@ -4,6 +4,7 @@ import (
 	"io"
 	iofs "io/fs"
 	"log"
+	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
+	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
@@ -131,12 +133,63 @@ func TestPathCmp(t *testing.T) {
 	}
 }
 
+type repreader struct {
+	msg       []byte
+	i, n, off int
+}
+
+func (b *repreader) Close() error { return nil }
+func (b *repreader) Read(p []byte) (int, error) {
+	tot := 0
+	for b.i < b.n {
+		t := copy(p, b.msg[b.off:])
+		tot += t
+		if t == len(b.msg)-b.off {
+			p = p[t:]
+			b.i++
+			b.off = 0
+			continue
+		}
+		b.off += t
+		return tot, nil
+	}
+	return tot, io.EOF
+}
+
 func generateSnapshot(t *testing.T) (*repository.Repository, *snapshot.Snapshot) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	snap := ptesting.GenerateSnapshot(t, repo, []ptesting.MockFile{
-		ptesting.NewMockDir("subdir"),
-		ptesting.NewMockFile("subdir/dummy.txt", 0644, "hello"),
-	})
+	snap := ptesting.GenerateSnapshot(t, repo,
+		// []ptesting.MockFile{
+		// 	ptesting.NewMockDir("subdir"),
+		// 	ptesting.NewMockFile("subdir/dummy.txt", 0644, "hello"),
+		// }
+		nil, ptesting.WithGenerator(func(ch chan<- *importer.ScanResult) {
+			ch <- importer.NewScanRecord("/", "", objects.FileInfo{
+				Lname: "/",
+				Lmode: os.ModeDir | 0755,
+			}, nil, nil)
+			ch <- importer.NewScanRecord("/subdir", "", objects.FileInfo{
+				Lname: "subdir",
+				Lmode: os.ModeDir | 0755,
+			}, nil, nil)
+			ch <- importer.NewScanRecord("/subdir/dummy.txt", "", objects.FileInfo{
+				Lname: "dummy.txt",
+				Lmode: 0644,
+			}, nil, func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("hello")), nil
+			})
+			ch <- importer.NewScanRecord("/subdir/big", "", objects.FileInfo{
+				Lname: "big",
+				Lmode: 0644,
+			}, nil, func() (io.ReadCloser, error) {
+				return &repreader{
+					msg: []byte("hello\n"),
+					n:   10 * 1024 * 1024,
+				}, nil
+			})
+			close(ch)
+		}),
+	)
 	return repo, snap
 }
 
@@ -152,7 +205,9 @@ func TestFiles(t *testing.T) {
 		if !entry.Type().IsRegular() {
 			continue
 		}
-		require.Contains(t, entry.Path(), "dummy.txt")
+		if n := entry.Path(); n != "/subdir/dummy.txt" && n != "/subdir/big" {
+			t.Error("unexpected file", n)
+		}
 	}
 }
 
@@ -270,7 +325,9 @@ func TestGetdents(t *testing.T) {
 	require.NoError(t, err)
 	for d, err := range dents {
 		require.NoError(t, err)
-		require.Equal(t, "dummy.txt", d.Name())
+		if n := d.Name(); n != "dummy.txt" && n != "big" {
+			t.Error("unexpected file", n)
+		}
 	}
 }
 
@@ -285,7 +342,7 @@ func TestChildren(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, iter)
 
-	expectedChildren := []string{"/subdir/dummy.txt"}
+	expectedChildren := []string{"/subdir/big", "/subdir/dummy.txt"}
 	var childNames []string
 	for child, err := range iter {
 		require.NoError(t, err)
@@ -313,5 +370,5 @@ func TestFileMacs(t *testing.T) {
 		macs[m] = struct{}{}
 	}
 
-	require.Equal(t, 3, len(macs))
+	require.Equal(t, 4, len(macs))
 }
