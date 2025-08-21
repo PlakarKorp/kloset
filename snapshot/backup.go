@@ -844,7 +844,7 @@ type chunkifyResult struct {
 	err error
 }
 
-func decentIterator(backupCtx *BackupContext, key, prefix string) iter.Seq2[string, []byte] {
+func directChildIter(backupCtx *BackupContext, key, prefix string) iter.Seq2[string, []byte] {
 	it := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", key, "0", prefix), false)
 
 	return func(yield func(string, []byte) bool) {
@@ -860,8 +860,8 @@ func decentIterator(backupCtx *BackupContext, key, prefix string) iter.Seq2[stri
 }
 
 func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint8, data []byte) error) error {
-	file := decentIterator(backupCtx, "__file__", prefix)
-	dir := decentIterator(backupCtx, "__directory__", prefix)
+	file := directChildIter(backupCtx, "__file__", prefix)
+	dir := directChildIter(backupCtx, "__directory__", prefix)
 
 	fileNext, fileStop := iter.Pull2(file)
 	defer fileStop()
