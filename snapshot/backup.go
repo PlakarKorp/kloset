@@ -952,7 +952,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		}
 
 		subDirIter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
-		for relpath := range subDirIter {
+		for relpath, bytes := range subDirIter {
 			if relpath == "" || strings.Contains(relpath, "/") {
 				continue
 			}
