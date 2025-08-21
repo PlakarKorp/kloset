@@ -874,27 +874,8 @@ func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint
 	filePath, fileBytes, hasFile := fileNext() // a c e
 	dirPath, dirBytes, hasDir := dirNext()     // b d f
 
-	for {
+	for hasFile || hasDir {
 		var advanceFile bool
-
-		if hasFile && strings.Contains(filePath, "/") {
-			log.Println("stopping the file iterator because it's in a subdir:", filePath)
-			hasFile = false
-		}
-		if hasDir && strings.Contains(dirPath, "/") {
-			log.Println("stopping the dir iterator because it's in a subdir:", dirPath)
-			hasDir = false
-		}
-		if !hasFile && !hasDir {
-			break
-		}
-
-		if hasFile {
-			log.Println("file:", filePath)
-		}
-		if hasDir {
-			log.Println("dir:", dirPath)
-		}
 
 		if !hasDir {
 			if err := writeFrame(TypeVFSFile, fileBytes); err != nil {
