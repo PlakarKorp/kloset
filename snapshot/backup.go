@@ -835,10 +835,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
 	for dirPath, bytes := range diriter {
-		select {
-		case <-snap.AppContext().Done():
-			return nil, nil, snap.AppContext().Err()
-		default:
+		if err := snap.AppContext().Err(); err != nil {
+			return nil, nil, err
 		}
 
 		dirEntry, err := vfs.EntryFromBytes(bytes)
