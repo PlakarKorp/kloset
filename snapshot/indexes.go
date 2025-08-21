@@ -37,8 +37,8 @@ func (snap *Snapshot) ContentTypeIdx() (*btree.BTree[string, objects.MAC, object
 	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
 }
 
-func (snap *Snapshot) PrefixIdx() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
-	mac, found := snap.getidx("prefix", "btree")
+func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
+	mac, found := snap.getidx("dirpack", "btree")
 	if !found {
 		return nil, nil
 	}

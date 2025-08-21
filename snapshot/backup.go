@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"mime"
 	"path"
@@ -503,6 +504,7 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	}
 	objectMAC := snap.repository.ComputeMAC(objectSerialized)
 
+	log.Printf("before putblobwithhint of %v/%x", resources.RT_OBJECT, objectMAC)
 	if err := snap.repository.PutBlobWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
 		return nil, objects.MAC{}, -1, err
 	}
@@ -1011,7 +1013,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		if err := backupCtx.indexes[0].prefixidx.Insert(dirPath, objects.MAC(dirMac)); err != nil {
 			return nil, nil, err
 		}
-		snap.Logger().Trace("prefixindex", "dir=%s mac=%x", dirPath, dirMac)
+		snap.Logger().Info("dirpack: dir=%s mac=%x", dirPath, dirMac)
 
 		//
 
@@ -1097,7 +1099,7 @@ func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, e
 
 	return []header.Index{
 		{
-			Name:  "prefix",
+			Name:  "dirpack",
 			Type:  "btree",
 			Value: prefixmac,
 		},
