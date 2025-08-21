@@ -1004,17 +1004,9 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		if res.err != nil {
 			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
 		}
-		logSerialized, err := res.obj.Serialize()
-		if err != nil {
-			return nil, nil, fmt.Errorf("failed to serialize object for %s: %w", dirPath, err)
-		}
 
 		// Compute MAC and insert into prefix index
 		dirMac := dirHash.Sum(nil)
-
-		if err := snap.repository.PutBlobIfNotExistsWithHint(0, resources.RT_OBJECT, objects.MAC(dirMac), logSerialized); err != nil {
-			return nil, nil, fmt.Errorf("failed to store dirpack object for %s: %w", dirPath, err)
-		}
 
 		if err := backupCtx.indexes[0].prefixidx.Insert(dirPath, objects.MAC(dirMac)); err != nil {
 			return nil, nil, err
