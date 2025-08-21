@@ -36,3 +36,21 @@ func (snap *Snapshot) ContentTypeIdx() (*btree.BTree[string, objects.MAC, object
 	}
 	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
 }
+
+func (snap *Snapshot) PrefixIdx() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
+	mac, found := snap.getidx("prefix", "btree")
+	if !found {
+		return nil, nil
+	}
+
+	d, err := snap.repository.GetBlobBytes(resources.RT_BTREE_ROOT, mac)
+	if err != nil {
+		return nil, err
+	}
+
+	store := SnapshotStore[string, objects.MAC]{
+		blobtype:   resources.RT_BTREE_NODE,
+		snapReader: snap,
+	}
+	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
+}
