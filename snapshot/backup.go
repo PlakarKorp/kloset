@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"log"
 	"math"
 	"mime"
 	"path"
@@ -839,7 +838,6 @@ const (
 )
 
 type chunkifyResult struct {
-	//obj *objects.Object
 	mac objects.MAC
 	err error
 }
@@ -1025,13 +1023,10 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			dirEntry.Summary.UpdateBelow(childSummary)
 		}
 
-		log.Println("==============================================")
-		log.Println("before mkdirpack with prefix:", prefix)
 		if err := mkDirPack(backupCtx, prefix, writeFrame); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
-		//_ = writeFrame
 
 		erriter, err := backupCtx.indexes[0].erridx.ScanFrom(prefix)
 		if err != nil {
