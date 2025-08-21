@@ -844,9 +844,26 @@ type chunkifyResult struct {
 	err error
 }
 
+func decentIterator(backupCtx *BackupContext, key, prefix string) iter.Seq2[string, []byte] {
+	it := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", key, "0", prefix), false)
+
+	return func(yield func(string, []byte) bool) {
+		for path, buf := range it {
+			if path == "" || strings.Contains(path, "/") {
+				continue
+			}
+			if !yield(path, buf) {
+				break
+			}
+		}
+	}
+}
+
 func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint8, data []byte) error) error {
-	file := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
-	dir := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
+	file := decentIterator(backupCtx, "__file__", prefix)
+	dir := decentIterator(backupCtx, "__directory__", prefix)
+	// file := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
+	// dir := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
 
 	fileNext, fileStop := iter.Pull2(file)
 	defer fileStop()
@@ -857,16 +874,19 @@ func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint
 	filePath, fileBytes, hasFile := fileNext() // a c e
 	dirPath, dirBytes, hasDir := dirNext()     // b d f
 
-	for hasFile && hasDir {
+	for {
 		var advanceFile bool
 
-		if strings.Contains(filePath, "/") {
+		if hasFile && strings.Contains(filePath, "/") {
 			log.Println("stopping the file iterator because it's in a subdir:", filePath)
 			hasFile = false
 		}
-		if strings.Contains(dirPath, "/") {
+		if hasDir && strings.Contains(dirPath, "/") {
 			log.Println("stopping the dir iterator because it's in a subdir:", dirPath)
 			hasDir = false
+		}
+		if !hasFile && !hasDir {
+			break
 		}
 
 		if hasFile {
@@ -1042,12 +1062,13 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			dirEntry.Summary.UpdateBelow(childSummary)
 		}
 
-		// log.Println("before mkdirpack with prefix:", prefix, "=========================")
-		// if err := mkDirPack(backupCtx, prefix, writeFrame); err != nil {
-		// 	pw.CloseWithError(err)
-		// 	return nil, nil, err
-		// }
-		_ = writeFrame
+		log.Println("==============================================")
+		log.Println("before mkdirpack with prefix:", prefix)
+		if err := mkDirPack(backupCtx, prefix, writeFrame); err != nil {
+			pw.CloseWithError(err)
+			return nil, nil, err
+		}
+		//_ = writeFrame
 
 		erriter, err := backupCtx.indexes[0].erridx.ScanFrom(prefix)
 		if err != nil {
