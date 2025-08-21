@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"iter"
 	"log"
 	"math"
 	"mime"
@@ -504,7 +505,6 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	}
 	objectMAC := snap.repository.ComputeMAC(objectSerialized)
 
-	log.Printf("before putblobwithhint of %v/%x", resources.RT_OBJECT, objectMAC)
 	if err := snap.repository.PutBlobWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
 		return nil, objects.MAC{}, -1, err
 	}
@@ -839,8 +839,73 @@ const (
 )
 
 type chunkifyResult struct {
-	obj *objects.Object
+	//obj *objects.Object
+	mac objects.MAC
 	err error
+}
+
+func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint8, data []byte) error) error {
+	file := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
+	dir := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
+
+	fileNext, fileStop := iter.Pull2(file)
+	defer fileStop()
+
+	dirNext, dirStop := iter.Pull2(dir)
+	defer dirStop()
+
+	filePath, fileBytes, hasFile := fileNext() // a c e
+	dirPath, dirBytes, hasDir := dirNext()     // b d f
+
+	for hasFile && hasDir {
+		var advanceFile bool
+
+		if strings.Contains(filePath, "/") {
+			log.Println("stopping the file iterator because it's in a subdir:", filePath)
+			hasFile = false
+		}
+		if strings.Contains(dirPath, "/") {
+			log.Println("stopping the dir iterator because it's in a subdir:", dirPath)
+			hasDir = false
+		}
+
+		if hasFile {
+			log.Println("file:", filePath)
+		}
+		if hasDir {
+			log.Println("dir:", dirPath)
+		}
+
+		if !hasDir {
+			if err := writeFrame(TypeVFSFile, fileBytes); err != nil {
+				return err
+			}
+			advanceFile = true
+		} else if !hasFile {
+			if err := writeFrame(TypeVFSDirectory, dirBytes); err != nil {
+				return err
+			}
+		} else {
+			if strings.Compare(filePath, dirPath) <= 0 {
+				if err := writeFrame(TypeVFSFile, fileBytes); err != nil {
+					return err
+				}
+				advanceFile = true
+			} else {
+				if err := writeFrame(TypeVFSDirectory, dirBytes); err != nil {
+					return err
+				}
+			}
+		}
+
+		if advanceFile {
+			filePath, fileBytes, hasFile = fileNext()
+		} else {
+			dirPath, dirBytes, hasDir = dirNext()
+		}
+	}
+
+	return nil
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
@@ -876,8 +941,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		resCh := make(chan chunkifyResult, 1)
 
 		go func() {
-			obj, _, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
-			resCh <- chunkifyResult{obj: obj, err: err}
+			_, mac, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
+			resCh <- chunkifyResult{mac: mac, err: err}
 		}()
 
 		writeFrame := func(typ uint8, data []byte) error {
@@ -899,8 +964,6 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		dirHash := snap.repository.GetMACHasher()
-
 		childiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
 
 		for relpath, bytes := range childiter {
@@ -915,13 +978,11 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 			childPath := prefix + relpath
 
-			err = writeFrame(TypeVFSFile, dupBytes)
-			if err != nil {
-				pw.CloseWithError(err)
-				return nil, nil, err
-			}
-
-			dirHash.Write(bytes)
+			// err = writeFrame(TypeVFSFile, dupBytes)
+			// if err != nil {
+			// 	pw.CloseWithError(err)
+			// 	return nil, nil, err
+			// }
 
 			if err := fileidx.Insert(childPath, dupBytes); err != nil && err != btree.ErrExists {
 				return nil, nil, err
@@ -959,12 +1020,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 				continue
 			}
 
-			dirHash.Write(bytes)
-			err = writeFrame(TypeVFSDirectory, bytes)
-			if err != nil {
-				pw.CloseWithError(err)
-				return nil, nil, err
-			}
+			_ = bytes
+			// err = writeFrame(TypeVFSDirectory, bytes)
+			// if err != nil {
+			// 	pw.CloseWithError(err)
+			// 	return nil, nil, err
+			// }
 
 			childPath := prefix + relpath
 			data, err := snap.scanCache.GetSummary(0, childPath)
@@ -980,6 +1041,13 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			dirEntry.Summary.Directory.Directories++
 			dirEntry.Summary.UpdateBelow(childSummary)
 		}
+
+		// log.Println("before mkdirpack with prefix:", prefix, "=========================")
+		// if err := mkDirPack(backupCtx, prefix, writeFrame); err != nil {
+		// 	pw.CloseWithError(err)
+		// 	return nil, nil, err
+		// }
+		_ = writeFrame
 
 		erriter, err := backupCtx.indexes[0].erridx.ScanFrom(prefix)
 		if err != nil {
@@ -1007,15 +1075,9 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
 		}
 
-		// Compute MAC and insert into prefix index
-		dirMac := dirHash.Sum(nil)
-
-		if err := backupCtx.indexes[0].prefixidx.Insert(dirPath, objects.MAC(dirMac)); err != nil {
+		if err := backupCtx.indexes[0].prefixidx.Insert(dirPath, res.mac); err != nil {
 			return nil, nil, err
 		}
-		snap.Logger().Info("dirpack: dir=%s mac=%x", dirPath, dirMac)
-
-		//
 
 		serializedSummary, err := dirEntry.Summary.ToBytes()
 		if err != nil {
