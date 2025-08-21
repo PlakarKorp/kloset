@@ -862,8 +862,6 @@ func decentIterator(backupCtx *BackupContext, key, prefix string) iter.Seq2[stri
 func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint8, data []byte) error) error {
 	file := decentIterator(backupCtx, "__file__", prefix)
 	dir := decentIterator(backupCtx, "__directory__", prefix)
-	// file := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
-	// dir := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
 
 	fileNext, fileStop := iter.Pull2(file)
 	defer fileStop()
@@ -875,33 +873,17 @@ func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint
 	dirPath, dirBytes, hasDir := dirNext()     // b d f
 
 	for hasFile || hasDir {
-		var advanceFile bool
-
-		if !hasDir {
+		switch {
+		case !hasDir, hasFile && hasDir && strings.Compare(filePath, dirPath) <= 0:
 			if err := writeFrame(TypeVFSFile, fileBytes); err != nil {
 				return err
 			}
-			advanceFile = true
-		} else if !hasFile {
+			filePath, fileBytes, hasFile = fileNext()
+
+		default:
 			if err := writeFrame(TypeVFSDirectory, dirBytes); err != nil {
 				return err
 			}
-		} else {
-			if strings.Compare(filePath, dirPath) <= 0 {
-				if err := writeFrame(TypeVFSFile, fileBytes); err != nil {
-					return err
-				}
-				advanceFile = true
-			} else {
-				if err := writeFrame(TypeVFSDirectory, dirBytes); err != nil {
-					return err
-				}
-			}
-		}
-
-		if advanceFile {
-			filePath, fileBytes, hasFile = fileNext()
-		} else {
 			dirPath, dirBytes, hasDir = dirNext()
 		}
 	}
