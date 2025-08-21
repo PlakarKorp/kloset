@@ -874,7 +874,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		resCh := make(chan chunkifyResult, 1)
 
 		go func() {
-			obj, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
+			obj, _, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
 			resCh <- chunkifyResult{obj: obj, err: err}
 		}()
 
