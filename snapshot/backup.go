@@ -880,7 +880,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 		writeFrame := func(typ uint8, data []byte) error {
 			hdr := FrameHeader{Type: typ, Length: uint32(len(data))}
-			if err := binary.Write(pw, binary.BigEndian, hdr); err != nil {
+			if err := binary.Write(pw, binary.LittleEndian, hdr); err != nil {
 				return err
 			}
 			_, err := pw.Write(data)
