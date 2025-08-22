@@ -46,12 +46,13 @@ type CustomMetadata struct {
 }
 
 type Filesystem struct {
-	tree   *btree.BTree[string, objects.MAC, objects.MAC]
-	xattrs *btree.BTree[string, objects.MAC, objects.MAC]
-	errors *btree.BTree[string, objects.MAC, objects.MAC]
-	repo   *repository.Repository
-	chroot string
-	mount  string
+	tree    *btree.BTree[string, objects.MAC, objects.MAC]
+	xattrs  *btree.BTree[string, objects.MAC, objects.MAC]
+	errors  *btree.BTree[string, objects.MAC, objects.MAC]
+	dirpack *btree.BTree[string, objects.MAC, objects.MAC]
+	repo    *repository.Repository
+	chroot  string
+	mount   string
 }
 
 func PathCmp(a, b string) int {
@@ -83,7 +84,7 @@ func NodeFromBytes(data []byte) (*btree.Node[string, objects.MAC, objects.MAC], 
 	return &node, err
 }
 
-func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC) (*Filesystem, error) {
+func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
 	rd, err := repo.GetBlob(resources.RT_VFS_BTREE, root)
 	if err != nil {
 		return nil, err
@@ -118,10 +119,11 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	}
 
 	fs := &Filesystem{
-		tree:   tree,
-		xattrs: xtree,
-		errors: errtree,
-		repo:   repo,
+		tree:    tree,
+		xattrs:  xtree,
+		errors:  errtree,
+		dirpack: dirpackidx,
+		repo:    repo,
 	}
 
 	return fs, nil

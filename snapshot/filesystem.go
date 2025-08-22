@@ -20,8 +20,13 @@ func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 		return nil, repository.ErrNotReadable
 	}
 
+	didx, err := s.DirPack()
+	if err != nil {
+		return nil, err
+	}
+
 	v := s.Header.GetSource(0).VFS
-	fs, err := vfs.NewFilesystem(s.repository, v.Root, v.Xattrs, v.Errors)
+	fs, err := vfs.NewFilesystem(s.repository, v.Root, v.Xattrs, v.Errors, didx)
 	if err != nil {
 		return nil, err
 	}
