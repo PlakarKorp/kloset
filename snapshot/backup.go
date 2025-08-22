@@ -959,12 +959,6 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 			childPath := prefix + relpath
 
-			// err = writeFrame(TypeVFSFile, dupBytes)
-			// if err != nil {
-			// 	pw.CloseWithError(err)
-			// 	return nil, nil, err
-			// }
-
 			if err := fileidx.Insert(childPath, dupBytes); err != nil && err != btree.ErrExists {
 				return nil, nil, err
 			}
@@ -996,17 +990,10 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		}
 
 		subDirIter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
-		for relpath, bytes := range subDirIter {
+		for relpath := range subDirIter {
 			if relpath == "" || strings.Contains(relpath, "/") {
 				continue
 			}
-
-			_ = bytes
-			// err = writeFrame(TypeVFSDirectory, bytes)
-			// if err != nil {
-			// 	pw.CloseWithError(err)
-			// 	return nil, nil, err
-			// }
 
 			childPath := prefix + relpath
 			data, err := snap.scanCache.GetSummary(0, childPath)
