@@ -867,8 +867,8 @@ func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint
 	dirNext, dirStop := iter.Pull2(dir)
 	defer dirStop()
 
-	filePath, fileBytes, hasFile := fileNext() // a c e
-	dirPath, dirBytes, hasDir := dirNext()     // b d f
+	filePath, fileBytes, hasFile := fileNext()
+	dirPath, dirBytes, hasDir := dirNext()
 
 	for hasFile || hasDir {
 		switch {
