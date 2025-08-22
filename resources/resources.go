@@ -73,27 +73,27 @@ func (r Type) String() string {
 	case RT_CHUNK:
 		return "chunk"
 	case RT_VFS_BTREE:
-		return "vfs btree"
+		return "vfs-btree"
 	case RT_VFS_NODE:
-		return "vfs node"
+		return "vfs-node"
 	case RT_VFS_ENTRY:
-		return "vfs entry"
+		return "vfs-entry"
 	case RT_ERROR_BTREE:
-		return "error btree"
+		return "error-btree"
 	case RT_ERROR_NODE:
-		return "error node"
+		return "error-node"
 	case RT_ERROR_ENTRY:
-		return "error entry"
+		return "error-entry"
 	case RT_XATTR_BTREE:
-		return "xattr btree"
+		return "xattr-btree"
 	case RT_XATTR_NODE:
-		return "xattr node"
+		return "xattr-node"
 	case RT_XATTR_ENTRY:
-		return "xattr entry"
+		return "xattr-entry"
 	case RT_BTREE_ROOT:
-		return "btree root"
+		return "btree-root"
 	case RT_BTREE_NODE:
-		return "btree node"
+		return "btree-node"
 	case RT_RANDOM:
 		return "random"
 	default:

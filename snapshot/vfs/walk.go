@@ -2,6 +2,7 @@ package vfs
 
 import (
 	"io/fs"
+	"iter"
 )
 
 type WalkDirFunc func(path string, entry *Entry, err error) error
@@ -16,12 +17,19 @@ func (fsc *Filesystem) walkdir(entry *Entry, fn WalkDirFunc) error {
 		return nil
 	}
 
-	iter, err := entry.Getdents(fsc)
+	var it iter.Seq2[*Entry, error]
+	var err error
+	if fsc.dirpack == nil {
+		it, err = entry.Getdents(fsc)
+	} else {
+		//it, err = entry.Getdents2(fsc)
+	}
+
 	if err != nil {
 		return fn(path, nil, err)
 	}
 
-	for entry, err := range iter {
+	for entry, err := range it {
 		if err != nil {
 			return fn(path, nil, err)
 		}

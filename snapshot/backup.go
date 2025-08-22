@@ -30,7 +30,7 @@ type BackupIndexes struct {
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
-	dirpackidx *btree.BTree[string, int, objects.MAC]
+	dirpackidx *btree.BTree[string, int, uint64]
 }
 
 type BackupContext struct {
@@ -587,7 +587,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 		Cache:  snap.scanCache,
 	}
 
-	dirpackstore := caching.DBStore[string, objects.MAC]{
+	dirpackstore := caching.DBStore[string, uint64]{
 		Prefix: "__dirpack__",
 		Cache:  snap.scanCache,
 	}
@@ -816,12 +816,12 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 }
 
 func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
-	vfsHeader, summary, err := snap.persistVFS(backupCtx)
+	vfsHeader, summary, dirpackObjectmac, err := snap.persistVFS(backupCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	indexes, err := snap.persistIndexes(backupCtx)
+	indexes, err := snap.persistIndexes(backupCtx, dirpackObjectmac)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -918,7 +918,9 @@ func (backupCtx *BackupContext) processDir(dirEntry *vfs.Entry, path string) err
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer, prefix string) error {
+func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer, prefix string) (uint64, error) {
+	var total uint64
+
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -937,50 +939,62 @@ func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer
 			abspath := prefix + filePath
 			err := backupCtx.processFile(dirEntry, fileBytes, abspath)
 			if err != nil {
-				return err
+				return 0, err
 			}
 
-			if err := writeFrame(w, TypeVFSFile, fileBytes); err != nil {
-				return err
+			written, err := writeFrame(w, TypeVFSFile, fileBytes)
+			if err != nil {
+				return 0, err
 			}
+
+			total += uint64(written)
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
 			abspath := prefix + dirPath
 			if err := backupCtx.processDir(dirEntry, abspath); err != nil {
-				return err
+				return 0, err
 			}
-			if err := writeFrame(w, TypeVFSDirectory, dirBytes); err != nil {
-				return err
+
+			written, err := writeFrame(w, TypeVFSDirectory, dirBytes)
+			if err != nil {
+				return 0, err
 			}
+
+			total += uint64(written)
 			dirPath, dirBytes, hasDir = dirNext()
 		}
 	}
 
-	return nil
+	return total, nil
 }
 
 // writeFrame writes a directory entry for dirpack.  Each entry is
 // encoded in TLV, where the type is one byte, the length is a 32 bit
 // unsigned integer and the data follows, all without padding.
-func writeFrame(w io.Writer, typ DirPackEntry, data []byte) error {
+func writeFrame(w io.Writer, typ DirPackEntry, data []byte) (int, error) {
 	endian := binary.LittleEndian
 	if err := binary.Write(w, endian, typ); err != nil {
-		return err
+		return 0, err
 	}
 	if err := binary.Write(w, endian, uint32(len(data))); err != nil {
-		return err
+		return 0, err
 	}
 	_, err := w.Write(data)
-	return err
+
+	if err != nil {
+		return 0, err
+	}
+
+	return 1 + 4 + len(data), nil
 
 }
 
-func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
+func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, objects.MAC, error) {
 	errcsum, err := persistMACIndex(snap, backupCtx.indexes[0].erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, objects.MAC{}, err
 	}
 
 	filestore := caching.DBStore[string, []byte]{
@@ -990,33 +1004,33 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 	backupCtx.fileidx, err = btree.New(&filestore, vfs.PathCmp, 50)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, objects.MAC{}, err
 	}
 
 	chunker, err := snap.repository.Chunker(nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, objects.MAC{}, err
 	}
 
+	pr, pw := io.Pipe()
+	resCh := make(chan chunkifyResult, 1)
+	go func() {
+		_, mac, _, err := snap.chunkify(1, chunker, fmt.Sprintf("dirpack:%s", snap.Header.Identifier), pr)
+		resCh <- chunkifyResult{mac: mac, err: err}
+	}()
+
 	var rootSummary *vfs.Summary
+	var nextOffset uint64
 
 	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
 	for dirPath, bytes := range diriter {
 		if err := snap.AppContext().Err(); err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
-
-		pr, pw := io.Pipe()
-		resCh := make(chan chunkifyResult, 1)
-
-		go func() {
-			_, mac, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
-			resCh <- chunkifyResult{mac: mac, err: err}
-		}()
 
 		dirEntry, err := vfs.EntryFromBytes(bytes)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		prefix := dirPath
@@ -1024,14 +1038,15 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := backupCtx.processChildren(dirEntry, pw, prefix); err != nil {
+		written, err := backupCtx.processChildren(dirEntry, pw, prefix)
+		if err != nil {
 			pw.CloseWithError(err)
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		erriter, err := backupCtx.indexes[0].erridx.ScanFrom(prefix)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 		for erriter.Next() {
 			path, _ := erriter.Current()
@@ -1044,31 +1059,27 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			dirEntry.Summary.Below.Errors++
 		}
 		if err := erriter.Err(); err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		dirEntry.Summary.UpdateAverages()
 
-		pw.Close()
-		res := <-resCh
-		if res.err != nil {
-			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
+		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, ((nextOffset << 32) | written)); err != nil {
+			return nil, nil, objects.MAC{}, err
 		}
 
-		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, res.mac); err != nil {
-			return nil, nil, err
-		}
+		nextOffset += written
 
 		serializedSummary, err := dirEntry.Summary.ToBytes()
 		if err != nil {
 			backupCtx.recordError(dirPath, err)
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		err = snap.scanCache.PutSummary(0, dirPath, serializedSummary)
 		if err != nil {
 			backupCtx.recordError(dirPath, err)
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, dirPath))
@@ -1081,21 +1092,27 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		mac := snap.repository.ComputeMAC(serialized)
 		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		if err := backupCtx.fileidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
 
 		if err := backupCtx.recordEntry(dirEntry); err != nil {
-			return nil, nil, err
+			return nil, nil, objects.MAC{}, err
 		}
+	}
+
+	pw.Close()
+	res := <-resCh
+	if res.err != nil {
+		return nil, nil, objects.MAC{}, fmt.Errorf("chunkify failed for %s: %w", snap.Header.Identifier, res.err)
 	}
 
 	rootcsum, err := persistIndex(snap, backupCtx.fileidx, resources.RT_VFS_BTREE,
@@ -1103,13 +1120,13 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return snap.repository.ComputeMAC(data), nil
 		})
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, objects.MAC{}, err
 	}
 
 	xattrcsum, err := persistMACIndex(snap, backupCtx.indexes[0].xattridx,
 		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, resources.RT_XATTR_ENTRY)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, objects.MAC{}, err
 	}
 
 	vfsHeader := &header.VFS{
@@ -1118,11 +1135,11 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		Errors: errcsum,
 	}
 
-	return vfsHeader, rootSummary, nil
+	return vfsHeader, rootSummary, res.mac, nil
 
 }
 
-func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
+func (snap *Builder) persistIndexes(backupCtx *BackupContext, dirpackObjectmac objects.MAC) ([]header.Index, error) {
 	ctmac, err := persistIndex(snap, backupCtx.indexes[0].ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
@@ -1132,8 +1149,8 @@ func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, e
 	}
 
 	prefixmac, err := persistIndex(snap, backupCtx.indexes[0].dirpackidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(idx uint64) (uint64, error) {
+			return idx, nil
 		})
 	if err != nil {
 		return nil, err
@@ -1144,6 +1161,11 @@ func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, e
 			Name:  "dirpack",
 			Type:  "btree",
 			Value: prefixmac,
+		},
+		{
+			Name:  "dirpack-object",
+			Type:  "object",
+			Value: dirpackObjectmac,
 		},
 		{
 			Name:  "content-type",

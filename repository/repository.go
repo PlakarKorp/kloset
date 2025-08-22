@@ -702,10 +702,10 @@ func randomShift(n uint32) (uint64, error) {
 	return uint64(r.Int64()), nil
 }
 
-func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
+func (r *Repository) GetPackfileRange(Type string, loc state.Location) ([]byte, error) {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "GetPackfileRange(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
+		r.Logger().Trace("repository", "GetPackfileRange(%s, %x, %d, %d): %s", Type, loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
 	}()
 
 	offset := loc.Offset
@@ -743,13 +743,13 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	return data[offsetDelta : length+uint32(offsetDelta)], nil
 }
 
-func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) {
+func (r *Repository) GetPackfileBlob(Type resources.Type, loc state.Location) (io.ReadSeeker, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetPackfileBlob(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
 	}()
 
-	data, err := r.GetPackfileRange(loc)
+	data, err := r.GetPackfileRange(Type.String(), loc)
 	if err != nil {
 		return nil, err
 	}
@@ -889,7 +889,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 			}
 
 			if currPackfile != loc.Packfile || nextOffset != loc.Offset || size >= maxSize {
-				data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
+				data, err := r.GetPackfileRange("content", state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 				if err != nil {
 					if !yield(nil, err) {
 						return
@@ -932,7 +932,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 		}
 
 		if leftOver {
-			data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
+			data, err := r.GetPackfileRange("content-leftover", state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 			if err != nil {
 				if !yield(nil, err) {
 					return
@@ -977,7 +977,7 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrPackfileNotFound
 	}
 
-	rd, err := r.GetPackfileBlob(loc)
+	rd, err := r.GetPackfileBlob(Type, loc)
 	if err != nil {
 		return nil, err
 	}

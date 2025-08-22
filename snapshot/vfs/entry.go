@@ -1,7 +1,9 @@
 package vfs
 
 import (
+	"encoding/binary"
 	"encoding/json"
+	//"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -200,6 +202,81 @@ func (e *Entry) Getdents(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 		}
 	}, nil
 }
+
+func readDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
+	endian := binary.LittleEndian
+	if err = binary.Read(rd, endian, &typ); err != nil {
+		return
+	}
+	if err = binary.Read(rd, endian, &siz); err != nil {
+		return
+	}
+	return
+}
+
+/*
+func (e *Entry) Getdents2(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
+	prefix := e.Path()
+
+	// if chroot is set, prefix must be relative to it for ScanFrom to work as expected
+	if fsc.chroot != "" {
+		prefix = path.Join(fsc.chroot, prefix)
+	}
+
+	objectMac, ok, err := fsc.dirpack.Find(prefix)
+	if err != nil {
+		return nil, err
+	}
+
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
+	}
+
+	// LookupObject inlined
+	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, err := objects.NewObjectFromBytes(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	var size int64
+	for _, c := range obj.Chunks {
+		size += int64(c.Length)
+	}
+
+	rd := NewObjectReader(fsc.repo, obj, size)
+	return func(yield func(*Entry, error) bool) {
+		for {
+			_, siz, err := readDirPackHdr(rd)
+			if err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+
+				yield(nil, fmt.Errorf("failed to read: %w", err))
+				return
+			}
+
+			lrd := io.LimitReader(rd, int64(siz))
+
+			var entry Entry
+			err = msgpack.NewDecoder(lrd).Decode(&entry)
+			if err != nil {
+				yield(nil, fmt.Errorf("failed to read entry: %w", err))
+				return
+			}
+
+			if !yield(&entry, nil) {
+				return
+			}
+		}
+	}, nil
+}
+*/
 
 func (e *Entry) Stat() *objects.FileInfo {
 	return &e.FileInfo
