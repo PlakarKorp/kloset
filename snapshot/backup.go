@@ -585,8 +585,8 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 		Cache:  snap.scanCache,
 	}
 
-	prefixstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__prefix__",
+	dirpackstore := caching.DBStore[string, objects.MAC]{
+		Prefix: "__dirpack__",
 		Cache:  snap.scanCache,
 	}
 
@@ -603,7 +603,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 		return nil, err
 	}
 
-	if bi.dirpackidx, err = btree.New(&prefixstore, strings.Compare, 50); err != nil {
+	if bi.dirpackidx, err = btree.New(&dirpackstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
