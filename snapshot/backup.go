@@ -27,10 +27,10 @@ import (
 )
 
 type BackupIndexes struct {
-	erridx    *btree.BTree[string, int, []byte]
-	xattridx  *btree.BTree[string, int, []byte]
-	ctidx     *btree.BTree[string, int, objects.MAC]
-	prefixidx *btree.BTree[string, int, objects.MAC]
+	erridx     *btree.BTree[string, int, []byte]
+	xattridx   *btree.BTree[string, int, []byte]
+	ctidx      *btree.BTree[string, int, objects.MAC]
+	dirpackidx *btree.BTree[string, int, objects.MAC]
 }
 
 type BackupContext struct {
@@ -603,7 +603,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 		return nil, err
 	}
 
-	if bi.prefixidx, err = btree.New(&prefixstore, strings.Compare, 50); err != nil {
+	if bi.dirpackidx, err = btree.New(&prefixstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
@@ -1054,7 +1054,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
 		}
 
-		if err := backupCtx.indexes[0].prefixidx.Insert(dirPath, res.mac); err != nil {
+		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, res.mac); err != nil {
 			return nil, nil, err
 		}
 
@@ -1130,7 +1130,7 @@ func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, e
 		return nil, err
 	}
 
-	prefixmac, err := persistIndex(snap, backupCtx.indexes[0].prefixidx,
+	prefixmac, err := persistIndex(snap, backupCtx.indexes[0].dirpackidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
