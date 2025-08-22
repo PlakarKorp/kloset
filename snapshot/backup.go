@@ -30,7 +30,7 @@ type BackupIndexes struct {
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
-	dirpackidx *btree.BTree[string, int, objects.MAC]
+	dirpackidx *btree.BTree[string, int, []byte]
 }
 
 type BackupContext struct {
@@ -587,7 +587,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 		Cache:  snap.scanCache,
 	}
 
-	dirpackstore := caching.DBStore[string, objects.MAC]{
+	dirpackstore := caching.DBStore[string, []byte]{
 		Prefix: "__dirpack__",
 		Cache:  snap.scanCache,
 	}
@@ -843,7 +843,7 @@ const (
 )
 
 type chunkifyResult struct {
-	mac objects.MAC
+	obj *objects.Object
 	err error
 }
 
@@ -1010,8 +1010,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		resCh := make(chan chunkifyResult, 1)
 
 		go func() {
-			_, mac, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
-			resCh <- chunkifyResult{mac: mac, err: err}
+			obj, _, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
+			resCh <- chunkifyResult{obj: obj, err: err}
 		}()
 
 		dirEntry, err := vfs.EntryFromBytes(bytes)
@@ -1055,7 +1055,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
 		}
 
-		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, res.mac); err != nil {
+		bin, err := res.obj.Serialize()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, bin); err != nil {
 			return nil, nil, err
 		}
 
@@ -1132,8 +1137,8 @@ func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, e
 	}
 
 	prefixmac, err := persistIndex(snap, backupCtx.indexes[0].dirpackidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(b []byte) ([]byte, error) {
+			return b, nil
 		})
 	if err != nil {
 		return nil, err

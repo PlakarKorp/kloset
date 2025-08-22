@@ -37,7 +37,7 @@ func (snap *Snapshot) ContentTypeIdx() (*btree.BTree[string, objects.MAC, object
 	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
 }
 
-func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
+func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, []byte], error) {
 	mac, found := snap.getidx("dirpack", "btree")
 	if !found {
 		return nil, nil
@@ -48,7 +48,7 @@ func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, objects.MAC],
 		return nil, err
 	}
 
-	store := SnapshotStore[string, objects.MAC]{
+	store := SnapshotStore[string, []byte]{
 		blobtype:   resources.RT_BTREE_NODE,
 		snapReader: snap,
 	}
