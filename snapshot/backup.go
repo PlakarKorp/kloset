@@ -827,14 +827,17 @@ func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.S
 	return vfsHeader, summary, indexes, nil
 }
 
+// FrameHeader is just for documentation; it is hand-de/serialized.
 type FrameHeader struct {
 	Type   uint8  // Entry type (directory, file, xattr, etc.)
 	Length uint32 // Length of the payload following this header
 }
 
+type DirPackEntry uint8
+
 const (
-	TypeVFSDirectory = 1
-	TypeVFSFile      = 2
+	TypeVFSDirectory DirPackEntry = 1
+	TypeVFSFile      DirPackEntry = 2
 )
 
 type chunkifyResult struct {
@@ -857,7 +860,7 @@ func directChildIter(backupCtx *BackupContext, key, prefix string) iter.Seq2[str
 	}
 }
 
-func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint8, data []byte) error) error {
+func mkDirPack(backupCtx *BackupContext, w io.Writer, prefix string) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -873,13 +876,13 @@ func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint
 	for hasFile || hasDir {
 		switch {
 		case !hasDir, hasFile && hasDir && strings.Compare(filePath, dirPath) <= 0:
-			if err := writeFrame(TypeVFSFile, fileBytes); err != nil {
+			if err := writeFrame(w, TypeVFSFile, fileBytes); err != nil {
 				return err
 			}
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
-			if err := writeFrame(TypeVFSDirectory, dirBytes); err != nil {
+			if err := writeFrame(w, TypeVFSDirectory, dirBytes); err != nil {
 				return err
 			}
 			dirPath, dirBytes, hasDir = dirNext()
@@ -887,6 +890,22 @@ func mkDirPack(backupCtx *BackupContext, prefix string, writeFrame func(typ uint
 	}
 
 	return nil
+}
+
+// writeFrame writes a directory entry for dirpack.  Each entry is
+// encoded in TLV, where the type is one byte, the length is a 32 bit
+// unsigned integer and the data follows, all without padding.
+func writeFrame(w io.Writer, typ DirPackEntry, data []byte) error {
+	endian := binary.LittleEndian
+	if err := binary.Write(w, endian, typ); err != nil {
+		return err
+	}
+	if err := binary.Write(w, endian, uint32(len(data))); err != nil {
+		return err
+	}
+	_, err := w.Write(data)
+	return err
+
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
@@ -925,15 +944,6 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			_, mac, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
 			resCh <- chunkifyResult{mac: mac, err: err}
 		}()
-
-		writeFrame := func(typ uint8, data []byte) error {
-			hdr := FrameHeader{Type: typ, Length: uint32(len(data))}
-			if err := binary.Write(pw, binary.LittleEndian, hdr); err != nil {
-				return err
-			}
-			_, err := pw.Write(data)
-			return err
-		}
 
 		dirEntry, err := vfs.EntryFromBytes(bytes)
 		if err != nil {
@@ -1010,7 +1020,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			dirEntry.Summary.UpdateBelow(childSummary)
 		}
 
-		if err := mkDirPack(backupCtx, prefix, writeFrame); err != nil {
+		if err := mkDirPack(backupCtx, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
