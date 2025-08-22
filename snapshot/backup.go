@@ -860,7 +860,63 @@ func directChildIter(backupCtx *BackupContext, key, prefix string) iter.Seq2[str
 	}
 }
 
-func mkDirPack(backupCtx *BackupContext, w io.Writer, prefix string) error {
+func (backupCtx *BackupContext) accountFile(dirEntry *vfs.Entry, fileidx *btree.BTree[string, int, []byte], bytes []byte, path string) error {
+	// bytes is a slice that will be reused in the next iteration,
+	// swapping below our feet, so make a copy out of it
+	dupBytes := make([]byte, len(bytes))
+	copy(dupBytes, bytes)
+
+	if err := fileidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
+		return err
+	}
+
+	data, err := backupCtx.vfsCache.GetCachedPath(path)
+	if err != nil {
+		return err
+	}
+
+	cachedPath, err := objects.NewCachedPathFromBytes(data)
+	if err != nil {
+		return err
+	}
+
+	fileSummary := &vfs.FileSummary{
+		Size:        uint64(cachedPath.FileInfo.Size()),
+		Chunks:      cachedPath.Chunks,
+		Mode:        cachedPath.FileInfo.Mode(),
+		ModTime:     cachedPath.FileInfo.ModTime().Unix(),
+		ContentType: cachedPath.ContentType,
+		Entropy:     cachedPath.Entropy,
+	}
+	if cachedPath.ObjectMAC != (objects.MAC{}) {
+		fileSummary.Objects++
+	}
+
+	dirEntry.Summary.Directory.Children++
+	dirEntry.Summary.UpdateWithFileSummary(fileSummary)
+
+	return nil
+}
+
+func (backupCtx *BackupContext) accountDir(dirEntry *vfs.Entry, path string) error {
+	data, err := backupCtx.scanCache.GetSummary(0, path)
+	if err != nil {
+		return err
+	}
+
+	childSummary, err := vfs.SummaryFromBytes(data)
+	if err != nil {
+		return err
+	}
+
+	dirEntry.Summary.Directory.Children++
+	dirEntry.Summary.Directory.Directories++
+	dirEntry.Summary.UpdateBelow(childSummary)
+
+	return nil
+}
+
+func (backupCtx *BackupContext) mkDirPack(dirEntry *vfs.Entry, fileidx *btree.BTree[string, int, []byte], w io.Writer, prefix string) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -876,12 +932,22 @@ func mkDirPack(backupCtx *BackupContext, w io.Writer, prefix string) error {
 	for hasFile || hasDir {
 		switch {
 		case !hasDir, hasFile && hasDir && strings.Compare(filePath, dirPath) <= 0:
+			abspath := prefix + filePath
+			err := backupCtx.accountFile(dirEntry, fileidx, fileBytes, abspath)
+			if err != nil {
+				return err
+			}
+
 			if err := writeFrame(w, TypeVFSFile, fileBytes); err != nil {
 				return err
 			}
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
+			abspath := prefix + dirPath
+			if err := backupCtx.accountDir(dirEntry, abspath); err != nil {
+				return err
+			}
 			if err := writeFrame(w, TypeVFSDirectory, dirBytes); err != nil {
 				return err
 			}
@@ -955,72 +1021,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		childiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__file__", "0", prefix), false)
-
-		for relpath, bytes := range childiter {
-			if strings.Contains(relpath, "/") {
-				continue
-			}
-
-			// bytes is a slice that will be reused in the next iteration,
-			// swapping below our feet, so make a copy out of it
-			dupBytes := make([]byte, len(bytes))
-			copy(dupBytes, bytes)
-
-			childPath := prefix + relpath
-
-			if err := fileidx.Insert(childPath, dupBytes); err != nil && err != btree.ErrExists {
-				return nil, nil, err
-			}
-
-			data, err := backupCtx.vfsCache.GetCachedPath(childPath)
-			if err != nil {
-				continue
-			}
-
-			cachedPath, err := objects.NewCachedPathFromBytes(data)
-			if err != nil {
-				continue
-			}
-
-			fileSummary := &vfs.FileSummary{
-				Size:        uint64(cachedPath.FileInfo.Size()),
-				Chunks:      cachedPath.Chunks,
-				Mode:        cachedPath.FileInfo.Mode(),
-				ModTime:     cachedPath.FileInfo.ModTime().Unix(),
-				ContentType: cachedPath.ContentType,
-				Entropy:     cachedPath.Entropy,
-			}
-			if cachedPath.ObjectMAC != (objects.MAC{}) {
-				fileSummary.Objects++
-			}
-
-			dirEntry.Summary.Directory.Children++
-			dirEntry.Summary.UpdateWithFileSummary(fileSummary)
-		}
-
-		subDirIter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", "__directory__", "0", prefix), false)
-		for relpath := range subDirIter {
-			if relpath == "" || strings.Contains(relpath, "/") {
-				continue
-			}
-
-			childPath := prefix + relpath
-			data, err := snap.scanCache.GetSummary(0, childPath)
-			if err != nil {
-				continue
-			}
-
-			childSummary, err := vfs.SummaryFromBytes(data)
-			if err != nil {
-				continue
-			}
-			dirEntry.Summary.Directory.Children++
-			dirEntry.Summary.Directory.Directories++
-			dirEntry.Summary.UpdateBelow(childSummary)
-		}
-
-		if err := mkDirPack(backupCtx, pw, prefix); err != nil {
+		if err := backupCtx.mkDirPack(dirEntry, fileidx, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
