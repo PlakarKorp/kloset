@@ -862,7 +862,7 @@ func directChildIter(backupCtx *BackupContext, key, prefix string) iter.Seq2[str
 	}
 }
 
-func (backupCtx *BackupContext) accountFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
+func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
 	// bytes is a slice that will be reused in the next iteration,
 	// swapping below our feet, so make a copy out of it
 	dupBytes := make([]byte, len(bytes))
@@ -900,7 +900,7 @@ func (backupCtx *BackupContext) accountFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) accountDir(dirEntry *vfs.Entry, path string) error {
+func (backupCtx *BackupContext) processDir(dirEntry *vfs.Entry, path string) error {
 	data, err := backupCtx.scanCache.GetSummary(0, path)
 	if err != nil {
 		return err
@@ -918,7 +918,7 @@ func (backupCtx *BackupContext) accountDir(dirEntry *vfs.Entry, path string) err
 	return nil
 }
 
-func (backupCtx *BackupContext) mkDirPack(dirEntry *vfs.Entry, w io.Writer, prefix string) error {
+func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer, prefix string) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -935,7 +935,7 @@ func (backupCtx *BackupContext) mkDirPack(dirEntry *vfs.Entry, w io.Writer, pref
 		switch {
 		case !hasDir, hasFile && hasDir && strings.Compare(filePath, dirPath) <= 0:
 			abspath := prefix + filePath
-			err := backupCtx.accountFile(dirEntry, fileBytes, abspath)
+			err := backupCtx.processFile(dirEntry, fileBytes, abspath)
 			if err != nil {
 				return err
 			}
@@ -947,7 +947,7 @@ func (backupCtx *BackupContext) mkDirPack(dirEntry *vfs.Entry, w io.Writer, pref
 
 		default:
 			abspath := prefix + dirPath
-			if err := backupCtx.accountDir(dirEntry, abspath); err != nil {
+			if err := backupCtx.processDir(dirEntry, abspath); err != nil {
 				return err
 			}
 			if err := writeFrame(w, TypeVFSDirectory, dirBytes); err != nil {
@@ -1024,7 +1024,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := backupCtx.mkDirPack(dirEntry, pw, prefix); err != nil {
+		if err := backupCtx.processChildren(dirEntry, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
