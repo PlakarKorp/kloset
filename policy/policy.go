@@ -1,6 +1,7 @@
 package policy
 
 import (
+	"flag"
 	"sort"
 	"time"
 )
@@ -28,7 +29,7 @@ type Item struct {
 	Timestamp time.Time
 }
 
-type Policy struct {
+type PolicyOptions struct {
 	// buckets
 	KeepMinutes, KeepHours, KeepDays, KeepWeeks, KeepMonths, KeepYears int
 
@@ -36,52 +37,33 @@ type Policy struct {
 	KeepPerMinute, KeepPerHour, KeepPerDay, KeepPerWeek, KeepPerMonth, KeepPerYear int
 }
 
-type Option func(*Policy)
+type Option func(*PolicyOptions)
 
-func NewPolicy(opts ...Option) *Policy {
-	p := &Policy{}
+func NewDefaultPolicyOptions(opts ...Option) *PolicyOptions {
+	p := &PolicyOptions{}
 
 	for _, opt := range opts {
 		opt(p)
 	}
 
-	if p.KeepPerMinute < 1 {
-		p.KeepPerMinute = 1
-	}
-	if p.KeepPerHour < 1 {
-		p.KeepPerHour = 1
-	}
-	if p.KeepPerDay < 1 {
-		p.KeepPerDay = 1
-	}
-	if p.KeepPerWeek < 1 {
-		p.KeepPerWeek = 1
-	}
-	if p.KeepPerMonth < 1 {
-		p.KeepPerMonth = 1
-	}
-	if p.KeepPerYear < 1 {
-		p.KeepPerYear = 1
-	}
-
 	return p
 }
 
-func WithKeepMinutes(n int) Option { return func(p *Policy) { p.KeepMinutes = n } }
-func WithKeepHours(n int) Option   { return func(p *Policy) { p.KeepHours = n } }
-func WithKeepDays(n int) Option    { return func(p *Policy) { p.KeepDays = n } }
-func WithKeepWeeks(n int) Option   { return func(p *Policy) { p.KeepWeeks = n } }
-func WithKeepMonths(n int) Option  { return func(p *Policy) { p.KeepMonths = n } }
-func WithKeepYears(n int) Option   { return func(p *Policy) { p.KeepYears = n } }
+func WithKeepMinutes(n int) Option { return func(p *PolicyOptions) { p.KeepMinutes = n } }
+func WithKeepHours(n int) Option   { return func(p *PolicyOptions) { p.KeepHours = n } }
+func WithKeepDays(n int) Option    { return func(p *PolicyOptions) { p.KeepDays = n } }
+func WithKeepWeeks(n int) Option   { return func(p *PolicyOptions) { p.KeepWeeks = n } }
+func WithKeepMonths(n int) Option  { return func(p *PolicyOptions) { p.KeepMonths = n } }
+func WithKeepYears(n int) Option   { return func(p *PolicyOptions) { p.KeepYears = n } }
 
-func WithPerMinuteCap(n int) Option { return func(p *Policy) { p.KeepPerMinute = n } }
-func WithPerHourCap(n int) Option   { return func(p *Policy) { p.KeepPerHour = n } }
-func WithPerDayCap(n int) Option    { return func(p *Policy) { p.KeepPerDay = n } }
-func WithPerWeekCap(n int) Option   { return func(p *Policy) { p.KeepPerWeek = n } }
-func WithPerMonthCap(n int) Option  { return func(p *Policy) { p.KeepPerMonth = n } }
-func WithPerYearCap(n int) Option   { return func(p *Policy) { p.KeepPerYear = n } }
+func WithPerMinuteCap(n int) Option { return func(p *PolicyOptions) { p.KeepPerMinute = n } }
+func WithPerHourCap(n int) Option   { return func(p *PolicyOptions) { p.KeepPerHour = n } }
+func WithPerDayCap(n int) Option    { return func(p *PolicyOptions) { p.KeepPerDay = n } }
+func WithPerWeekCap(n int) Option   { return func(p *PolicyOptions) { p.KeepPerWeek = n } }
+func WithPerMonthCap(n int) Option  { return func(p *PolicyOptions) { p.KeepPerMonth = n } }
+func WithPerYearCap(n int) Option   { return func(p *PolicyOptions) { p.KeepPerYear = n } }
 
-func (p *Policy) Select(items []Item, now time.Time) (map[string]struct{}, map[string]Reason) {
+func (p *PolicyOptions) Select(items []Item, now time.Time) (map[string]struct{}, map[string]Reason) {
 	now = now.UTC()
 
 	// copy + normalize timestamps + sort newest-first
@@ -182,4 +164,26 @@ func capOr1(v int) int {
 		return 1
 	}
 	return v
+}
+
+func (po *PolicyOptions) InstallFlags(flags *flag.FlagSet) {
+	flags.IntVar(&po.KeepMinutes, "keep-minutes", 0, "keep snapshots for the last N minutes")
+	flags.IntVar(&po.KeepHours, "keep-hours", 0, "keep snapshots for the last N hours")
+	flags.IntVar(&po.KeepDays, "keep-days", 0, "keep snapshots for the last N days")
+	flags.IntVar(&po.KeepWeeks, "keep-weeks", 0, "keep snapshots for the last N weeks")
+	flags.IntVar(&po.KeepMonths, "keep-months", 0, "keep snapshots for the last N months")
+	flags.IntVar(&po.KeepYears, "keep-years", 0, "keep snapshots for the last N years")
+	flags.IntVar(&po.KeepPerMinute, "keep-per-minute", 1, "cap the number of kept snapshots per minute")
+	flags.IntVar(&po.KeepPerHour, "keep-per-hour", 1, "cap the number of kept snapshots per hour")
+	flags.IntVar(&po.KeepPerDay, "keep-per-day", 1, "cap the number of kept snapshots per day")
+	flags.IntVar(&po.KeepPerWeek, "keep-per-week", 1, "cap the number of kept snapshots per week")
+	flags.IntVar(&po.KeepPerMonth, "keep-per-month", 1, "cap the number of kept snapshots per month")
+	flags.IntVar(&po.KeepPerYear, "keep-per-year", 1, "cap the number of kept snapshots per year")
+}
+
+func (po *PolicyOptions) Empty() bool {
+	return po.KeepMinutes == 0 && po.KeepHours == 0 && po.KeepDays == 0 &&
+		po.KeepWeeks == 0 && po.KeepMonths == 0 && po.KeepYears == 0 &&
+		po.KeepPerMinute <= 1 && po.KeepPerHour <= 1 && po.KeepPerDay <= 1 &&
+		po.KeepPerWeek <= 1 && po.KeepPerMonth <= 1 && po.KeepPerYear <= 1
 }
