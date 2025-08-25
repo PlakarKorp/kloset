@@ -10,16 +10,6 @@ func tstamp(y int, mon time.Month, d, h, m, s int) time.Time {
 	return time.Date(y, mon, d, h, m, s, 0, time.UTC)
 }
 
-func TestNewDefaultPolicyOptions_DefaultCapsNormalizedToOne(t *testing.T) {
-	p := NewDefaultPolicyOptions(
-		WithKeepMinutes(5),
-		WithPerMinuteCap(0), // should normalize to 1
-	)
-	if got, want := p.Minute.Cap, 1; got != want {
-		t.Fatalf("cap normalization failed: got %d want %d", got, want)
-	}
-}
-
 func TestSelect_MinuteBucket_CapAndRank(t *testing.T) {
 	// Set now away from a minute boundary so -1s/-5s/-10s stay in the same minute.
 	now := tstamp(2025, time.August, 24, 12, 30, 30)

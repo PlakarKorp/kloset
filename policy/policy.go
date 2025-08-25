@@ -152,12 +152,12 @@ func (po *PolicyOptions) InstallFlags(flags *flag.FlagSet) {
 	flags.IntVar(&po.Week.Keep, "keep-weeks", 0, "keep snapshots for the last N weeks")
 	flags.IntVar(&po.Month.Keep, "keep-months", 0, "keep snapshots for the last N months")
 	flags.IntVar(&po.Year.Keep, "keep-years", 0, "keep snapshots for the last N years")
-	flags.IntVar(&po.Minute.Cap, "keep-per-minute", 1, "cap the number of kept snapshots per minute")
-	flags.IntVar(&po.Hour.Cap, "keep-per-hour", 1, "cap the number of kept snapshots per hour")
-	flags.IntVar(&po.Day.Cap, "keep-per-day", 1, "cap the number of kept snapshots per day")
-	flags.IntVar(&po.Week.Cap, "keep-per-week", 1, "cap the number of kept snapshots per week")
-	flags.IntVar(&po.Month.Cap, "keep-per-month", 1, "cap the number of kept snapshots per month")
-	flags.IntVar(&po.Year.Cap, "keep-per-year", 1, "cap the number of kept snapshots per year")
+	flags.IntVar(&po.Minute.Cap, "keep-per-minute", 0, "cap the number of kept snapshots per minute")
+	flags.IntVar(&po.Hour.Cap, "keep-per-hour", 0, "cap the number of kept snapshots per hour")
+	flags.IntVar(&po.Day.Cap, "keep-per-day", 0, "cap the number of kept snapshots per day")
+	flags.IntVar(&po.Week.Cap, "keep-per-week", 0, "cap the number of kept snapshots per week")
+	flags.IntVar(&po.Month.Cap, "keep-per-month", 0, "cap the number of kept snapshots per month")
+	flags.IntVar(&po.Year.Cap, "keep-per-year", 0, "cap the number of kept snapshots per year")
 }
 
 func (po *PolicyOptions) Empty() bool {
