@@ -281,7 +281,7 @@ func (fsc *Filesystem) Open(path string) (fs.File, error) {
 		return nil, err
 	}
 
-	return entry.Open(fsc), nil
+	return entry.Open(fsc)
 }
 
 func (fsc *Filesystem) Stat(name string) (fs.FileInfo, error) {

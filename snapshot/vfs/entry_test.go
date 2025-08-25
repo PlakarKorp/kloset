@@ -51,7 +51,8 @@ func TestVfile(t *testing.T) {
 	// can't test the whole json content as there are some random part included
 	require.Contains(t, string(entryJson), `"file_info":{"name":"dummy.txt","size":5,"mode":420`)
 
-	vFile := entry.Open(fs)
+	vFile, err := entry.Open(fs)
+	require.NoError(t, err)
 
 	seeked, err := vFile.(io.ReadSeeker).Seek(2, io.SeekCurrent)
 	require.NoError(t, err)
@@ -114,7 +115,9 @@ func TestVdir(t *testing.T) {
 	}
 
 	dst := make([]byte, 100)
-	dirFile := entry.Open(fs)
+	dirFile, err := entry.Open(fs)
+
+	require.NoError(t, err)
 	_, err = dirFile.Read(dst)
 	require.Error(t, iofs.ErrInvalid, err)
 
@@ -147,7 +150,10 @@ func TestBigFile(t *testing.T) {
 		t.Error("not enough chunks; would have expected at least two, got", n)
 	}
 
-	fp := entry.Open(fs).(io.ReadSeeker)
+	rd, err := entry.Open(fs)
+	require.NoError(t, err)
+
+	fp := rd.(io.ReadSeeker)
 
 	buf := make([]byte, 256)
 	var seeked int64
