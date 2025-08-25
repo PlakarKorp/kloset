@@ -15,7 +15,7 @@ func TestNewDefaultPolicyOptions_DefaultCapsNormalizedToOne(t *testing.T) {
 		WithKeepMinutes(5),
 		WithPerMinuteCap(0), // should normalize to 1
 	)
-	if got, want := p.KeepPerMinute, 1; got != want {
+	if got, want := p.Minute.Cap, 1; got != want {
 		t.Fatalf("cap normalization failed: got %d want %d", got, want)
 	}
 }
@@ -47,13 +47,13 @@ func TestSelect_MinuteBucket_CapAndRank(t *testing.T) {
 		t.Fatalf("expected B not kept; kept=%v", kept)
 	}
 
-	if r, ok := reasons["C"]; !ok || !(r.Action == "keep" && r.Rule == RuleMinutes && r.Rank == 1 && r.Cap == 1) {
+	if r, ok := reasons["C"]; !ok || !(r.Action == "keep" && r.Rule == Minutes.Name && r.Rank == 1 && r.Cap == 1) {
 		t.Fatalf("C reason unexpected: %+v (ok=%v)", r, ok)
 	}
-	if r, ok := reasons["B"]; !ok || !(r.Action == "delete" && r.Rule == RuleMinutes && r.Rank == 2 && r.Cap == 1 && r.Note == "exceeds per-bucket cap") {
+	if r, ok := reasons["B"]; !ok || !(r.Action == "delete" && r.Rule == Minutes.Name && r.Rank == 2 && r.Cap == 1 && r.Note == "exceeds per-bucket cap") {
 		t.Fatalf("B reason unexpected: %+v (ok=%v)", r, ok)
 	}
-	if r, ok := reasons["A"]; !ok || !(r.Action == "delete" && r.Rule == RuleMinutes && r.Rank == 3 && r.Cap == 1 && r.Note == "exceeds per-bucket cap") {
+	if r, ok := reasons["A"]; !ok || !(r.Action == "delete" && r.Rule == Minutes.Name && r.Rank == 3 && r.Cap == 1 && r.Note == "exceeds per-bucket cap") {
 		t.Fatalf("A reason unexpected: %+v (ok=%v)", r, ok)
 	}
 }
@@ -74,7 +74,7 @@ func TestSelect_HourBucket_UnionWithMinutes(t *testing.T) {
 	if _, ok := kept["H"]; !ok {
 		t.Fatalf("expected H kept by hour rule; kept=%v", kept)
 	}
-	if r, ok := reasons["H"]; !ok || !(r.Action == "keep" && r.Rule == RuleHours && r.Rank == 1) {
+	if r, ok := reasons["H"]; !ok || !(r.Action == "keep" && r.Rule == Hours.Name && r.Rank == 1) {
 		t.Fatalf("H reason unexpected: %+v (ok=%v)", r, ok)
 	}
 }
@@ -105,9 +105,9 @@ func TestSelect_WeekBucket_CapAcrossDays(t *testing.T) {
 
 	// Three items in the same ISO week, different days
 	items := []Item{
-		{ItemID: "Mon", Timestamp: startOfISOWeek(now).Add(1 * time.Hour)},                // Monday 01:00
-		{ItemID: "Tue", Timestamp: startOfISOWeek(now).Add(24*time.Hour + 1*time.Hour)},   // Tuesday 01:00
-		{ItemID: "Fri", Timestamp: startOfISOWeek(now).Add(4*24*time.Hour + 1*time.Hour)}, // Friday 01:00 (newest)
+		{ItemID: "Mon", Timestamp: Weeks.Start(now).Add(1 * time.Hour)},                // Monday 01:00
+		{ItemID: "Tue", Timestamp: Weeks.Start(now).Add(24*time.Hour + 1*time.Hour)},   // Tuesday 01:00
+		{ItemID: "Fri", Timestamp: Weeks.Start(now).Add(4*24*time.Hour + 1*time.Hour)}, // Friday 01:00 (newest)
 	}
 
 	kept, reasons := p.Select(items, now)
@@ -119,7 +119,7 @@ func TestSelect_WeekBucket_CapAcrossDays(t *testing.T) {
 		if _, ok := kept[id]; ok {
 			t.Fatalf("expected %s dropped by cap; kept=%v", id, kept)
 		}
-		if r, ok := reasons[id]; !ok || !(r.Action == "delete" && r.Rule == RuleWeeks && r.Note == "exceeds per-bucket cap") {
+		if r, ok := reasons[id]; !ok || !(r.Action == "delete" && r.Rule == Weeks.Name && r.Note == "exceeds per-bucket cap") {
 			t.Fatalf("%s reason unexpected: %+v (ok=%v)", id, r, ok)
 		}
 	}
@@ -147,17 +147,17 @@ func TestSelect_DayAndMonth_Union(t *testing.T) {
 	kept, reasons := p.Select([]Item{sameDayOld, sameDayNew, prevDay}, now)
 
 	// D1 must be kept by day
-	if r, ok := reasons["D1"]; !ok || r.Action != "keep" || r.Rule != RuleDays {
+	if r, ok := reasons["D1"]; !ok || r.Action != "keep" || r.Rule != Days.Name {
 		t.Fatalf("D1 should be kept by day: kept=%v reason=%+v (ok=%v)", kept, r, ok)
 	}
 
 	// D2 not kept by day (cap), BUT should be kept by month (union)
-	if r, ok := reasons["D2"]; !ok || r.Action != "keep" || r.Rule != RuleMonths {
+	if r, ok := reasons["D2"]; !ok || r.Action != "keep" || r.Rule != Months.Name {
 		t.Fatalf("D2 should be kept by month: kept=%v reason=%+v (ok=%v)", kept, r, ok)
 	}
 
 	// M1 is 3rd-newest in the month; month cap=2 keeps D1 & D2 → M1 dropped by months.
-	if r, ok := reasons["M1"]; !ok || !(r.Action == "delete" && r.Rule == RuleMonths && r.Rank == 3 && r.Cap == 2 && r.Note == "exceeds per-bucket cap") {
+	if r, ok := reasons["M1"]; !ok || !(r.Action == "delete" && r.Rule == Months.Name && r.Rank == 3 && r.Cap == 2 && r.Note == "exceeds per-bucket cap") {
 		t.Fatalf("M1 should be deleted by months: kept=%v reason=%+v (ok=%v)", kept, r, ok)
 	}
 }
