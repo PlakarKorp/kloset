@@ -5,9 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
-	"strings"
 
-	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -229,29 +227,43 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		// Lastly going over the indexes.
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)) {
-			return
-		}
-		rd, err := snap.repository.GetBlob(resources.RT_BTREE_ROOT, snap.Header.GetSource(0).Indexes[0].Value)
-		if err != nil {
-			if !yield(objects.MAC{}, fmt.Errorf("Failed to load Index root entry %s", err)) {
-				return
-			}
-		}
-
-		store := repository.NewRepositoryStore[string, objects.MAC](snap.repository, resources.RT_BTREE_NODE)
-		tree, err := btree.Deserialize(rd, store, strings.Compare)
+		tree, err := snap.ContentTypeIdx()
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
 				return
 			}
 		}
 
-		indexIter := tree.IterDFS()
-		for indexIter.Next() {
-			mac, _ := indexIter.Current()
-			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+		if tree != nil {
+			indexIter := tree.IterDFS()
+			for indexIter.Next() {
+				mac, _ := indexIter.Current()
+				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
+			}
+		}
+
+		dirpack, err := snap.DirPack()
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
 				return
+			}
+		}
+
+		if dirpack != nil {
+			indexIter := dirpack.IterDFS()
+			for indexIter.Next() {
+				mac, node := indexIter.Current()
+				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
+
+				for _, dirpackObject := range node.Values {
+					if !yield(getPackfileForBlobWithError(snap, resources.RT_OBJECT, dirpackObject)) {
+						return
+					}
+				}
 			}
 		}
 
