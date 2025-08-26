@@ -151,19 +151,38 @@ func (e *Entry) AddClassification(analyzer string, classes []string) {
 	})
 }
 
-func (e *Entry) Open(fs *Filesystem) fs.File {
+func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
 	if e.FileInfo.IsDir() {
 		return &vdir{
 			entry: e,
 			fs:    fs,
+		}, nil
+	}
+
+	if e.HasObject() && e.ResolvedObject == nil {
+		rd, err := fs.repo.GetBlob(resources.RT_OBJECT, e.Object)
+		if err != nil {
+			return nil, err
 		}
+
+		bytes, err := io.ReadAll(rd)
+		if err != nil {
+			return nil, err
+		}
+
+		obj, err := objects.NewObjectFromBytes(bytes)
+		if err != nil {
+			return nil, err
+		}
+
+		e.ResolvedObject = obj
 	}
 
 	return &vfile{
 		entry: e,
 		repo:  fs.repo,
 		rd:    NewObjectReader(fs.repo, e.ResolvedObject, e.Size()),
-	}
+	}, nil
 }
 
 func (e *Entry) Getdents(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {

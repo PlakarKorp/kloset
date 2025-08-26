@@ -93,7 +93,12 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				}
 			}
 
-			rd := e.Open(restoreContext.vfs)
+			rd, err := e.Open(restoreContext.vfs)
+			if err != nil {
+				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+				return nil
+			}
+
 			defer rd.Close()
 
 			// Ensure the parent directory exists.
