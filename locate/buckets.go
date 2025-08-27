@@ -1,4 +1,4 @@
-package policy
+package locate
 
 import (
 	"fmt"
