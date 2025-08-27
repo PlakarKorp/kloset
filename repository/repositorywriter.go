@@ -51,7 +51,7 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	case PtarType:
 		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPtarPackfile)
 	default:
-		rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPackfile)
+		rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, packfile.NewPackfileInMemory, rw.GetMACHasher, rw.PutPackfile)
 	}
 
 	// XXX: Better placement for this
@@ -182,7 +182,7 @@ func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.
 	return r.state.DeleteResource(Type, mac)
 }
 
-func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
+func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "PutPackfile(%x): %s", r.currentStateID, time.Since(t0))
@@ -234,15 +234,15 @@ func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
-	for idx, blob := range pfile.Index {
+	for _, blob := range pfile.Entries() {
 		delta := &state.DeltaEntry{
 			Type:    blob.Type,
-			Version: pfile.Index[idx].Version,
+			Version: blob.Version,
 			Blob:    blob.MAC,
 			Location: state.Location{
 				Packfile: mac,
-				Offset:   pfile.Index[idx].Offset,
-				Length:   pfile.Index[idx].Length,
+				Offset:   blob.Offset,
+				Length:   blob.Length,
 			},
 		}
 

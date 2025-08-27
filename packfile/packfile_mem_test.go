@@ -15,7 +15,7 @@ import (
 func TestPackFile(t *testing.T) {
 	hasher := hmac.New(sha256.New, []byte("testkey"))
 
-	p := New(hasher)
+	p := NewPackfileInMemory(hasher).(*PackfileInMemory)
 
 	// Define some sample chunks
 	chunk1 := []byte("This is chunk number 1")
@@ -28,18 +28,18 @@ func TestPackFile(t *testing.T) {
 	p.AddBlob(resources.RT_CHUNK, versioning.GetCurrentVersion(resources.RT_CHUNK), mac2, chunk2, 0)
 
 	// Test GetBlob
-	retrievedChunk1, exists := p.GetBlob(mac1)
+	retrievedChunk1, exists := p.getBlob(mac1)
 	if !exists || !bytes.Equal(retrievedChunk1, chunk1) {
 		t.Fatalf("Expected %s but got %s", chunk1, retrievedChunk1)
 	}
 
-	retrievedChunk2, exists := p.GetBlob(mac2)
+	retrievedChunk2, exists := p.getBlob(mac2)
 	if !exists || !bytes.Equal(retrievedChunk2, chunk2) {
 		t.Fatalf("Expected %s but got %s", chunk2, retrievedChunk2)
 	}
 
 	// this blob should not exist
-	_, exists = p.GetBlob([32]byte{200})
+	_, exists = p.getBlob([32]byte{200})
 	require.Equal(t, false, exists)
 
 	// Check PackFile Metadata
@@ -51,63 +51,10 @@ func TestPackFile(t *testing.T) {
 	}
 }
 
-// XXX: Once we move the packfile package to the good place _reenable those tests_
-func _TestPackFileSerialization(t *testing.T) {
-	hasher := hmac.New(sha256.New, []byte("testkey"))
-
-	p := New(hasher)
-
-	// Define some sample chunks
-	chunk1 := []byte("This is chunk number 1")
-	chunk2 := []byte("This is chunk number 2")
-	mac1 := [32]byte{1} // Mock mac for chunk1
-	mac2 := [32]byte{2} // Mock mac for chunk2
-
-	// Test AddBlob
-	p.AddBlob(resources.RT_CHUNK, versioning.GetCurrentVersion(resources.RT_CHUNK), mac1, chunk1, 0)
-	p.AddBlob(resources.RT_CHUNK, versioning.GetCurrentVersion(resources.RT_CHUNK), mac2, chunk2, 0)
-
-	// Test Serialize and NewFromBytes
-	serialized, err := p.Serialize()
-	if err != nil {
-		t.Fatalf("Failed to serialize PackFile: %v", err)
-	}
-
-	p2, err := NewFromBytes(hasher, versioning.GetCurrentVersion(resources.RT_PACKFILE), serialized)
-	if err != nil {
-		t.Fatalf("Failed to create PackFile from bytes: %v", err)
-	}
-
-	// Check that metadata is correctly restored after deserialization
-	if p2.Footer.Version != p.Footer.Version {
-		t.Fatalf("Expected Footer.Version to be %d but got %d", p.Footer.Version, p2.Footer.Version)
-	}
-	if p2.Footer.Count != p.Footer.Count {
-		t.Fatalf("Expected Footer.Count to be %d but got %d", p.Footer.Count, p2.Footer.Count)
-	}
-	if p2.Footer.IndexOffset != p.Footer.IndexOffset {
-		t.Fatalf("Expected Footer.Length to be %d but got %d", p.Footer.IndexOffset, p2.Footer.IndexOffset)
-	}
-	if p2.Footer.Timestamp != p.Footer.Timestamp {
-		t.Fatalf("Expected Footer.Timestamp to be %d but got %d", p.Footer.Timestamp, p2.Footer.Timestamp)
-	}
-
-	// Test that chunks are still retrievable after serialization and deserialization
-	retrievedChunk1, exists := p2.GetBlob(mac1)
-	if !exists || !bytes.Equal(retrievedChunk1, chunk1) {
-		t.Fatalf("Expected %s but got %s", chunk1, retrievedChunk1)
-	}
-
-	retrievedChunk2, exists := p2.GetBlob(mac2)
-	if !exists || !bytes.Equal(retrievedChunk2, chunk2) {
-		t.Fatalf("Expected %s but got %s", chunk2, retrievedChunk2)
-	}
-}
-
 func _TestPackFileSerializeIndex(t *testing.T) {
 	hasher := hmac.New(sha256.New, []byte("testkey"))
 
-	p := New(hasher)
+	p := NewPackfileInMemory(hasher).(*PackfileInMemory)
 
 	// Define some sample chunks
 	chunk1 := []byte("This is chunk number 1")
@@ -126,7 +73,7 @@ func _TestPackFileSerializeIndex(t *testing.T) {
 	serialized, err := p.SerializeIndex()
 	require.NoError(t, err, "Failed to serialize PackFile index")
 
-	p2, err := NewIndexFromBytes(versioning.GetCurrentVersion(resources.RT_PACKFILE), serialized)
+	p2, err := NewInMemoryIndexFromBytes(versioning.GetCurrentVersion(resources.RT_PACKFILE), serialized)
 	require.NoError(t, err, "Failed to create PackFile index from bytes")
 
 	require.Equal(t, len(p2), 2, "Expected 2 blobs but got %d", len(p2))
@@ -149,7 +96,7 @@ func _TestPackFileSerializeIndex(t *testing.T) {
 
 func _TestPackFileSerializeFooter(t *testing.T) {
 	hasher := hmac.New(sha256.New, []byte("testkey"))
-	p := New(hasher)
+	p := NewPackfileInMemory(hasher).(*PackfileInMemory)
 
 	// Define some sample chunks
 	chunk1 := []byte("This is chunk number 1")
@@ -165,7 +112,7 @@ func _TestPackFileSerializeFooter(t *testing.T) {
 	serialized, err := p.SerializeFooter()
 	require.NoError(t, err, "Failed to serialize PackFile footer")
 
-	p2, err := NewFooterFromBytes(versioning.GetCurrentVersion(resources.RT_PACKFILE), serialized)
+	p2, err := NewInMemoryFooterFromBytes(versioning.GetCurrentVersion(resources.RT_PACKFILE), serialized)
 	require.NoError(t, err, "Failed to create PackFile footer from bytes")
 
 	require.Equal(t, p2.Count, uint32(2), "Expected 2 blobs but got %d", uint32(p2.Count))
@@ -175,7 +122,7 @@ func _TestPackFileSerializeFooter(t *testing.T) {
 
 func _TestPackFileSerializeData(t *testing.T) {
 	hasher := hmac.New(sha256.New, []byte("testkey"))
-	p := New(hasher)
+	p := NewPackfileInMemory(hasher).(*PackfileInMemory)
 
 	// Define some sample chunks
 	chunk1 := []byte("This is chunk number 1")

@@ -27,18 +27,19 @@ type seqPackerManager struct {
 	packerChan     []chan PackerMsg
 	packerChanDone chan struct{}
 
-	storageConf  *storage.Configuration
-	encodingFunc func(io.Reader) (io.Reader, error)
-	hashFactory  func() hash.Hash
-	appCtx       *kcontext.KContext
-	nChan        int
+	packfileFactory packfile.PackfileCtor
+	storageConf     *storage.Configuration
+	encodingFunc    func(io.Reader) (io.Reader, error)
+	hashFactory     func() hash.Hash
+	appCtx          *kcontext.KContext
+	nChan           int
 
 	// XXX: Temporary hack callback-based to ease the transition diff.
 	// To be revisited with either an interface or moving this file inside repository/
-	flush func(*packfile.PackFile) error
+	flush func(packfile.Packfile) error
 }
 
-func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), hashFactory func() hash.Hash, flusher func(*packfile.PackFile) error) PackerManagerInt {
+func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), packfileFactory packfile.PackfileCtor, hashFactory func() hash.Hash, flusher func(packfile.Packfile) error) PackerManagerInt {
 	inflightsMACs := make(map[resources.Type]*sync.Map)
 	for _, Type := range resources.Types() {
 		inflightsMACs[Type] = &sync.Map{}
@@ -47,15 +48,16 @@ func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConf
 	// VFS entries dedicated channel
 	nChan := maxConcurrency + 1
 	ret := &seqPackerManager{
-		inflightMACs:   inflightsMACs,
-		packerChan:     make([]chan PackerMsg, nChan),
-		packerChanDone: make(chan struct{}),
-		storageConf:    storageConfiguration,
-		encodingFunc:   encodingFunc,
-		hashFactory:    hashFactory,
-		appCtx:         ctx,
-		flush:          flusher,
-		nChan:          nChan,
+		inflightMACs:    inflightsMACs,
+		packerChan:      make([]chan PackerMsg, nChan),
+		packerChanDone:  make(chan struct{}),
+		packfileFactory: packfileFactory,
+		storageConf:     storageConfiguration,
+		encodingFunc:    encodingFunc,
+		hashFactory:     hashFactory,
+		appCtx:          ctx,
+		flush:           flusher,
+		nChan:           nChan,
 	}
 
 	for i := range nChan {
@@ -66,7 +68,7 @@ func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConf
 }
 
 func (mgr *seqPackerManager) Run() error {
-	packerResultChan := make(chan *packfile.PackFile, mgr.nChan)
+	packerResultChan := make(chan packfile.Packfile, mgr.nChan)
 
 	flusherGroup, _ := errgroup.WithContext(context.TODO())
 	for range mgr.nChan {
@@ -86,7 +88,7 @@ func (mgr *seqPackerManager) Run() error {
 					return err
 				}
 
-				for _, record := range pfile.Index {
+				for _, record := range pfile.Entries() {
 					mgr.inflightMACs[record.Type].Delete(record.MAC)
 				}
 			}
@@ -101,7 +103,7 @@ func (mgr *seqPackerManager) Run() error {
 	workerGroup, workerCtx := errgroup.WithContext(context.TODO())
 	for i := range mgr.nChan {
 		workerGroup.Go(func() error {
-			var pfile *packfile.PackFile
+			var pfile packfile.Packfile
 
 			for {
 				select {
@@ -116,13 +118,13 @@ func (mgr *seqPackerManager) Run() error {
 					}
 
 					if pfile == nil {
-						pfile = packfile.New(mgr.hashFactory())
+						pfile = mgr.packfileFactory(mgr.hashFactory())
 						mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
 					}
 
 					pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags)
 
-					if pfile.Size() > uint32(mgr.storageConf.Packfile.MaxSize) {
+					if pfile.Size() > mgr.storageConf.Packfile.MaxSize {
 						packerResultChan <- pfile
 						pfile = nil
 					}
@@ -197,7 +199,7 @@ func (mgr *seqPackerManager) Exists(Type resources.Type, mac objects.MAC) (bool,
 	return false, nil
 }
 
-func (mgr *seqPackerManager) AddPadding(packfile *packfile.PackFile, maxSize int) error {
+func (mgr *seqPackerManager) AddPadding(packfile packfile.Packfile, maxSize int) error {
 	if maxSize < 0 {
 		return fmt.Errorf("invalid padding size")
 	}
