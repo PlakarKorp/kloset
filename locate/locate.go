@@ -52,12 +52,12 @@ type Item struct {
 	Filters   ItemFilters
 }
 
-type PeriodPolicy struct {
+type LocatePeriod struct {
 	Keep int
 	Cap  int
 }
 
-type FiltersPolicy struct {
+type LocateFilters struct {
 	Before time.Time
 	Since  time.Time
 
@@ -74,21 +74,21 @@ type FiltersPolicy struct {
 
 }
 
-type PolicyOptions struct {
-	Filters FiltersPolicy
+type LocateOptions struct {
+	Filters LocateFilters
 
-	Minute PeriodPolicy
-	Hour   PeriodPolicy
-	Day    PeriodPolicy
-	Week   PeriodPolicy
-	Month  PeriodPolicy
-	Year   PeriodPolicy
+	Minute LocatePeriod
+	Hour   LocatePeriod
+	Day    LocatePeriod
+	Week   LocatePeriod
+	Month  LocatePeriod
+	Year   LocatePeriod
 }
 
-type Option func(*PolicyOptions)
+type Option func(*LocateOptions)
 
-func NewDefaultPolicyOptions(opts ...Option) *PolicyOptions {
-	p := &PolicyOptions{}
+func NewDefaultLocateOptions(opts ...Option) *LocateOptions {
+	p := &LocateOptions{}
 
 	for _, opt := range opts {
 		opt(p)
@@ -97,49 +97,49 @@ func NewDefaultPolicyOptions(opts ...Option) *PolicyOptions {
 	return p
 }
 
-func WithKeepMinutes(n int) Option { return func(p *PolicyOptions) { p.Minute.Keep = n } }
-func WithKeepHours(n int) Option   { return func(p *PolicyOptions) { p.Hour.Keep = n } }
-func WithKeepDays(n int) Option    { return func(p *PolicyOptions) { p.Day.Keep = n } }
-func WithKeepWeeks(n int) Option   { return func(p *PolicyOptions) { p.Week.Keep = n } }
-func WithKeepMonths(n int) Option  { return func(p *PolicyOptions) { p.Month.Keep = n } }
-func WithKeepYears(n int) Option   { return func(p *PolicyOptions) { p.Year.Keep = n } }
+func WithKeepMinutes(n int) Option { return func(p *LocateOptions) { p.Minute.Keep = n } }
+func WithKeepHours(n int) Option   { return func(p *LocateOptions) { p.Hour.Keep = n } }
+func WithKeepDays(n int) Option    { return func(p *LocateOptions) { p.Day.Keep = n } }
+func WithKeepWeeks(n int) Option   { return func(p *LocateOptions) { p.Week.Keep = n } }
+func WithKeepMonths(n int) Option  { return func(p *LocateOptions) { p.Month.Keep = n } }
+func WithKeepYears(n int) Option   { return func(p *LocateOptions) { p.Year.Keep = n } }
 
-func WithPerMinuteCap(n int) Option { return func(p *PolicyOptions) { p.Minute.Cap = n } }
-func WithPerHourCap(n int) Option   { return func(p *PolicyOptions) { p.Hour.Cap = n } }
-func WithPerDayCap(n int) Option    { return func(p *PolicyOptions) { p.Day.Cap = n } }
-func WithPerWeekCap(n int) Option   { return func(p *PolicyOptions) { p.Week.Cap = n } }
-func WithPerMonthCap(n int) Option  { return func(p *PolicyOptions) { p.Month.Cap = n } }
-func WithPerYearCap(n int) Option   { return func(p *PolicyOptions) { p.Year.Cap = n } }
+func WithPerMinuteCap(n int) Option { return func(p *LocateOptions) { p.Minute.Cap = n } }
+func WithPerHourCap(n int) Option   { return func(p *LocateOptions) { p.Hour.Cap = n } }
+func WithPerDayCap(n int) Option    { return func(p *LocateOptions) { p.Day.Cap = n } }
+func WithPerWeekCap(n int) Option   { return func(p *LocateOptions) { p.Week.Cap = n } }
+func WithPerMonthCap(n int) Option  { return func(p *LocateOptions) { p.Month.Cap = n } }
+func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Year.Cap = n } }
 
 func WithBefore(t time.Time) Option {
-	return func(p *PolicyOptions) { p.Filters.Before = t }
+	return func(p *LocateOptions) { p.Filters.Before = t }
 }
 func WithSince(t time.Time) Option {
-	return func(p *PolicyOptions) { p.Filters.Since = t }
+	return func(p *LocateOptions) { p.Filters.Since = t }
 }
 func WithName(name string) Option {
-	return func(p *PolicyOptions) { p.Filters.Name = name }
+	return func(p *LocateOptions) { p.Filters.Name = name }
 }
 func WithCategory(category string) Option {
-	return func(p *PolicyOptions) { p.Filters.Category = category }
+	return func(p *LocateOptions) { p.Filters.Category = category }
 }
 func WithEnvironment(env string) Option {
-	return func(p *PolicyOptions) { p.Filters.Environment = env }
+	return func(p *LocateOptions) { p.Filters.Environment = env }
 }
 func WithPerimeter(perimeter string) Option {
-	return func(p *PolicyOptions) { p.Filters.Perimeter = perimeter }
+	return func(p *LocateOptions) { p.Filters.Perimeter = perimeter }
 }
 func WithJob(job string) Option {
-	return func(p *PolicyOptions) { p.Filters.Job = job }
+	return func(p *LocateOptions) { p.Filters.Job = job }
 }
 func WithTag(tag string) Option {
-	return func(p *PolicyOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
+	return func(p *LocateOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
 }
-func WithPrefix(prefix string) Option  { return func(p *PolicyOptions) { p.Filters.Prefix = prefix } }
-func WithLatest(latest bool) Option    { return func(p *PolicyOptions) { p.Filters.Latest = latest } }
-func WithSortOrder(o SortOrder) Option { return func(p *PolicyOptions) { p.Filters.SortOrder = o } }
+func WithPrefix(prefix string) Option  { return func(p *LocateOptions) { p.Filters.Prefix = prefix } }
+func WithLatest(latest bool) Option    { return func(p *LocateOptions) { p.Filters.Latest = latest } }
+func WithSortOrder(o SortOrder) Option { return func(p *LocateOptions) { p.Filters.SortOrder = o } }
 
-func (po *PolicyOptions) Matches(it Item) bool {
+func (po *LocateOptions) Matches(it Item) bool {
 	if po.Filters.Prefix != "" && !strings.HasPrefix(it.ItemID, po.Filters.Prefix) {
 		return false
 	}
@@ -178,7 +178,7 @@ func (po *PolicyOptions) Matches(it Item) bool {
 	return true
 }
 
-func (po *PolicyOptions) FilterAndSort(items []Item, now time.Time) []Item {
+func (po *LocateOptions) FilterAndSort(items []Item, now time.Time) []Item {
 	now = now.UTC()
 	out := make([]Item, 0, len(items))
 	for i := range items {
@@ -206,7 +206,7 @@ func (po *PolicyOptions) FilterAndSort(items []Item, now time.Time) []Item {
 	return out
 }
 
-func (po *PolicyOptions) Select(items []Item, now time.Time) (map[string]struct{}, map[string]Reason) {
+func (po *LocateOptions) Select(items []Item, now time.Time) (map[string]struct{}, map[string]Reason) {
 	now = now.UTC()
 
 	filtered := po.FilterAndSort(items, now)
@@ -216,7 +216,7 @@ func (po *PolicyOptions) Select(items []Item, now time.Time) (map[string]struct{
 	ruleKeepReasons := make(map[string]Reason, len(filtered)) // per-snapshot best keep reason
 	ruleDropReasons := make(map[string]Reason, len(filtered)) // per-snapshot best delete reason
 
-	processRule := func(period Period, pp PeriodPolicy) {
+	processRule := func(period Period, pp LocatePeriod) {
 		if pp.Keep <= 0 {
 			return
 		}
@@ -285,7 +285,7 @@ func (po *PolicyOptions) Select(items []Item, now time.Time) (map[string]struct{
 	return kept, reasons
 }
 
-func (po *PolicyOptions) InstallFlags(flags *flag.FlagSet) {
+func (po *LocateOptions) InstallFlags(flags *flag.FlagSet) {
 	flags.IntVar(&po.Minute.Keep, "keep-minutes", 0, "keep snapshots for the last N minutes")
 	flags.IntVar(&po.Hour.Keep, "keep-hours", 0, "keep snapshots for the last N hours")
 	flags.IntVar(&po.Day.Keep, "keep-days", 0, "keep snapshots for the last N days")
@@ -338,7 +338,7 @@ func (po *PolicyOptions) InstallFlags(flags *flag.FlagSet) {
 	flags.StringVar(&po.Filters.Prefix, "prefix", "", "filter by item ID prefix (hex)")
 }
 
-func (po *PolicyOptions) Empty() bool {
+func (po *LocateOptions) Empty() bool {
 	return po.Minute.Keep == 0 && po.Hour.Keep == 0 && po.Day.Keep == 0 &&
 		po.Week.Keep == 0 && po.Month.Keep == 0 && po.Year.Keep == 0 &&
 		po.Filters.Name == "" && po.Filters.Category == "" && po.Filters.Environment == "" &&

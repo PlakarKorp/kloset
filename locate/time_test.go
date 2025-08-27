@@ -59,7 +59,7 @@ func TestParseTimeFlag(t *testing.T) {
 func TestMatches_PrefixAndMetadata(t *testing.T) {
 	now := tstamp(2025, time.August, 24, 12, 0, 0)
 
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithName("n1"),
 		WithCategory("c1"),
 		WithEnvironment("prod"),
@@ -89,7 +89,7 @@ func TestMatches_PrefixAndMetadata(t *testing.T) {
 func TestMatches_TagsAND(t *testing.T) {
 	now := tstamp(2025, time.August, 24, 12, 0, 0)
 
-	p := NewDefaultPolicyOptions(WithTag("a"), WithTag("b")) // AND semantics
+	p := NewDefaultLocateOptions(WithTag("a"), WithTag("b")) // AND semantics
 
 	ok := Item{ItemID: "ok", Timestamp: now, Filters: ItemFilters{Tags: []string{"a", "b", "c"}}}
 	missA := Item{ItemID: "missA", Timestamp: now, Filters: ItemFilters{Tags: []string{"b"}}}
@@ -106,7 +106,7 @@ func TestMatches_BeforeSince_BoundariesInclusive(t *testing.T) {
 	before := now
 	since := now.Add(-1 * time.Hour)
 
-	p := NewDefaultPolicyOptions(WithBefore(before), WithSince(since))
+	p := NewDefaultLocateOptions(WithBefore(before), WithSince(since))
 
 	// exactly at boundaries should match (inclusive)
 	atSince := Item{ItemID: "since", Timestamp: since}
@@ -128,7 +128,7 @@ func TestMatches_BeforeSince_BoundariesInclusive(t *testing.T) {
 
 func TestFilterAndSort_LatestImpliesDescending(t *testing.T) {
 	now := tstamp(2025, time.August, 24, 10, 0, 0)
-	p := NewDefaultPolicyOptions()
+	p := NewDefaultLocateOptions()
 	p.Filters.Latest = true             // implies descending
 	p.Filters.SortOrder = SortOrderNone // none → default to desc because latest
 
@@ -146,7 +146,7 @@ func TestFilterAndSort_LatestImpliesDescending(t *testing.T) {
 
 func TestFilterAndSort_CustomAscending(t *testing.T) {
 	now := tstamp(2025, time.August, 24, 10, 0, 0)
-	p := NewDefaultPolicyOptions()
+	p := NewDefaultLocateOptions()
 	p.Filters.SortOrder = SortOrderAscending
 
 	items := []Item{
@@ -163,7 +163,7 @@ func TestFilterAndSort_CustomAscending(t *testing.T) {
 
 func TestSelect_LatestPlusPrefix(t *testing.T) {
 	now := tstamp(2025, time.August, 24, 11, 30, 0)
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepHours(1), // make sure something can be kept
 		WithPerHourCap(5),
 	)
@@ -189,19 +189,19 @@ func TestSelect_LatestPlusPrefix(t *testing.T) {
 }
 
 func TestEmpty_ConsidersFiltersAndWindows(t *testing.T) {
-	p := NewDefaultPolicyOptions()
+	p := NewDefaultLocateOptions()
 	if !p.Empty() {
 		t.Fatalf("expected empty by default")
 	}
-	p = NewDefaultPolicyOptions(WithKeepDays(1))
+	p = NewDefaultLocateOptions(WithKeepDays(1))
 	if p.Empty() {
 		t.Fatalf("expected non-empty with a keep window")
 	}
-	p = NewDefaultPolicyOptions(WithName("foo"))
+	p = NewDefaultLocateOptions(WithName("foo"))
 	if p.Empty() {
 		t.Fatalf("expected non-empty with a filter set")
 	}
-	p = NewDefaultPolicyOptions()
+	p = NewDefaultLocateOptions()
 	p.Filters.Prefix = "abc"
 	if p.Empty() {
 		t.Fatalf("expected non-empty with prefix filter")
@@ -211,7 +211,7 @@ func TestEmpty_ConsidersFiltersAndWindows(t *testing.T) {
 func TestSelect_TagsAND_UnionWithMonth(t *testing.T) {
 	// Ensure AND tag filter narrows the set before month union/keeps are applied.
 	now := tstamp(2025, time.August, 24, 12, 0, 0)
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepMonths(1),
 		WithPerMonthCap(2),
 	)

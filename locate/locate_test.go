@@ -14,7 +14,7 @@ func TestSelect_MinuteBucket_CapAndRank(t *testing.T) {
 	// Set now away from a minute boundary so -1s/-5s/-10s stay in the same minute.
 	now := tstamp(2025, time.August, 24, 12, 30, 30)
 
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepMinutes(1),  // only this minute window
 		WithPerMinuteCap(1), // keep newest 1 per minute
 	)
@@ -52,7 +52,7 @@ func TestSelect_HourBucket_UnionWithMinutes(t *testing.T) {
 	// Set now away from an hour boundary so -30m stays within the same hour.
 	now := tstamp(2025, time.August, 24, 15, 30, 0)
 
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepMinutes(0),
 		WithKeepHours(1),
 		WithPerHourCap(1),
@@ -71,7 +71,7 @@ func TestSelect_HourBucket_UnionWithMinutes(t *testing.T) {
 
 func TestSelect_OutsideAllWindows(t *testing.T) {
 	now := tstamp(2025, time.August, 24, 0, 0, 0)
-	p := NewDefaultPolicyOptions() // no windows configured
+	p := NewDefaultLocateOptions() // no windows configured
 
 	item := Item{ItemID: "Z", Timestamp: now.Add(-24 * time.Hour)}
 	kept, reasons := p.Select([]Item{item}, now)
@@ -88,7 +88,7 @@ func TestSelect_OutsideAllWindows(t *testing.T) {
 func TestSelect_WeekBucket_CapAcrossDays(t *testing.T) {
 	// ISO week window: multiple days in same ISO week share the bucket.
 	now := tstamp(2025, time.August, 20, 10, 0, 0) // Wednesday
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepWeeks(1),
 		WithPerWeekCap(1),
 	)
@@ -123,7 +123,7 @@ func TestSelect_DayAndMonth_Union(t *testing.T) {
 	// - D2 kept by month (month cap=2 keeps D1 and D2)
 	// - M1 deleted by months (rank 3, exceeds cap)
 	now := tstamp(2025, time.August, 24, 18, 0, 0)
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepDays(1),
 		WithPerDayCap(1),
 		WithKeepMonths(1),
@@ -155,7 +155,7 @@ func TestSelect_DayAndMonth_Union(t *testing.T) {
 func TestSelect_SortingNewestFirstWithinBucket(t *testing.T) {
 	// Keep 1 hour, cap=2, and ensure all items are in the same hour bucket.
 	now := tstamp(2025, time.August, 24, 14, 30, 0)
-	p := NewDefaultPolicyOptions(
+	p := NewDefaultLocateOptions(
 		WithKeepHours(1),
 		WithPerHourCap(2),
 	)
