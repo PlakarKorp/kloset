@@ -366,14 +366,7 @@ func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]str
 }
 
 func (lo *LocateOptions) Empty() bool {
-	return lo.Minute.Keep == 0 && lo.Hour.Keep == 0 && lo.Day.Keep == 0 &&
-		lo.Week.Keep == 0 && lo.Month.Keep == 0 && lo.Year.Keep == 0 &&
-		lo.Monday.Keep == 0 && lo.Tuesday.Keep == 0 && lo.Wednesday.Keep == 0 &&
-		lo.Thursday.Keep == 0 && lo.Friday.Keep == 0 && lo.Saturday.Keep == 0 && lo.Sunday.Keep == 0 &&
-		lo.Minute.Cap == 0 && lo.Hour.Cap == 0 && lo.Day.Cap == 0 &&
-		lo.Week.Cap == 0 && lo.Month.Cap == 0 && lo.Year.Cap == 0 &&
-		lo.Monday.Cap == 0 && lo.Tuesday.Cap == 0 && lo.Wednesday.Cap == 0 &&
-		lo.Thursday.Cap == 0 && lo.Friday.Cap == 0 && lo.Saturday.Cap == 0 && lo.Sunday.Cap == 0 &&
+	return !lo.HasPeriods() &&
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
 		lo.Filters.Perimeter == "" && lo.Filters.Job == "" &&
 		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
