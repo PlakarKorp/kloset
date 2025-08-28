@@ -1,6 +1,12 @@
 package resources
 
+import "errors"
+
 type Type uint32
+
+var (
+	ErrInvalid = errors.New("invalid type")
+)
 
 const (
 	RT_CONFIG    Type = 1
@@ -98,5 +104,52 @@ func (r Type) String() string {
 		return "random"
 	default:
 		return "unknown"
+	}
+}
+
+func FromString(typ string) (Type, error) {
+	switch typ {
+	case "config":
+		return RT_CONFIG, nil
+	case "lock":
+		return RT_LOCK, nil
+	case "state":
+		return RT_STATE, nil
+	case "packfile":
+		return RT_PACKFILE, nil
+	case "snapshot":
+		return RT_SNAPSHOT, nil
+	case "signature":
+		return RT_SIGNATURE, nil
+	case "object":
+		return RT_OBJECT, nil
+	case "chunk":
+		return RT_CHUNK, nil
+	case "vfs-btree":
+		return RT_VFS_BTREE, nil
+	case "vfs-node":
+		return RT_VFS_NODE, nil
+	case "vfs-entry":
+		return RT_VFS_ENTRY, nil
+	case "error-btree":
+		return RT_ERROR_BTREE, nil
+	case "error-node":
+		return RT_ERROR_NODE, nil
+	case "error-entry":
+		return RT_ERROR_ENTRY, nil
+	case "xattr-btree":
+		return RT_XATTR_BTREE, nil
+	case "xattr-node":
+		return RT_XATTR_NODE, nil
+	case "xattr-entry":
+		return RT_XATTR_ENTRY, nil
+	case "btree-root":
+		return RT_BTREE_ROOT, nil
+	case "btree-node":
+		return RT_BTREE_NODE, nil
+	case "random":
+		return RT_RANDOM, nil
+	default:
+		return Type(0), ErrInvalid
 	}
 }
