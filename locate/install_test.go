@@ -41,8 +41,8 @@ func TestInstallLocateFlags_ParsesAllFlags(t *testing.T) {
 		"--latest",
 
 		// repeated/comma-separated
-		"--source=repo1, repo2",
-		"--source=repo3",
+		"--root=repo1, repo2",
+		"--root=repo3",
 
 		"--tag=a,b",
 		"--tag=c",
@@ -136,7 +136,7 @@ func TestInstallDeletionFlags_OnlyGenericFlags(t *testing.T) {
 		"--perimeter=p",
 		"--job=j",
 		"--latest",
-		"--source=one, two",
+		"--root=one, two",
 		"--tag=x,y",
 	}
 
@@ -165,8 +165,8 @@ func TestSourceAndTagTrimAndEmptyAreIgnored(t *testing.T) {
 	po.InstallLocateFlags(fs)
 
 	args := []string{
-		`--source= alpha ,  ,beta,  `,
-		`--source= , , `,
+		`--root= alpha ,  ,beta,  `,
+		`--root= , , `,
 		`--tag=  t1 , , t2`,
 	}
 
