@@ -2,6 +2,7 @@ package locate
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -92,3 +93,39 @@ func (period Period) LastNKeys(now time.Time, n int) map[string]any {
 	}
 	return keys
 }
+
+func WeekdayPeriod(target time.Weekday) Period {
+	name := strings.ToLower(target.String())
+	return Period{
+		Name: name,
+		Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02") + "-" + name },
+		Start: func(t time.Time) time.Time {
+			ut := Days.Start(t) // 00:00:00Z of the day
+			wd := int(ut.Weekday())
+			if wd == 0 {
+				wd = 7 // Sunday -> 7
+			}
+			tw := int(target)
+			if tw == 0 {
+				tw = 7 // Sunday -> 7
+			}
+			// Monday start of the ISO week, then offset to the target weekday
+			monday := ut.AddDate(0, 0, -(wd - 1))
+			return monday.AddDate(0, 0, tw-1)
+		},
+		Prev: func(t time.Time) time.Time {
+			// assumes t is at Start; still safe for any t because it’s a fixed step back
+			return t.AddDate(0, 0, -7)
+		},
+	}
+}
+
+var (
+	Mondays    = WeekdayPeriod(time.Monday)
+	Tuesdays   = WeekdayPeriod(time.Tuesday)
+	Wednesdays = WeekdayPeriod(time.Wednesday)
+	Thursdays  = WeekdayPeriod(time.Thursday)
+	Fridays    = WeekdayPeriod(time.Friday)
+	Saturdays  = WeekdayPeriod(time.Saturday)
+	Sundays    = WeekdayPeriod(time.Sunday)
+)

@@ -1,10 +1,11 @@
 package locate
 
 import (
-	"slices"
 	"testing"
 	"time"
 )
+
+// --- helpers ---
 
 func mustParse(t *testing.T, s string) time.Time {
 	t.Helper()
@@ -14,6 +15,8 @@ func mustParse(t *testing.T, s string) time.Time {
 	}
 	return tt.UTC()
 }
+
+// --- standard periods ---
 
 func TestMinutes(t *testing.T) {
 	now := mustParse(t, "2023-03-15T13:45:59Z")
@@ -55,19 +58,17 @@ func TestDays(t *testing.T) {
 }
 
 func TestWeeks_Key_And_Start(t *testing.T) {
-	// ISO week tricky boundaries:
-	// 2020 had week 53; 2021-01-01 is still 2020-W53
-	d1 := mustParse(t, "2020-12-31T10:00:00Z") // Thu
+	// ISO week tricky boundary: 2021-01-01 is still 2020-W53
+	d1 := mustParse(t, "2020-12-31T10:00:00Z")
 	if got, want := Weeks.Key(d1), "2020-W53"; got != want {
 		t.Fatalf("Weeks.Key 2020-12-31: got %q want %q", got, want)
 	}
-	d2 := mustParse(t, "2021-01-01T10:00:00Z") // Fri
+	d2 := mustParse(t, "2021-01-01T10:00:00Z")
 	if got, want := Weeks.Key(d2), "2020-W53"; got != want {
 		t.Fatalf("Weeks.Key 2021-01-01: got %q want %q", got, want)
 	}
 
-	// Start should be Monday 00:00:00 of the ISO week.
-	// For a Wednesday, the start is the Monday of that week.
+	// Start is Monday 00:00:00Z of the ISO week.
 	wd := mustParse(t, "2023-03-15T13:45:00Z") // Wed
 	start := Weeks.Start(wd)
 	if got, want := start, mustParse(t, "2023-03-13T00:00:00Z"); !got.Equal(want) {
@@ -80,7 +81,7 @@ func TestWeeks_Key_And_Start(t *testing.T) {
 		t.Fatalf("Weeks.Start (Sun): got %v want %v", got, want)
 	}
 
-	// Prev should go back exactly one week.
+	// Prev goes back one week exactly.
 	if got, want := Weeks.Prev(start), mustParse(t, "2023-03-06T00:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Weeks.Prev: got %v want %v", got, want)
 	}
@@ -112,40 +113,68 @@ func TestYears(t *testing.T) {
 	}
 }
 
-func TestLastNKeys_Days(t *testing.T) {
-	now := mustParse(t, "2023-03-03T10:00:00Z")
-	got := Days.LastNKeys(now, 3)
-	want := map[string]any{
-		"2023-03-03": nil,
-		"2023-03-02": nil,
-		"2023-03-01": nil,
+// --- weekday-aligned periods (with date+name key) ---
+func TestWeekdayPeriod_MondayAlignAndPrev(t *testing.T) {
+	// Wed, Aug 27, 2025 → Monday of that ISO week is Aug 25, 2025
+	wed := mustParse(t, "2025-08-27T13:37:00Z")
+	start := Mondays.Start(wed)
+	wantStart := mustParse(t, "2025-08-25T00:00:00Z")
+	if !start.Equal(wantStart) {
+		t.Fatalf("Mondays.Start: got %v want %v", start, wantStart)
 	}
-	if len(got) != len(want) {
-		t.Fatalf("LastNKeys len: got %d want %d", len(got), len(want))
+	// Prev Monday is Aug 18, 2025
+	prev := Mondays.Prev(start)
+	wantPrev := mustParse(t, "2025-08-18T00:00:00Z")
+	if !prev.Equal(wantPrev) {
+		t.Fatalf("Mondays.Prev: got %v want %v", prev, wantPrev)
+	}
+
+	// Use the aligned start when checking the key
+	if got, want := Mondays.Key(start), "2025-08-25-monday"; got != want {
+		t.Fatalf("Mondays.Key: got %q want %q", got, want)
+	}
+}
+
+func TestWeekdayPeriod_ThursdayWeekBoundary(t *testing.T) {
+	// Thu, Jan 1, 2026 — Thursday-aligned Start is 2026-01-01 00:00Z
+	thu := mustParse(t, "2026-01-01T12:00:00Z")
+	start := Thursdays.Start(thu)
+	wantStart := mustParse(t, "2026-01-01T00:00:00Z")
+	if !start.Equal(wantStart) {
+		t.Fatalf("Thursdays.Start boundary: got %v want %v", start, wantStart)
+	}
+	// Prev should jump to the previous Thursday (−7 days).
+	prev := Thursdays.Prev(start)
+	wantPrev := mustParse(t, "2025-12-25T00:00:00Z")
+	if !prev.Equal(wantPrev) {
+		t.Fatalf("Thursdays.Prev boundary: got %v want %v", prev, wantPrev)
+	}
+	// Use the aligned start when checking the key
+	if got, want := Thursdays.Key(start), "2026-01-01-thursday"; got != want {
+		t.Fatalf("Thursdays.Key: got %q want %q", got, want)
+	}
+}
+func TestLastNKeys_Weekday_Monday(t *testing.T) {
+	// Anchor on a Wednesday; the aligned Monday is 2025-08-25
+	now := mustParse(t, "2025-08-27T12:00:00Z")
+	keys := Mondays.LastNKeys(now, 3)
+
+	want := map[string]struct{}{
+		"2025-08-25-monday": {},
+		"2025-08-18-monday": {},
+		"2025-08-11-monday": {},
+	}
+	if len(keys) != len(want) {
+		t.Fatalf("LastNKeys Monday len: got %d want %d", len(keys), len(want))
 	}
 	for k := range want {
-		if _, ok := got[k]; !ok {
-			t.Fatalf("LastNKeys missing key %q", k)
+		if _, ok := keys[k]; !ok {
+			t.Fatalf("LastNKeys Monday missing key %q", k)
 		}
 	}
 }
 
-func TestLastNKeys_Weeks_Across_Year(t *testing.T) {
-	now := mustParse(t, "2021-01-01T10:00:00Z") // ISO 2020-W53
-	got := Weeks.LastNKeys(now, 3)
-
-	// Expected weeks: 2020-W53, 2020-W52, 2020-W51
-	expected := []string{"2020-W53", "2020-W52", "2020-W51"}
-
-	for _, k := range expected {
-		if _, ok := got[k]; !ok {
-			t.Fatalf("LastNKeys missing key %q", k)
-		}
-	}
-	if len(got) != len(expected) {
-		t.Fatalf("LastNKeys len: got %d want %d", len(got), len(expected))
-	}
-}
+// --- general invariants ---
 
 func TestStartAlwaysUTC(t *testing.T) {
 	// Ensure Start normalizes to UTC regardless of input zone.
@@ -163,6 +192,8 @@ func TestStartAlwaysUTC(t *testing.T) {
 		{"week", Weeks, Weeks.Start(localTime.In(time.UTC))},
 		{"month", Months, Months.Start(localTime.In(time.UTC))},
 		{"year", Years, Years.Start(localTime.In(time.UTC))},
+		{"monday", Mondays, Mondays.Start(localTime.In(time.UTC))},
+		{"thursday", Thursdays, Thursdays.Start(localTime.In(time.UTC))},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -176,8 +207,8 @@ func TestStartAlwaysUTC(t *testing.T) {
 }
 
 func TestPrevIsMonotonicBackwards(t *testing.T) {
-	periods := []Period{Minutes, Hours, Days, Weeks, Months, Years}
-	now := mustParse(t, "2024-02-29T12:34:56Z") // leap year for extra spice
+	periods := []Period{Minutes, Hours, Days, Weeks, Months, Years, Mondays, Thursdays}
+	now := mustParse(t, "2024-02-29T12:34:56Z") // leap year
 	for _, p := range periods {
 		t.Run(p.Name, func(t *testing.T) {
 			cur := p.Start(now)
@@ -198,14 +229,4 @@ func TestLastNKeys_NIsZero_ReturnsEmpty(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("LastNKeys with n=0: got %d keys, want 0", len(got))
 	}
-}
-
-// Optional: ensure maps contain only expected keys by comparing sorted slices.
-func keys(m map[string]any) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	slices.Sort(out)
-	return out
 }

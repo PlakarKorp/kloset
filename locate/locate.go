@@ -100,11 +100,21 @@ type LocateOptions struct {
 	Week   LocatePeriod
 	Month  LocatePeriod
 	Year   LocatePeriod
+
+	Monday    LocatePeriod
+	Tuesday   LocatePeriod
+	Wednesday LocatePeriod
+	Thursday  LocatePeriod
+	Friday    LocatePeriod
+	Saturday  LocatePeriod
+	Sunday    LocatePeriod
 }
 
 func (lo *LocateOptions) HasPeriods() bool {
 	return !lo.Minute.Empty() || !lo.Hour.Empty() || !lo.Day.Empty() ||
-		!lo.Week.Empty() || !lo.Month.Empty() || !lo.Year.Empty()
+		!lo.Week.Empty() || !lo.Month.Empty() || !lo.Year.Empty() ||
+		!lo.Monday.Empty() || !lo.Tuesday.Empty() || !lo.Wednesday.Empty() ||
+		!lo.Thursday.Empty() || !lo.Friday.Empty() || !lo.Saturday.Empty() || !lo.Sunday.Empty()
 }
 
 type Option func(*LocateOptions)
@@ -324,6 +334,15 @@ func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]str
 	processRule(Minutes, lo.Minute)
 	processRule(Hours, lo.Hour)
 	processRule(Days, lo.Day)
+
+	processRule(Mondays, lo.Monday)
+	processRule(Tuesdays, lo.Tuesday)
+	processRule(Wednesdays, lo.Wednesday)
+	processRule(Thursdays, lo.Thursday)
+	processRule(Fridays, lo.Friday)
+	processRule(Saturdays, lo.Saturday)
+	processRule(Sundays, lo.Sunday)
+
 	processRule(Weeks, lo.Week)
 	processRule(Months, lo.Month)
 	processRule(Years, lo.Year)
@@ -349,9 +368,14 @@ func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]str
 func (lo *LocateOptions) Empty() bool {
 	return lo.Minute.Keep == 0 && lo.Hour.Keep == 0 && lo.Day.Keep == 0 &&
 		lo.Week.Keep == 0 && lo.Month.Keep == 0 && lo.Year.Keep == 0 &&
+		lo.Monday.Keep == 0 && lo.Tuesday.Keep == 0 && lo.Wednesday.Keep == 0 &&
+		lo.Thursday.Keep == 0 && lo.Friday.Keep == 0 && lo.Saturday.Keep == 0 && lo.Sunday.Keep == 0 &&
 		lo.Minute.Cap == 0 && lo.Hour.Cap == 0 && lo.Day.Cap == 0 &&
 		lo.Week.Cap == 0 && lo.Month.Cap == 0 && lo.Year.Cap == 0 &&
+		lo.Monday.Cap == 0 && lo.Tuesday.Cap == 0 && lo.Wednesday.Cap == 0 &&
+		lo.Thursday.Cap == 0 && lo.Friday.Cap == 0 && lo.Saturday.Cap == 0 && lo.Sunday.Cap == 0 &&
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
-		lo.Filters.Perimeter == "" && lo.Filters.Job == "" && len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 &&
+		lo.Filters.Perimeter == "" && lo.Filters.Job == "" &&
+		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
 		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest
 }

@@ -47,12 +47,29 @@ func (po *LocateOptions) InstallLocateFlags(flags *flag.FlagSet) {
 	flags.IntVar(&po.Week.Keep, "weeks", 0, "keep snapshots for the last N weeks")
 	flags.IntVar(&po.Month.Keep, "months", 0, "keep snapshots for the last N months")
 	flags.IntVar(&po.Year.Keep, "years", 0, "keep snapshots for the last N years")
+
 	flags.IntVar(&po.Minute.Cap, "per-minute", 0, "cap the number of kept snapshots per minute")
 	flags.IntVar(&po.Hour.Cap, "per-hour", 0, "cap the number of kept snapshots per hour")
 	flags.IntVar(&po.Day.Cap, "per-day", 0, "cap the number of kept snapshots per day")
 	flags.IntVar(&po.Week.Cap, "per-week", 0, "cap the number of kept snapshots per week")
 	flags.IntVar(&po.Month.Cap, "per-month", 0, "cap the number of kept snapshots per month")
 	flags.IntVar(&po.Year.Cap, "per-year", 0, "cap the number of kept snapshots per year")
+
+	flags.IntVar(&po.Monday.Keep, "mondays", 0, "keep snapshots for the last N Mondays")
+	flags.IntVar(&po.Tuesday.Keep, "tuesdays", 0, "keep snapshots for the last N Tuesdays")
+	flags.IntVar(&po.Wednesday.Keep, "wednesdays", 0, "keep snapshots for the last N Wednesdays")
+	flags.IntVar(&po.Thursday.Keep, "thursdays", 0, "keep snapshots for the last N Thursdays")
+	flags.IntVar(&po.Friday.Keep, "fridays", 0, "keep snapshots for the last N Fridays")
+	flags.IntVar(&po.Saturday.Keep, "saturdays", 0, "keep snapshots for the last N Saturdays")
+	flags.IntVar(&po.Sunday.Keep, "sundays", 0, "keep snapshots for the last N Sundays")
+
+	flags.IntVar(&po.Monday.Cap, "per-monday", 0, "cap the number of kept snapshots per Monday bucket")
+	flags.IntVar(&po.Tuesday.Cap, "per-tuesday", 0, "cap the number of kept snapshots per Tuesday bucket")
+	flags.IntVar(&po.Wednesday.Cap, "per-wednesday", 0, "cap the number of kept snapshots per Wednesday bucket")
+	flags.IntVar(&po.Thursday.Cap, "per-thursday", 0, "cap the number of kept snapshots per Thursday bucket")
+	flags.IntVar(&po.Friday.Cap, "per-friday", 0, "cap the number of kept snapshots per Friday bucket")
+	flags.IntVar(&po.Saturday.Cap, "per-saturday", 0, "cap the number of kept snapshots per Saturday bucket")
+	flags.IntVar(&po.Sunday.Cap, "per-sunday", 0, "cap the number of kept snapshots per Sunday bucket")
 }
 
 func (po *LocateOptions) InstallDeletionFlags(flags *flag.FlagSet) {
