@@ -36,7 +36,7 @@ type ItemFilters struct {
 	Roots       []string
 }
 
-func (it ItemFilters) HasTag(tag string) bool {
+func (it *ItemFilters) HasTag(tag string) bool {
 	if tag == "" {
 		return true
 	}
@@ -136,12 +136,28 @@ func WithKeepWeeks(n int) Option   { return func(p *LocateOptions) { p.Week.Keep
 func WithKeepMonths(n int) Option  { return func(p *LocateOptions) { p.Month.Keep = n } }
 func WithKeepYears(n int) Option   { return func(p *LocateOptions) { p.Year.Keep = n } }
 
+func WithKeepMondays(n int) Option    { return func(p *LocateOptions) { p.Monday.Keep = n } }
+func WithKeepTuesdays(n int) Option   { return func(p *LocateOptions) { p.Tuesday.Keep = n } }
+func WithKeepWednesdays(n int) Option { return func(p *LocateOptions) { p.Wednesday.Keep = n } }
+func WithKeepThursdays(n int) Option  { return func(p *LocateOptions) { p.Thursday.Keep = n } }
+func WithKeepFridays(n int) Option    { return func(p *LocateOptions) { p.Friday.Keep = n } }
+func WithKeepSaturdays(n int) Option  { return func(p *LocateOptions) { p.Saturday.Keep = n } }
+func WithKeepSundays(n int) Option    { return func(p *LocateOptions) { p.Sunday.Keep = n } }
+
 func WithPerMinuteCap(n int) Option { return func(p *LocateOptions) { p.Minute.Cap = n } }
 func WithPerHourCap(n int) Option   { return func(p *LocateOptions) { p.Hour.Cap = n } }
 func WithPerDayCap(n int) Option    { return func(p *LocateOptions) { p.Day.Cap = n } }
 func WithPerWeekCap(n int) Option   { return func(p *LocateOptions) { p.Week.Cap = n } }
 func WithPerMonthCap(n int) Option  { return func(p *LocateOptions) { p.Month.Cap = n } }
 func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Year.Cap = n } }
+
+func WithPerMondayCap(n int) Option   { return func(p *LocateOptions) { p.Monday.Cap = n } }
+func WithPerTuesdayCap(n int) Option  { return func(p *LocateOptions) { p.Tuesday.Cap = n } }
+func WithPerWednsdayCap(n int) Option { return func(p *LocateOptions) { p.Wednesday.Cap = n } }
+func WithPerThursdayCap(n int) Option { return func(p *LocateOptions) { p.Thursday.Cap = n } }
+func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Friday.Cap = n } }
+func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Saturday.Cap = n } }
+func WithPerSundaysCap(n int) Option  { return func(p *LocateOptions) { p.Sunday.Cap = n } }
 
 func WithBefore(t time.Time) Option {
 	return func(p *LocateOptions) { p.Filters.Before = t }

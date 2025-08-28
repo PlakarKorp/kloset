@@ -121,13 +121,6 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 	return items
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 func ParseSnapshotPath(snapshotPath string) (string, string) {
 	if strings.HasPrefix(snapshotPath, "/") {
 		return "", snapshotPath
