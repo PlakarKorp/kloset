@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -67,6 +68,10 @@ type BackupOptions struct {
 	NoCommit        bool
 	CleanupVFSCache bool
 }
+
+var (
+	ErrOutOfRange = errors.New("out of range")
+)
 
 func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
 	path := entry.Path()
@@ -918,7 +923,7 @@ func (backupCtx *BackupContext) processDir(dirEntry *vfs.Entry, path string) err
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer, prefix string) error {
+func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -940,7 +945,7 @@ func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer
 				return err
 			}
 
-			if err := writeFrame(w, TypeVFSFile, fileBytes); err != nil {
+			if err := writeFrame(builder, w, TypeVFSFile, fileBytes); err != nil {
 				return err
 			}
 			filePath, fileBytes, hasFile = fileNext()
@@ -950,7 +955,7 @@ func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer
 			if err := backupCtx.processDir(dirEntry, abspath); err != nil {
 				return err
 			}
-			if err := writeFrame(w, TypeVFSDirectory, dirBytes); err != nil {
+			if err := writeFrame(builder, w, TypeVFSDirectory, dirBytes); err != nil {
 				return err
 			}
 			dirPath, dirBytes, hasDir = dirNext()
@@ -963,15 +968,24 @@ func (backupCtx *BackupContext) processChildren(dirEntry *vfs.Entry, w io.Writer
 // writeFrame writes a directory entry for dirpack.  Each entry is
 // encoded in TLV, where the type is one byte, the length is a 32 bit
 // unsigned integer and the data follows, all without padding.
-func writeFrame(w io.Writer, typ DirPackEntry, data []byte) error {
+func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) error {
+	mac := builder.repository.ComputeMAC(data)
+	tot := len(data) + len(mac)
+	if tot > math.MaxUint32 {
+		return ErrOutOfRange
+	}
+
 	endian := binary.LittleEndian
 	if err := binary.Write(w, endian, typ); err != nil {
 		return err
 	}
-	if err := binary.Write(w, endian, uint32(len(data))); err != nil {
+	if err := binary.Write(w, endian, uint32(tot)); err != nil {
 		return err
 	}
-	_, err := w.Write(data)
+	if _, err := w.Write(data); err != nil {
+		return err
+	}
+	_, err := w.Write(mac[:])
 	return err
 
 }
@@ -1024,7 +1038,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := backupCtx.processChildren(dirEntry, pw, prefix); err != nil {
+		if err := backupCtx.processChildren(snap, dirEntry, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
