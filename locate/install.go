@@ -16,7 +16,7 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 	flags.StringVar(&po.Filters.Job, "job", "", "filter by job")
 	flags.BoolVar(&po.Filters.Latest, "latest", false, "consider only the latest matching item")
 
-	flags.Func("source", "filter by root (repeat).",
+	flags.Func("root", "filter by root (repeat).",
 		func(v string) error {
 			for _, t := range strings.Split(v, ",") {
 				t = strings.TrimSpace(t)
