@@ -90,6 +90,11 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 			h := snap.Header
 			hexID := hex.EncodeToString(id[:])
 
+			roots := []string{}
+			for _, src := range h.Sources {
+				roots = append(roots, src.Importer.Directory)
+			}
+
 			it := Item{
 				ItemID:    id,
 				Timestamp: h.Timestamp,
@@ -101,7 +106,8 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 					Job:         h.Job,
 					// adjust to however tags are exposed on your header:
 					// Tags: h.Tags, or h.GetTags()
-					Tags: h.Tags,
+					Tags:  h.Tags,
+					Roots: roots,
 				},
 			}
 

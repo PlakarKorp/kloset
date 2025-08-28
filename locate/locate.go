@@ -33,6 +33,7 @@ type ItemFilters struct {
 	Perimeter   string
 	Job         string
 	Tags        []string
+	Roots       []string
 }
 
 func (it ItemFilters) HasTag(tag string) bool {
@@ -41,6 +42,18 @@ func (it ItemFilters) HasTag(tag string) bool {
 	}
 	for _, t := range it.Tags {
 		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func (it ItemFilters) HasRoot(root string) bool {
+	if root == "" {
+		return true
+	}
+	for _, t := range it.Roots {
+		if t == root {
 			return true
 		}
 	}
@@ -75,7 +88,7 @@ type LocateFilters struct {
 
 	Latest bool
 	IDs    []string
-	//Prefix string // snapshot/item id prefix
+	Roots  []string
 }
 
 type LocateOptions struct {
@@ -190,6 +203,13 @@ func (lo *LocateOptions) Matches(it Item) bool {
 	if len(lo.Filters.Tags) > 0 {
 		for _, tag := range lo.Filters.Tags {
 			if !it.Filters.HasTag(tag) {
+				return false
+			}
+		}
+	}
+	if len(lo.Filters.Roots) > 0 {
+		for _, root := range lo.Filters.Roots {
+			if !it.Filters.HasRoot(root) {
 				return false
 			}
 		}
