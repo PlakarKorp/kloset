@@ -1,7 +1,6 @@
 package locate
 
 import (
-	"reflect"
 	"sort"
 	"testing"
 	"time"
@@ -20,20 +19,12 @@ func mustRFC3339(t *testing.T, s string) time.Time {
 	return tt.UTC()
 }
 
-// zeroMAC returns the zero value; useful to match ID prefix "0".
-func zeroMAC() objects.MAC { var m objects.MAC; return m }
-
 // mac(n) returns a unique, deterministic objects.MAC for tests by setting
 // the first byte (works when MAC is a named byte array, which is typical).
 // If MAC is not a byte array, this is a no-op and tests still compile,
 // but uniqueness may not hold (adjust if needed).
 func mac(n byte) objects.MAC {
-	var m objects.MAC
-	rv := reflect.ValueOf(&m).Elem() // m is addressable; Elem() gives the value
-	if rv.Kind() == reflect.Array && rv.Type().Elem().Kind() == reflect.Uint8 && rv.Len() > 0 {
-		rv.Index(0).SetUint(uint64(n))
-	}
-	return m
+	return objects.MAC([]byte{n})
 }
 
 // makeItem creates a test Item.
@@ -124,7 +115,7 @@ func TestHasPeriods(t *testing.T) {
 
 func TestMatches_IDPrefix(t *testing.T) {
 	var lo LocateOptions
-	idZero := zeroMAC()
+	idZero := objects.NilMac
 	it := Item{ItemID: idZero, Timestamp: mustRFC3339(t, "2025-08-20T10:00:00Z")}
 	// fmt.Sprintf("%x" , zero) will be all zeros → should match prefix "0"
 	lo.Filters.IDs = []string{"0"}
