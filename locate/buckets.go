@@ -13,7 +13,7 @@ type Period struct {
 }
 
 var Minutes = Period{
-	Name: "minutes",
+	Name: "minute",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02-15:04") },
 	Start: func(t time.Time) time.Time {
 		y, m, d := t.UTC().Date()
@@ -23,7 +23,7 @@ var Minutes = Period{
 }
 
 var Hours = Period{
-	Name: "hours",
+	Name: "hour",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02-15") },
 	Start: func(t time.Time) time.Time {
 		y, m, d := t.UTC().Date()
@@ -33,7 +33,7 @@ var Hours = Period{
 }
 
 var Days = Period{
-	Name: "days",
+	Name: "day",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02") },
 	Start: func(t time.Time) time.Time {
 		y, m, d := t.UTC().Date()
@@ -43,7 +43,7 @@ var Days = Period{
 }
 
 var Weeks = Period{
-	Name: "weeks",
+	Name: "week",
 	Key: func(t time.Time) string {
 		y, w := t.UTC().ISOWeek()
 		return fmt.Sprintf("%04d-W%02d", y, w)
@@ -60,7 +60,7 @@ var Weeks = Period{
 }
 
 var Months = Period{
-	Name: "months",
+	Name: "month",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01") },
 	Start: func(t time.Time) time.Time {
 		y, m, _ := t.UTC().Date()
@@ -70,7 +70,7 @@ var Months = Period{
 }
 
 var Years = Period{
-	Name: "years",
+	Name: "year",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006") },
 	Start: func(t time.Time) time.Time {
 		y := t.UTC().Year()

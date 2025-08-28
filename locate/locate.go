@@ -1,11 +1,12 @@
 package locate
 
 import (
-	"flag"
 	"fmt"
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/PlakarKorp/kloset/objects"
 )
 
 type SortOrder int
@@ -47,7 +48,7 @@ func (it ItemFilters) HasTag(tag string) bool {
 }
 
 type Item struct {
-	ItemID    string
+	ItemID    objects.MAC
 	Timestamp time.Time
 	Filters   ItemFilters
 }
@@ -55,6 +56,10 @@ type Item struct {
 type LocatePeriod struct {
 	Keep int
 	Cap  int
+}
+
+func (lp *LocatePeriod) Empty() bool {
+	return lp.Keep == 0 && lp.Cap == 0
 }
 
 type LocateFilters struct {
@@ -68,10 +73,9 @@ type LocateFilters struct {
 	Job         string
 	Tags        []string
 
-	SortOrder SortOrder
-	Latest    bool
-	Prefix    string // snapshot/item id prefix
-
+	Latest bool
+	IDs    []string
+	//Prefix string // snapshot/item id prefix
 }
 
 type LocateOptions struct {
@@ -83,6 +87,11 @@ type LocateOptions struct {
 	Week   LocatePeriod
 	Month  LocatePeriod
 	Year   LocatePeriod
+}
+
+func (lo *LocateOptions) HasPeriods() bool {
+	return !lo.Minute.Empty() || !lo.Hour.Empty() || !lo.Day.Empty() ||
+		!lo.Week.Empty() || !lo.Month.Empty() || !lo.Year.Empty()
 }
 
 type Option func(*LocateOptions)
@@ -135,41 +144,51 @@ func WithJob(job string) Option {
 func WithTag(tag string) Option {
 	return func(p *LocateOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
 }
-func WithPrefix(prefix string) Option  { return func(p *LocateOptions) { p.Filters.Prefix = prefix } }
-func WithLatest(latest bool) Option    { return func(p *LocateOptions) { p.Filters.Latest = latest } }
-func WithSortOrder(o SortOrder) Option { return func(p *LocateOptions) { p.Filters.SortOrder = o } }
+func WithID(id string) Option {
+	return func(p *LocateOptions) { p.Filters.IDs = append(p.Filters.IDs, id) }
+}
+func WithLatest(latest bool) Option { return func(p *LocateOptions) { p.Filters.Latest = latest } }
 
-func (po *LocateOptions) Matches(it Item) bool {
-	if po.Filters.Prefix != "" && !strings.HasPrefix(it.ItemID, po.Filters.Prefix) {
-		return false
+func (lo *LocateOptions) Matches(it Item) bool {
+	if len(lo.Filters.IDs) > 0 {
+		found := false
+		for _, id := range lo.Filters.IDs {
+			if strings.HasPrefix(fmt.Sprintf("%x", it.ItemID), id) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
 	}
 
 	// time window
-	if !po.Filters.Before.IsZero() && it.Timestamp.After(po.Filters.Before.UTC()) {
+	if !lo.Filters.Before.IsZero() && it.Timestamp.After(lo.Filters.Before.UTC()) {
 		return false
 	}
-	if !po.Filters.Since.IsZero() && it.Timestamp.Before(po.Filters.Since.UTC()) {
+	if !lo.Filters.Since.IsZero() && it.Timestamp.Before(lo.Filters.Since.UTC()) {
 		return false
 	}
 
 	// header fields
-	if po.Filters.Name != "" && it.Filters.Name != po.Filters.Name {
+	if lo.Filters.Name != "" && it.Filters.Name != lo.Filters.Name {
 		return false
 	}
-	if po.Filters.Category != "" && it.Filters.Category != po.Filters.Category {
+	if lo.Filters.Category != "" && it.Filters.Category != lo.Filters.Category {
 		return false
 	}
-	if po.Filters.Environment != "" && it.Filters.Environment != po.Filters.Environment {
+	if lo.Filters.Environment != "" && it.Filters.Environment != lo.Filters.Environment {
 		return false
 	}
-	if po.Filters.Perimeter != "" && it.Filters.Perimeter != po.Filters.Perimeter {
+	if lo.Filters.Perimeter != "" && it.Filters.Perimeter != lo.Filters.Perimeter {
 		return false
 	}
-	if po.Filters.Job != "" && it.Filters.Job != po.Filters.Job {
+	if lo.Filters.Job != "" && it.Filters.Job != lo.Filters.Job {
 		return false
 	}
-	if len(po.Filters.Tags) > 0 {
-		for _, tag := range po.Filters.Tags {
+	if len(lo.Filters.Tags) > 0 {
+		for _, tag := range lo.Filters.Tags {
 			if !it.Filters.HasTag(tag) {
 				return false
 			}
@@ -178,53 +197,69 @@ func (po *LocateOptions) Matches(it Item) bool {
 	return true
 }
 
-func (po *LocateOptions) FilterAndSort(items []Item, now time.Time) []Item {
-	now = now.UTC()
+func (lo *LocateOptions) FilterAndSort(items []Item) []Item {
 	out := make([]Item, 0, len(items))
 	for i := range items {
 		it := items[i]
 		it.Timestamp = it.Timestamp.UTC()
-		if po.Matches(it) {
+		if lo.Matches(it) {
 			out = append(out, it)
 		}
 	}
-	sortOrder := po.Filters.SortOrder
-	if po.Filters.Latest && sortOrder == SortOrderNone {
-		sortOrder = SortOrderDescending
-	}
-	switch sortOrder {
-	case SortOrderAscending:
-		sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.Before(out[j].Timestamp) })
-	case SortOrderDescending:
-		sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
-	default:
-		sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
-	}
-	if po.Filters.Latest && len(out) > 1 {
+
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.After(out[j].Timestamp) })
+	if lo.Filters.Latest && len(out) > 1 {
 		return out[:1]
 	}
 	return out
 }
 
-func (po *LocateOptions) Select(items []Item, now time.Time) (map[string]struct{}, map[string]Reason) {
+func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]struct{}, map[objects.MAC]Reason) {
 	now = now.UTC()
 
-	filtered := po.FilterAndSort(items, now)
+	filtered := lo.FilterAndSort(items)
 
-	kept := make(map[string]struct{}, len(filtered))
-	reasons := make(map[string]Reason, len(filtered))
-	ruleKeepReasons := make(map[string]Reason, len(filtered)) // per-snapshot best keep reason
-	ruleDropReasons := make(map[string]Reason, len(filtered)) // per-snapshot best delete reason
+	kept := make(map[objects.MAC]struct{}, len(filtered))
+	reasons := make(map[objects.MAC]Reason, len(filtered))
 
+	// nothing matched, no need to go further
+	if len(filtered) == 0 {
+		return kept, reasons
+	}
+
+	// we won't group by periods
+	if !lo.HasPeriods() {
+		for _, s := range filtered {
+			id := s.ItemID
+			kept[id] = struct{}{}
+			reasons[id] = Reason{
+				Action: "keep", Note: "matched filters",
+			}
+		}
+		return kept, reasons
+	}
+
+	ruleKeepReasons := make(map[objects.MAC]Reason, len(filtered)) // per-snapshot best keep reason
+	ruleDropReasons := make(map[objects.MAC]Reason, len(filtered)) // per-snapshot best delete reason
 	processRule := func(period Period, pp LocatePeriod) {
-		if pp.Keep <= 0 {
+		if pp.Keep == 0 && pp.Cap == 0 {
 			return
 		}
-		capPer := max(pp.Cap, 1)
 
-		windowKeys := period.LastNKeys(now, pp.Keep)
+		// 2) Keep==0 && Cap>0: consider ALL time buckets, keep up to Cap per bucket (since oldest)
+		// 3) Keep>0  && Cap==0: consider last Keep buckets, keep ALL items in-window (no per-bucket cap)
+		// 4) Keep>0  && Cap>0: consider last Keep buckets, keep up to Cap per bucket
 
-		// bucket indices (items already newest-first)
+		var windowKeys map[string]any
+		if pp.Keep == 0 {
+			windowKeys = make(map[string]any)
+			for _, s := range filtered {
+				windowKeys[period.Key(s.Timestamp)] = struct{}{}
+			}
+		} else {
+			windowKeys = period.LastNKeys(now, pp.Keep)
+		}
+
 		buckets := make(map[string][]int)
 		for idx, s := range filtered {
 			k := period.Key(s.Timestamp)
@@ -233,23 +268,30 @@ func (po *LocateOptions) Select(items []Item, now time.Time) (map[string]struct{
 			}
 		}
 
-		// assign reasons (top K kept; rest exceed cap)
 		for bkey, idxs := range buckets {
 			for rank, idx := range idxs {
 				s := filtered[idx]
 				id := s.ItemID
-				if rank < capPer {
+				if pp.Cap == 0 || rank < pp.Cap {
 					r := Reason{
-						Action: "keep", Rule: period.Name, Bucket: bkey,
-						Rank: rank + 1, Cap: capPer,
+						Action: "keep",
+						Rule:   period.Name,
+						Bucket: bkey,
+						Rank:   rank + 1,
+						Cap:    pp.Cap, // 0 = unlimited
+						Note:   "within bucket",
 					}
 					if prev, ok := ruleKeepReasons[id]; !ok || r.Rank < prev.Rank {
 						ruleKeepReasons[id] = r
 					}
 				} else {
 					r := Reason{
-						Action: "delete", Rule: period.Name, Bucket: bkey,
-						Rank: rank + 1, Cap: capPer, Note: "exceeds per-bucket cap",
+						Action: "delete",
+						Rule:   period.Name,
+						Bucket: bkey,
+						Rank:   rank + 1,
+						Cap:    pp.Cap,
+						Note:   "exceeds per-bucket cap",
 					}
 					if prev, ok := ruleDropReasons[id]; !ok || r.Rank < prev.Rank {
 						ruleDropReasons[id] = r
@@ -259,13 +301,12 @@ func (po *LocateOptions) Select(items []Item, now time.Time) (map[string]struct{
 		}
 	}
 
-	// process for each period
-	processRule(Minutes, po.Minute)
-	processRule(Hours, po.Hour)
-	processRule(Days, po.Day)
-	processRule(Weeks, po.Week)
-	processRule(Months, po.Month)
-	processRule(Years, po.Year)
+	processRule(Minutes, lo.Minute)
+	processRule(Hours, lo.Hour)
+	processRule(Days, lo.Day)
+	processRule(Weeks, lo.Week)
+	processRule(Months, lo.Month)
+	processRule(Years, lo.Year)
 
 	// finalize decision for each snapshot
 	for _, s := range filtered {
@@ -285,63 +326,12 @@ func (po *LocateOptions) Select(items []Item, now time.Time) (map[string]struct{
 	return kept, reasons
 }
 
-func (po *LocateOptions) InstallFlags(flags *flag.FlagSet) {
-	flags.IntVar(&po.Minute.Keep, "keep-minutes", 0, "keep snapshots for the last N minutes")
-	flags.IntVar(&po.Hour.Keep, "keep-hours", 0, "keep snapshots for the last N hours")
-	flags.IntVar(&po.Day.Keep, "keep-days", 0, "keep snapshots for the last N days")
-	flags.IntVar(&po.Week.Keep, "keep-weeks", 0, "keep snapshots for the last N weeks")
-	flags.IntVar(&po.Month.Keep, "keep-months", 0, "keep snapshots for the last N months")
-	flags.IntVar(&po.Year.Keep, "keep-years", 0, "keep snapshots for the last N years")
-	flags.IntVar(&po.Minute.Cap, "keep-per-minute", 0, "cap the number of kept snapshots per minute")
-	flags.IntVar(&po.Hour.Cap, "keep-per-hour", 0, "cap the number of kept snapshots per hour")
-	flags.IntVar(&po.Day.Cap, "keep-per-day", 0, "cap the number of kept snapshots per day")
-	flags.IntVar(&po.Week.Cap, "keep-per-week", 0, "cap the number of kept snapshots per week")
-	flags.IntVar(&po.Month.Cap, "keep-per-month", 0, "cap the number of kept snapshots per month")
-	flags.IntVar(&po.Year.Cap, "keep-per-year", 0, "cap the number of kept snapshots per year")
-
-	flags.Var(NewTimeFlag(&po.Filters.Before), "before", "filter by date")
-	flags.Var(NewTimeFlag(&po.Filters.Since), "since", "filter by date")
-
-	flags.StringVar(&po.Filters.Name, "name", "", "filter by name")
-	flags.StringVar(&po.Filters.Category, "category", "", "filter by category")
-	flags.StringVar(&po.Filters.Environment, "environment", "", "filter by environment")
-	flags.StringVar(&po.Filters.Perimeter, "perimeter", "", "filter by perimeter")
-	flags.StringVar(&po.Filters.Job, "job", "", "filter by job")
-
-	flags.Func("tag", "filter by tag (repeat or comma-separated). All specified tags must be present.",
-		func(v string) error {
-			for _, t := range strings.Split(v, ",") {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					po.Filters.Tags = append(po.Filters.Tags, t)
-				}
-			}
-			return nil
-		})
-
-	flags.Func("order", "0=none, 1=asc (oldest-first), -1=desc (newest-first)",
-		func(v string) error {
-			switch strings.TrimSpace(v) {
-			case "0", "none":
-				po.Filters.SortOrder = SortOrderNone
-			case "1", "asc", "ascending":
-				po.Filters.SortOrder = SortOrderAscending
-			case "-1", "desc", "descending":
-				po.Filters.SortOrder = SortOrderDescending
-			default:
-				return fmt.Errorf("invalid sort-order: %q", v)
-			}
-			return nil
-		})
-
-	flags.BoolVar(&po.Filters.Latest, "latest", false, "consider only the latest matching item")
-	flags.StringVar(&po.Filters.Prefix, "prefix", "", "filter by item ID prefix (hex)")
-}
-
-func (po *LocateOptions) Empty() bool {
-	return po.Minute.Keep == 0 && po.Hour.Keep == 0 && po.Day.Keep == 0 &&
-		po.Week.Keep == 0 && po.Month.Keep == 0 && po.Year.Keep == 0 &&
-		po.Filters.Name == "" && po.Filters.Category == "" && po.Filters.Environment == "" &&
-		po.Filters.Perimeter == "" && po.Filters.Job == "" && len(po.Filters.Tags) == 0 &&
-		po.Filters.Prefix == "" && po.Filters.Before.IsZero() && po.Filters.Since.IsZero()
+func (lo *LocateOptions) Empty() bool {
+	return lo.Minute.Keep == 0 && lo.Hour.Keep == 0 && lo.Day.Keep == 0 &&
+		lo.Week.Keep == 0 && lo.Month.Keep == 0 && lo.Year.Keep == 0 &&
+		lo.Minute.Cap == 0 && lo.Hour.Cap == 0 && lo.Day.Cap == 0 &&
+		lo.Week.Cap == 0 && lo.Month.Cap == 0 && lo.Year.Cap == 0 &&
+		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
+		lo.Filters.Perimeter == "" && lo.Filters.Job == "" && len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 &&
+		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest
 }
