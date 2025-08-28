@@ -16,8 +16,10 @@ var Minutes = Period{
 	Name: "minute",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02-15:04") },
 	Start: func(t time.Time) time.Time {
-		y, m, d := t.UTC().Date()
-		return time.Date(y, m, d, t.Hour(), t.Minute(), 0, 0, time.UTC)
+		ut := t.UTC()
+		y, m, d := ut.Date()
+		h, min, _ := ut.Clock()
+		return time.Date(y, m, d, h, min, 0, 0, time.UTC)
 	},
 	Prev: func(t time.Time) time.Time { return t.Add(-time.Minute) },
 }
@@ -26,8 +28,10 @@ var Hours = Period{
 	Name: "hour",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02-15") },
 	Start: func(t time.Time) time.Time {
-		y, m, d := t.UTC().Date()
-		return time.Date(y, m, d, t.Hour(), 0, 0, 0, time.UTC)
+		ut := t.UTC()
+		y, m, d := ut.Date()
+		h, _, _ := ut.Clock()
+		return time.Date(y, m, d, h, 0, 0, 0, time.UTC)
 	},
 	Prev: func(t time.Time) time.Time { return t.Add(-time.Hour) },
 }
