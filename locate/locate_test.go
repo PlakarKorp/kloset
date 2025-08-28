@@ -24,7 +24,9 @@ func mustRFC3339(t *testing.T, s string) time.Time {
 // If MAC is not a byte array, this is a no-op and tests still compile,
 // but uniqueness may not hold (adjust if needed).
 func mac(n byte) objects.MAC {
-	return objects.MAC([]byte{n})
+	var m objects.MAC
+	m[0] = n
+	return m
 }
 
 // makeItem creates a test Item.
