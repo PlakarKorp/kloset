@@ -287,12 +287,15 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 				return
 			}
 
-			lrd := io.LimitReader(rd, int64(siz))
-
 			var entry Entry
+			lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
 			err = msgpack.NewDecoder(lrd).Decode(&entry)
 			if err != nil {
 				yield(nil, fmt.Errorf("failed to read entry: %w", err))
+				return
+			}
+			if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
+				yield(nil, fmt.Errorf("failed to read entry mac: %w", err))
 				return
 			}
 
