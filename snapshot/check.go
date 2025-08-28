@@ -234,6 +234,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	})
 	if err != nil {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
+		wg.Wait()
 		return err
 	}
 	if err := wg.Wait(); err != nil {
