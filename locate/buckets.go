@@ -1,7 +1,8 @@
-package policy
+package locate
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -13,27 +14,31 @@ type Period struct {
 }
 
 var Minutes = Period{
-	Name: "minutes",
+	Name: "minute",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02-15:04") },
 	Start: func(t time.Time) time.Time {
-		y, m, d := t.UTC().Date()
-		return time.Date(y, m, d, t.Hour(), t.Minute(), 0, 0, time.UTC)
+		ut := t.UTC()
+		y, m, d := ut.Date()
+		h, min, _ := ut.Clock()
+		return time.Date(y, m, d, h, min, 0, 0, time.UTC)
 	},
 	Prev: func(t time.Time) time.Time { return t.Add(-time.Minute) },
 }
 
 var Hours = Period{
-	Name: "hours",
+	Name: "hour",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02-15") },
 	Start: func(t time.Time) time.Time {
-		y, m, d := t.UTC().Date()
-		return time.Date(y, m, d, t.Hour(), 0, 0, 0, time.UTC)
+		ut := t.UTC()
+		y, m, d := ut.Date()
+		h, _, _ := ut.Clock()
+		return time.Date(y, m, d, h, 0, 0, 0, time.UTC)
 	},
 	Prev: func(t time.Time) time.Time { return t.Add(-time.Hour) },
 }
 
 var Days = Period{
-	Name: "days",
+	Name: "day",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02") },
 	Start: func(t time.Time) time.Time {
 		y, m, d := t.UTC().Date()
@@ -43,7 +48,7 @@ var Days = Period{
 }
 
 var Weeks = Period{
-	Name: "weeks",
+	Name: "week",
 	Key: func(t time.Time) string {
 		y, w := t.UTC().ISOWeek()
 		return fmt.Sprintf("%04d-W%02d", y, w)
@@ -60,7 +65,7 @@ var Weeks = Period{
 }
 
 var Months = Period{
-	Name: "months",
+	Name: "month",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006-01") },
 	Start: func(t time.Time) time.Time {
 		y, m, _ := t.UTC().Date()
@@ -70,7 +75,7 @@ var Months = Period{
 }
 
 var Years = Period{
-	Name: "years",
+	Name: "year",
 	Key:  func(t time.Time) string { return t.UTC().Format("2006") },
 	Start: func(t time.Time) time.Time {
 		y := t.UTC().Year()
@@ -88,3 +93,39 @@ func (period Period) LastNKeys(now time.Time, n int) map[string]any {
 	}
 	return keys
 }
+
+func WeekdayPeriod(target time.Weekday) Period {
+	name := strings.ToLower(target.String())
+	return Period{
+		Name: name,
+		Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02") + "-" + name },
+		Start: func(t time.Time) time.Time {
+			ut := Days.Start(t) // 00:00:00Z of the day
+			wd := int(ut.Weekday())
+			if wd == 0 {
+				wd = 7 // Sunday -> 7
+			}
+			tw := int(target)
+			if tw == 0 {
+				tw = 7 // Sunday -> 7
+			}
+			// Monday start of the ISO week, then offset to the target weekday
+			monday := ut.AddDate(0, 0, -(wd - 1))
+			return monday.AddDate(0, 0, tw-1)
+		},
+		Prev: func(t time.Time) time.Time {
+			// assumes t is at Start; still safe for any t because it’s a fixed step back
+			return t.AddDate(0, 0, -7)
+		},
+	}
+}
+
+var (
+	Mondays    = WeekdayPeriod(time.Monday)
+	Tuesdays   = WeekdayPeriod(time.Tuesday)
+	Wednesdays = WeekdayPeriod(time.Wednesday)
+	Thursdays  = WeekdayPeriod(time.Thursday)
+	Fridays    = WeekdayPeriod(time.Friday)
+	Saturdays  = WeekdayPeriod(time.Saturday)
+	Sundays    = WeekdayPeriod(time.Sunday)
+)
