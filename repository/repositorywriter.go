@@ -1,9 +1,6 @@
 package repository
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -188,40 +185,12 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		r.Logger().Trace("repository", "PutPackfile(%x): %s", r.currentStateID, time.Since(t0))
 	}()
 
-	serializedData, err := pfile.SerializeData()
-	if err != nil {
-		return fmt.Errorf("could not serialize pack file data %s", err.Error())
-	}
-	serializedIndex, err := pfile.SerializeIndex()
-	if err != nil {
-		return fmt.Errorf("could not serialize pack file index %s", err.Error())
-	}
-	serializedFooter, err := pfile.SerializeFooter()
-	if err != nil {
-		return fmt.Errorf("could not serialize pack file footer %s", err.Error())
-	}
-
-	encryptedIndex, err := r.encodeBuffer(serializedIndex)
+	serializedPackfile, mac, err := pfile.Serialize(r.encode)
 	if err != nil {
 		return err
 	}
 
-	encryptedFooter, err := r.encodeBuffer(serializedFooter)
-	if err != nil {
-		return err
-	}
-
-	serializedPackfile := append(serializedData, encryptedIndex...)
-	serializedPackfile = append(serializedPackfile, encryptedFooter...)
-
-	/* it is necessary to track the footer _encrypted_ length */
-	encryptedFooterLength := make([]byte, 4)
-	binary.LittleEndian.PutUint32(encryptedFooterLength, uint32(len(encryptedFooter)))
-	serializedPackfile = append(serializedPackfile, encryptedFooterLength...)
-
-	mac := r.ComputeMAC(serializedPackfile)
-
-	rd, err := storage.Serialize(r.GetMACHasher(), resources.RT_PACKFILE, versioning.GetCurrentVersion(resources.RT_PACKFILE), bytes.NewBuffer(serializedPackfile))
+	rd, err := storage.Serialize(r.GetMACHasher(), resources.RT_PACKFILE, versioning.GetCurrentVersion(resources.RT_PACKFILE), serializedPackfile)
 	if err != nil {
 		return err
 	}
