@@ -599,7 +599,7 @@ func (r *Repository) GetPackfiles() ([]objects.MAC, error) {
 	return r.store.GetPackfiles(r.appContext)
 }
 
-func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
+func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetPackfile(%x, ...): %s", mac, time.Since(t0))
@@ -639,7 +639,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 		return nil, err
 	}
 
-	footer, err := packfile.NewFooterFromBytes(packfileVersion, footerbuf)
+	footer, err := packfile.NewInMemoryFooterFromBytes(packfileVersion, footerbuf)
 	if err != nil {
 		return nil, err
 	}
@@ -663,7 +663,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackFile, error) {
 	rawPackfile = append(rawPackfile, footerbuf...)
 
 	hasher.Reset()
-	p, err := packfile.NewFromBytes(hasher, packfileVersion, rawPackfile)
+	p, err := packfile.NewPackfileInMemoryFromBytes(hasher, packfileVersion, rawPackfile)
 	if err != nil {
 		return nil, err
 	}
