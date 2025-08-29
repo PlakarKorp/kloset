@@ -31,7 +31,18 @@ type Builder struct {
 	Header *header.Header
 }
 
-func Create(repo *repository.Repository, packingStrategy repository.RepositoryType) (*Builder, error) {
+type BuilderOptions struct {
+	Username        string
+	Hostname        string
+	CommandLine     string
+	MachineID       string
+	OperatingSystem string
+	Architecture    string
+	Client          string
+	ProcessID       int
+}
+
+func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, opts *BuilderOptions) (*Builder, error) {
 	identifier := objects.RandomMAC()
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
@@ -50,22 +61,22 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
 		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
 	}
-	snap.Header.SetContext("Hostname", snap.AppContext().Hostname)
-	snap.Header.SetContext("Username", snap.AppContext().Username)
-	snap.Header.SetContext("OperatingSystem", snap.AppContext().OperatingSystem)
-	snap.Header.SetContext("MachineID", snap.AppContext().MachineID)
-	snap.Header.SetContext("CommandLine", snap.AppContext().CommandLine)
-	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", snap.AppContext().ProcessID))
-	snap.Header.SetContext("Architecture", snap.AppContext().Architecture)
+	snap.Header.SetContext("Hostname", opts.Hostname)
+	snap.Header.SetContext("Username", opts.Username)
+	snap.Header.SetContext("OperatingSystem", opts.OperatingSystem)
+	snap.Header.SetContext("MachineID", opts.MachineID)
+	snap.Header.SetContext("CommandLine", opts.CommandLine)
+	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", opts.ProcessID))
+	snap.Header.SetContext("Architecture", opts.Architecture)
 	snap.Header.SetContext("NumCPU", fmt.Sprintf("%d", runtime.NumCPU()))
 	snap.Header.SetContext("MaxProcs", fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
-	snap.Header.SetContext("Client", snap.AppContext().Client)
+	snap.Header.SetContext("Client", opts.Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 	return snap, nil
 }
 
-func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, error) {
+func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, opts *BuilderOptions) (*Builder, error) {
 	identifier := objects.RandomMAC()
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
@@ -85,16 +96,16 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, er
 		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
 	}
 
-	snap.Header.SetContext("Hostname", snap.AppContext().Hostname)
-	snap.Header.SetContext("Username", snap.AppContext().Username)
-	snap.Header.SetContext("OperatingSystem", snap.AppContext().OperatingSystem)
-	snap.Header.SetContext("MachineID", snap.AppContext().MachineID)
-	snap.Header.SetContext("CommandLine", snap.AppContext().CommandLine)
-	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", snap.AppContext().ProcessID))
-	snap.Header.SetContext("Architecture", snap.AppContext().Architecture)
+	snap.Header.SetContext("Hostname", opts.Hostname)
+	snap.Header.SetContext("Username", opts.Username)
+	snap.Header.SetContext("OperatingSystem", opts.OperatingSystem)
+	snap.Header.SetContext("MachineID", opts.MachineID)
+	snap.Header.SetContext("CommandLine", opts.CommandLine)
+	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", opts.ProcessID))
+	snap.Header.SetContext("Architecture", opts.Architecture)
 	snap.Header.SetContext("NumCPU", fmt.Sprintf("%d", runtime.NumCPU()))
 	snap.Header.SetContext("MaxProcs", fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
-	snap.Header.SetContext("Client", snap.AppContext().Client)
+	snap.Header.SetContext("Client", opts.Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 	return snap, nil
@@ -200,7 +211,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 		return lockDone, nil
 	}
 
-	lock := repository.NewSharedLock(snap.AppContext().Hostname)
+	lock := repository.NewSharedLock(snap.Header.GetContext("Hostname"))
 
 	buffer := &bytes.Buffer{}
 	err := lock.SerializeToStream(buffer)
@@ -264,7 +275,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 				snap.repository.DeleteLock(snap.Header.Identifier)
 				return
 			case <-time.After(repository.LOCK_REFRESH_RATE):
-				lock := repository.NewSharedLock(snap.AppContext().Hostname)
+				lock := repository.NewSharedLock(snap.Header.GetContext("Hostname"))
 
 				buffer := &bytes.Buffer{}
 

@@ -27,8 +27,6 @@ func GenerateContext(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer) *
 
 	ctx := kcontext.NewKContext()
 
-	ctx.Client = "plakar-test/1.0.0"
-
 	// create a repository
 	ctx.MaxConcurrency = 1
 	if bufout != nil && buferr != nil {
