@@ -2,6 +2,7 @@ package packfile
 
 import (
 	"hash"
+	"io"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -21,13 +22,22 @@ type Blob struct {
 
 const BLOB_RECORD_SIZE = 56
 
+type EncodingFn func(io.Reader) (io.Reader, error)
+
+// It is the responsability of the packfile, to return a reader (through
+// serialize) that will produce the expected format as documented below:
+//
+// - 0....N Blob bytes (encoded individually)
+// - Index into blobs (encoded as a whole)
+// - MAC of index
+// - Footer (encoded as a whole)
+// - Encoded footer length (uint32)
 type Packfile interface {
 	AddBlob(t resources.Type, v versioning.Version, mac objects.MAC, data []byte, flags uint32) error
 	Size() uint64
 	Entries() []Blob
-	SerializeData() ([]byte, error)
-	SerializeIndex() ([]byte, error)
-	SerializeFooter() ([]byte, error)
+	Serialize(EncodingFn) (io.Reader, objects.MAC, error)
+	Cleanup() error
 }
 
 type PackfileCtor func(hash.Hash) Packfile
