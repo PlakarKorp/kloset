@@ -68,8 +68,8 @@ func TestNewDefaultLocateOptions_And_WithOptions(t *testing.T) {
 	if !lo.HasPeriods() {
 		t.Fatalf("HasPeriods should be true when any keep/cap is set")
 	}
-	if lo.Minute.Keep != 3 || lo.Hour.Cap != 5 {
-		t.Fatalf("options not applied: minute.keep=%d hour.cap=%d", lo.Minute.Keep, lo.Hour.Cap)
+	if lo.Periods.Minute.Keep != 3 || lo.Periods.Hour.Cap != 5 {
+		t.Fatalf("options not applied: minute.keep=%d hour.cap=%d", lo.Periods.Minute.Keep, lo.Periods.Hour.Cap)
 	}
 	if lo.Filters.Before.IsZero() || lo.Filters.Since.IsZero() {
 		t.Fatalf("before/since not set")
@@ -96,7 +96,7 @@ func TestLocateOptions_Empty(t *testing.T) {
 		t.Fatalf("Empty() should be false when a filter is set")
 	}
 	lo = LocateOptions{}
-	lo.Minute.Keep = 1
+	lo.Periods.Minute.Keep = 1
 	if lo.Empty() {
 		t.Fatalf("Empty() should be false when a period keep is set")
 	}
@@ -107,7 +107,7 @@ func TestHasPeriods(t *testing.T) {
 	if lo.HasPeriods() {
 		t.Fatalf("HasPeriods false on zero-value")
 	}
-	lo.Minute.Cap = 1
+	lo.Periods.Minute.Cap = 1
 	if !lo.HasPeriods() {
 		t.Fatalf("HasPeriods true when any cap/keep is set")
 	}
@@ -226,7 +226,7 @@ func TestMatch_KeepOnly_LastNDays_AllInWindowKept(t *testing.T) {
 		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-18T09:00:00Z")}, // day 2025-08-18
 		{ItemID: mac(4), Timestamp: mustRFC3339(t, "2025-08-17T09:00:00Z")}, // outside (if Keep=3)
 	}
-	lo := LocateOptions{Day: LocatePeriod{Keep: 3}}
+	lo := LocateOptions{Periods: LocatePeriods{Day: LocatePeriod{Keep: 3}}}
 	kept, reasons := lo.Match(items, now)
 
 	if len(kept) != 3 {
@@ -257,7 +257,7 @@ func TestMatch_CapOnly_PerMinute_NewestFirstWithinBucket(t *testing.T) {
 		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")}, // oldest within bucket
 	}
 	// Ensure FilterAndSort will order desc by ts (newest first)
-	lo := LocateOptions{Minute: LocatePeriod{Cap: 2}}
+	lo := LocateOptions{Periods: LocatePeriods{Minute: LocatePeriod{Cap: 2}}}
 	kept, reasons := lo.Match(items, now)
 
 	if len(kept) != 2 {
@@ -301,7 +301,11 @@ func TestMatch_KeepAndCap_PerHour(t *testing.T) {
 	}
 
 	// Keep last 2 hours (current hour 17 and previous hour 16), capped at 2 per hour.
-	lo := LocateOptions{Hour: LocatePeriod{Keep: 2, Cap: 2}}
+	lo := LocateOptions{
+		Periods: LocatePeriods{
+			Hour: LocatePeriod{Keep: 2, Cap: 2},
+		},
+	}
 	kept, reasons := lo.Match(items, now)
 
 	if len(kept) != 4 {
@@ -343,8 +347,10 @@ func TestMatch_MultipleRules_KeepBeatsDelete(t *testing.T) {
 	items := []Item{item1, item2}
 
 	lo := LocateOptions{
-		Day:  LocatePeriod{Keep: 1, Cap: 1}, // keep only the newest within the day
-		Week: LocatePeriod{Keep: 1, Cap: 2}, // same week key, allow both
+		Periods: LocatePeriods{
+			Day:  LocatePeriod{Keep: 1, Cap: 1}, // keep only the newest within the day
+			Week: LocatePeriod{Keep: 1, Cap: 2}, // same week key, allow both
+		},
 	}
 
 	kept, reasons := lo.Match(items, now)
@@ -363,7 +369,11 @@ func TestMatch_OutsideWindows_NoRulesKeeping(t *testing.T) {
 	items := []Item{
 		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-10T00:00:00Z")},
 	}
-	lo := LocateOptions{Day: LocatePeriod{Keep: 1}}
+	lo := LocateOptions{
+		Periods: LocatePeriods{
+			Day: LocatePeriod{Keep: 1},
+		},
+	}
 	_, reasons := lo.Match(items, now)
 	r := reasons[items[0].ItemID]
 	if r.Action != "delete" || r.Note != "outside retention windows" {

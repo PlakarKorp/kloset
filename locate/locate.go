@@ -67,8 +67,8 @@ type Item struct {
 }
 
 type LocatePeriod struct {
-	Keep int
-	Cap  int
+	Keep int `json:"keep,omitempty" yaml:"keep,omitempty"` // number of time buckets to keep, 0 = unlimited
+	Cap  int `json:"cap,omitempty" yaml:"cap,omitempty"`   // max items to keep per time bucket, 0 = unlimited
 }
 
 func (lp *LocatePeriod) Empty() bool {
@@ -76,45 +76,48 @@ func (lp *LocatePeriod) Empty() bool {
 }
 
 type LocateFilters struct {
-	Before time.Time
-	Since  time.Time
+	Before time.Time `json:"before,omitempty" yaml:"before,omitempty"`
+	Since  time.Time `json:"since,omitempty" yaml:"since,omitempty"`
 
-	Name        string
-	Category    string
-	Environment string
-	Perimeter   string
-	Job         string
-	Tags        []string
+	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
+	Category    string   `json:"category,omitempty" yaml:"category,omitempty"`
+	Environment string   `json:"environment,omitempty" yaml:"environment,omitempty"`
+	Perimeter   string   `json:"perimeter,omitempty" yaml:"perimeter,omitempty"`
+	Job         string   `json:"job,omitempty" yaml:"job,omitempty"`
+	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 
-	Latest bool
-	IDs    []string
-	Roots  []string
+	Latest bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
+	IDs    []string `json:"ids,omitempty" yaml:"ids,omitempty"`
+	Roots  []string `json:"roots,omitempty" yaml:"roots,omitempty"`
+}
+
+type LocatePeriods struct {
+	Minute LocatePeriod `json:"minute,omitempty" yaml:"minute,omitempty"`
+	Hour   LocatePeriod `json:"hour,omitempty" yaml:"hour,omitempty"`
+	Day    LocatePeriod `json:"day,omitempty" yaml:"day,omitempty"`
+	Week   LocatePeriod `json:"week,omitempty" yaml:"week,omitempty"`
+	Month  LocatePeriod `json:"month,omitempty" yaml:"month,omitempty"`
+	Year   LocatePeriod `json:"year,omitempty" yaml:"year,omitempty"`
+
+	Monday    LocatePeriod `json:"monday,omitempty" yaml:"monday,omitempty"`
+	Tuesday   LocatePeriod `json:"tuesday,omitempty" yaml:"tuesday,omitempty"`
+	Wednesday LocatePeriod `json:"wednesday,omitempty" yaml:"wednesday,omitempty"`
+	Thursday  LocatePeriod `json:"thursday,omitempty" yaml:"thursday,omitempty"`
+	Friday    LocatePeriod `json:"friday,omitempty" yaml:"friday,omitempty"`
+	Saturday  LocatePeriod `json:"saturday,omitempty" yaml:"saturday,omitempty"`
+	Sunday    LocatePeriod `json:"sunday,omitempty" yaml:"sunday,omitempty"`
 }
 
 type LocateOptions struct {
-	Filters LocateFilters
-
-	Minute LocatePeriod
-	Hour   LocatePeriod
-	Day    LocatePeriod
-	Week   LocatePeriod
-	Month  LocatePeriod
-	Year   LocatePeriod
-
-	Monday    LocatePeriod
-	Tuesday   LocatePeriod
-	Wednesday LocatePeriod
-	Thursday  LocatePeriod
-	Friday    LocatePeriod
-	Saturday  LocatePeriod
-	Sunday    LocatePeriod
+	Filters LocateFilters `json:"filters,omitempty" yaml:"filters,omitempty"`
+	Periods LocatePeriods `json:"periods,omitempty" yaml:"periods,omitempty"`
 }
 
 func (lo *LocateOptions) HasPeriods() bool {
-	return !lo.Minute.Empty() || !lo.Hour.Empty() || !lo.Day.Empty() ||
-		!lo.Week.Empty() || !lo.Month.Empty() || !lo.Year.Empty() ||
-		!lo.Monday.Empty() || !lo.Tuesday.Empty() || !lo.Wednesday.Empty() ||
-		!lo.Thursday.Empty() || !lo.Friday.Empty() || !lo.Saturday.Empty() || !lo.Sunday.Empty()
+	return !lo.Periods.Minute.Empty() || !lo.Periods.Hour.Empty() || !lo.Periods.Day.Empty() ||
+		!lo.Periods.Week.Empty() || !lo.Periods.Month.Empty() || !lo.Periods.Year.Empty() ||
+		!lo.Periods.Monday.Empty() || !lo.Periods.Tuesday.Empty() || !lo.Periods.Wednesday.Empty() ||
+		!lo.Periods.Thursday.Empty() || !lo.Periods.Friday.Empty() || !lo.Periods.Saturday.Empty() || !lo.Periods.Sunday.Empty()
 }
 
 type Option func(*LocateOptions)
@@ -129,35 +132,35 @@ func NewDefaultLocateOptions(opts ...Option) *LocateOptions {
 	return p
 }
 
-func WithKeepMinutes(n int) Option { return func(p *LocateOptions) { p.Minute.Keep = n } }
-func WithKeepHours(n int) Option   { return func(p *LocateOptions) { p.Hour.Keep = n } }
-func WithKeepDays(n int) Option    { return func(p *LocateOptions) { p.Day.Keep = n } }
-func WithKeepWeeks(n int) Option   { return func(p *LocateOptions) { p.Week.Keep = n } }
-func WithKeepMonths(n int) Option  { return func(p *LocateOptions) { p.Month.Keep = n } }
-func WithKeepYears(n int) Option   { return func(p *LocateOptions) { p.Year.Keep = n } }
+func WithKeepMinutes(n int) Option { return func(p *LocateOptions) { p.Periods.Minute.Keep = n } }
+func WithKeepHours(n int) Option   { return func(p *LocateOptions) { p.Periods.Hour.Keep = n } }
+func WithKeepDays(n int) Option    { return func(p *LocateOptions) { p.Periods.Day.Keep = n } }
+func WithKeepWeeks(n int) Option   { return func(p *LocateOptions) { p.Periods.Week.Keep = n } }
+func WithKeepMonths(n int) Option  { return func(p *LocateOptions) { p.Periods.Month.Keep = n } }
+func WithKeepYears(n int) Option   { return func(p *LocateOptions) { p.Periods.Year.Keep = n } }
 
-func WithKeepMondays(n int) Option    { return func(p *LocateOptions) { p.Monday.Keep = n } }
-func WithKeepTuesdays(n int) Option   { return func(p *LocateOptions) { p.Tuesday.Keep = n } }
-func WithKeepWednesdays(n int) Option { return func(p *LocateOptions) { p.Wednesday.Keep = n } }
-func WithKeepThursdays(n int) Option  { return func(p *LocateOptions) { p.Thursday.Keep = n } }
-func WithKeepFridays(n int) Option    { return func(p *LocateOptions) { p.Friday.Keep = n } }
-func WithKeepSaturdays(n int) Option  { return func(p *LocateOptions) { p.Saturday.Keep = n } }
-func WithKeepSundays(n int) Option    { return func(p *LocateOptions) { p.Sunday.Keep = n } }
+func WithKeepMondays(n int) Option    { return func(p *LocateOptions) { p.Periods.Monday.Keep = n } }
+func WithKeepTuesdays(n int) Option   { return func(p *LocateOptions) { p.Periods.Tuesday.Keep = n } }
+func WithKeepWednesdays(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Keep = n } }
+func WithKeepThursdays(n int) Option  { return func(p *LocateOptions) { p.Periods.Thursday.Keep = n } }
+func WithKeepFridays(n int) Option    { return func(p *LocateOptions) { p.Periods.Friday.Keep = n } }
+func WithKeepSaturdays(n int) Option  { return func(p *LocateOptions) { p.Periods.Saturday.Keep = n } }
+func WithKeepSundays(n int) Option    { return func(p *LocateOptions) { p.Periods.Sunday.Keep = n } }
 
-func WithPerMinuteCap(n int) Option { return func(p *LocateOptions) { p.Minute.Cap = n } }
-func WithPerHourCap(n int) Option   { return func(p *LocateOptions) { p.Hour.Cap = n } }
-func WithPerDayCap(n int) Option    { return func(p *LocateOptions) { p.Day.Cap = n } }
-func WithPerWeekCap(n int) Option   { return func(p *LocateOptions) { p.Week.Cap = n } }
-func WithPerMonthCap(n int) Option  { return func(p *LocateOptions) { p.Month.Cap = n } }
-func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Year.Cap = n } }
+func WithPerMinuteCap(n int) Option { return func(p *LocateOptions) { p.Periods.Minute.Cap = n } }
+func WithPerHourCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Hour.Cap = n } }
+func WithPerDayCap(n int) Option    { return func(p *LocateOptions) { p.Periods.Day.Cap = n } }
+func WithPerWeekCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Week.Cap = n } }
+func WithPerMonthCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Month.Cap = n } }
+func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Year.Cap = n } }
 
-func WithPerMondayCap(n int) Option   { return func(p *LocateOptions) { p.Monday.Cap = n } }
-func WithPerTuesdayCap(n int) Option  { return func(p *LocateOptions) { p.Tuesday.Cap = n } }
-func WithPerWednsdayCap(n int) Option { return func(p *LocateOptions) { p.Wednesday.Cap = n } }
-func WithPerThursdayCap(n int) Option { return func(p *LocateOptions) { p.Thursday.Cap = n } }
-func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Friday.Cap = n } }
-func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Saturday.Cap = n } }
-func WithPerSundaysCap(n int) Option  { return func(p *LocateOptions) { p.Sunday.Cap = n } }
+func WithPerMondayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Monday.Cap = n } }
+func WithPerTuesdayCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Tuesday.Cap = n } }
+func WithPerWednsdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Cap = n } }
+func WithPerThursdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Thursday.Cap = n } }
+func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Friday.Cap = n } }
+func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Saturday.Cap = n } }
+func WithPerSundaysCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Sunday.Cap = n } }
 
 func WithBefore(t time.Time) Option {
 	return func(p *LocateOptions) { p.Filters.Before = t }
@@ -347,21 +350,21 @@ func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]str
 		}
 	}
 
-	processRule(Minutes, lo.Minute)
-	processRule(Hours, lo.Hour)
-	processRule(Days, lo.Day)
+	processRule(Minutes, lo.Periods.Minute)
+	processRule(Hours, lo.Periods.Hour)
+	processRule(Days, lo.Periods.Day)
 
-	processRule(Mondays, lo.Monday)
-	processRule(Tuesdays, lo.Tuesday)
-	processRule(Wednesdays, lo.Wednesday)
-	processRule(Thursdays, lo.Thursday)
-	processRule(Fridays, lo.Friday)
-	processRule(Saturdays, lo.Saturday)
-	processRule(Sundays, lo.Sunday)
+	processRule(Mondays, lo.Periods.Monday)
+	processRule(Tuesdays, lo.Periods.Tuesday)
+	processRule(Wednesdays, lo.Periods.Wednesday)
+	processRule(Thursdays, lo.Periods.Thursday)
+	processRule(Fridays, lo.Periods.Friday)
+	processRule(Saturdays, lo.Periods.Saturday)
+	processRule(Sundays, lo.Periods.Sunday)
 
-	processRule(Weeks, lo.Week)
-	processRule(Months, lo.Month)
-	processRule(Years, lo.Year)
+	processRule(Weeks, lo.Periods.Week)
+	processRule(Months, lo.Periods.Month)
+	processRule(Years, lo.Periods.Year)
 
 	// finalize decision for each snapshot
 	for _, s := range filtered {

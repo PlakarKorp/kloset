@@ -109,15 +109,15 @@ func TestInstallLocateFlags_ParsesAllFlags(t *testing.T) {
 	}
 
 	// Retention
-	if po.Minute.Keep != 5 || po.Hour.Keep != 6 || po.Day.Keep != 7 || po.Week.Keep != 8 || po.Month.Keep != 9 || po.Year.Keep != 10 {
+	if po.Periods.Minute.Keep != 5 || po.Periods.Hour.Keep != 6 || po.Periods.Day.Keep != 7 || po.Periods.Week.Keep != 8 || po.Periods.Month.Keep != 9 || po.Periods.Year.Keep != 10 {
 		t.Fatalf("Keep values: got (m=%d h=%d d=%d w=%d mo=%d y=%d) want (5 6 7 8 9 10)",
-			po.Minute.Keep, po.Hour.Keep, po.Day.Keep, po.Week.Keep, po.Month.Keep, po.Year.Keep)
+			po.Periods.Minute.Keep, po.Periods.Hour.Keep, po.Periods.Day.Keep, po.Periods.Week.Keep, po.Periods.Month.Keep, po.Periods.Year.Keep)
 	}
 
 	// Caps
-	if po.Minute.Cap != 11 || po.Hour.Cap != 12 || po.Day.Cap != 13 || po.Week.Cap != 14 || po.Month.Cap != 15 || po.Year.Cap != 16 {
+	if po.Periods.Minute.Cap != 11 || po.Periods.Hour.Cap != 12 || po.Periods.Day.Cap != 13 || po.Periods.Week.Cap != 14 || po.Periods.Month.Cap != 15 || po.Periods.Year.Cap != 16 {
 		t.Fatalf("Cap values: got (m=%d h=%d d=%d w=%d mo=%d y=%d) want (11 12 13 14 15 16)",
-			po.Minute.Cap, po.Hour.Cap, po.Day.Cap, po.Week.Cap, po.Month.Cap, po.Year.Cap)
+			po.Periods.Minute.Cap, po.Periods.Hour.Cap, po.Periods.Day.Cap, po.Periods.Week.Cap, po.Periods.Month.Cap, po.Periods.Year.Cap)
 	}
 }
 
