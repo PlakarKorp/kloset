@@ -29,7 +29,7 @@ type Params struct {
 	Unknown func(string) error
 }
 
-func NewParams() *Params {
+func New() *Params {
 	return &Params{
 		fields: make(map[string]*param),
 	}
