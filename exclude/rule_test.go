@@ -16,7 +16,7 @@ func (tc RuleTestCase) Display() string {
 	return fmt.Sprintf("pattern=%q path=%q", tc.Pattern, tc.Path)
 }
 
-func (tc RuleTestCase) RunTest(useRegex bool) error {
+func (tc RuleTestCase) RunTest(matcher string) error {
 	var isDir bool
 
 	path := tc.Path
@@ -33,7 +33,22 @@ func (tc RuleTestCase) RunTest(useRegex bool) error {
 		return fmt.Errorf("directory rule can't match non-directory")
 	}
 
-	matched := rule.Match(path, useRegex)
+	var matched bool
+	var err error
+	switch matcher {
+	case "regex":
+		matched, err = rule.MatchRegex(path)
+	case "doublestart":
+		matched, err = rule.MatchDoubleStar(path)
+	case "git":
+		matched, err = rule.MatchGit(path)
+	default:
+		matched, err = false, fmt.Errorf("unknowm matcher %q", matcher)
+	}
+
+	if err != nil {
+		return err
+	}
 	if matched != tc.Expected {
 		return fmt.Errorf("expect %v, got %v", tc.Expected, matched)
 	}
@@ -173,8 +188,7 @@ var testCases = []RuleTestCase{
 func TestRules(t *testing.T) {
 	for idx, tc := range testCases {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
-			err := tc.RunTest(false)
-			if err != nil {
+			if err := tc.RunTest("git"); err != nil {
 				t.Error(tc.Display(), err)
 			}
 		})

@@ -2,6 +2,8 @@ package exclude
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"regexp"
 	"strings"
 
@@ -71,10 +73,56 @@ func MustParseRule(pattern string) *Rule {
 	return rule
 }
 
-func (rule *Rule) Match(path string, useRegex bool) bool {
+func (rule *Rule) Match(path string, useRegex bool) (bool, error) {
 	if useRegex {
-		return rule.Re.MatchString(path)
+		return rule.MatchRegex(path)
 	}
-	m, _ := doublestar.Match(rule.Pattern, path)
-	return m
+	return rule.MatchDoubleStar(path)
+}
+
+func (rule *Rule) MatchRegex(path string) (bool, error) {
+	return rule.Re.MatchString(path), nil
+}
+
+func (rule *Rule) MatchDoubleStar(path string) (bool, error) {
+	return doublestar.Match(rule.Pattern, path)
+}
+
+func (rule *Rule) MatchGit(path string) (bool, error) {
+	tmp, err := os.MkdirTemp("/tmp", "git.*")
+	if err != nil {
+		return false, err
+	}
+	defer os.RemoveAll(tmp)
+	_, err = exec.Command("git", "-C", tmp, "init").Output()
+	if err != nil {
+		return false, err
+	}
+	fd, err := os.Create(tmp + "/.gitignore")
+	if err != nil {
+		return false, err
+	}
+	defer fd.Close()
+	_, err = fd.WriteString(rule.Pattern + "\n")
+	if err != nil {
+		return false, err
+	}
+	fd.Close()
+	out, err := exec.Command("git", "-C", tmp, "check-ignore", path).Output()
+	if err != nil {
+		if exiterr, ok := err.(*exec.ExitError); ok {
+			if exiterr.ExitCode() == 1 {
+				return false, nil
+			}
+		}
+		return false, err
+	}
+	res := strings.TrimSuffix(string(out), "\n")
+
+	switch res {
+	case path:
+		return true, nil
+	default:
+		return false, fmt.Errorf("unexpected output %q", out)
+	}
 }

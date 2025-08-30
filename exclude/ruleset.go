@@ -61,7 +61,7 @@ func (ruleset *RuleSet) AddRulesFromFile(filename string) error {
 
 // Ignore reports whether path (relative or absolute) is ignored.
 // isDir should be true if `path` is a directory (needed for patterns with trailing '/').
-func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule) {
+func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule, error) {
 	//rel := relativeTo(path, ruleset.Root)
 	//rel = strings.TrimLeft(rel, "/") // .gitignore patterns see paths relative to the file
 	rel := path
@@ -73,12 +73,16 @@ func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule) {
 			continue
 		}
 
-		if rule.Match(rel, ruleset.UseRegex) {
+		m, err := rule.Match(rel, ruleset.UseRegex)
+		if err != nil {
+			return false, rule, err
+		}
+		if m {
 			matchedRule = rule
 			matched = !rule.Negate
 			// last match wins; keep scanning
 		}
 	}
 
-	return matched, matchedRule
+	return matched, matchedRule, nil
 }
