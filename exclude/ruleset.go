@@ -72,7 +72,9 @@ func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule, error) {
 		if rule.DirOnly && !isDir {
 			continue
 		}
-
+		if isDir {
+			rel = rel + "/"
+		}
 		m, err := ruleset.Matcher(rule, rel)
 		if err != nil {
 			return false, rule, err
