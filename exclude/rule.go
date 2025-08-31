@@ -19,6 +19,8 @@ type Rule struct {
 	Re       *regexp.Regexp
 }
 
+type RuleMatcher func(*Rule, string) (bool, error)
+
 func ParseRule(pattern string) (*Rule, error) {
 	rule := Rule{}
 	rule.Raw = pattern
@@ -73,22 +75,15 @@ func MustParseRule(pattern string) *Rule {
 	return rule
 }
 
-func (rule *Rule) Match(path string, useRegex bool) (bool, error) {
-	if useRegex {
-		return rule.MatchRegex(path)
-	}
-	return rule.MatchDoubleStar(path)
-}
-
-func (rule *Rule) MatchRegex(path string) (bool, error) {
+func RuleMatchRegex(rule *Rule, path string) (bool, error) {
 	return rule.Re.MatchString(path), nil
 }
 
-func (rule *Rule) MatchDoubleStar(path string) (bool, error) {
+func RuleMatchDoubleStar(rule *Rule, path string) (bool, error) {
 	return doublestar.Match(rule.Pattern, path)
 }
 
-func (rule *Rule) MatchGit(path string) (bool, error) {
+func RuleMatchGit(rule *Rule, path string) (bool, error) {
 	tmp, err := os.MkdirTemp("/tmp", "git.*")
 	if err != nil {
 		return false, err

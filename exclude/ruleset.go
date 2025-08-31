@@ -7,15 +7,15 @@ import (
 )
 
 type RuleSet struct {
-	Root     string
-	Rules    []*Rule
-	UseRegex bool
+	Root    string
+	Rules   []*Rule
+	Matcher RuleMatcher
 }
 
-func NewRuleSet(root string, useRegex bool) *RuleSet {
+func NewRuleSet(root string, matcher RuleMatcher) *RuleSet {
 	return &RuleSet{
-		Root:     toSlashNoTrail(root),
-		UseRegex: useRegex,
+		Root:    toSlashNoTrail(root),
+		Matcher: matcher,
 	}
 }
 
@@ -73,7 +73,7 @@ func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule, error) {
 			continue
 		}
 
-		m, err := rule.Match(rel, ruleset.UseRegex)
+		m, err := ruleset.Matcher(rule, rel)
 		if err != nil {
 			return false, rule, err
 		}
