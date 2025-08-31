@@ -11,11 +11,12 @@ import (
 )
 
 type Rule struct {
-	Negate   bool   // '!' at start
-	DirOnly  bool   // trailing '/'
-	Anchored bool   // leading '/'
-	Pattern  string // resulting pattern
-	Raw      string // original line
+	Negate   bool // '!' at start
+	DirOnly  bool // trailing '/'
+	Anchored bool // contains non-trailing '/'
+
+	Raw      string // original pattern (for git)
+	Globstar string // resulting globstar pattern (for doublestar)
 	Re       *regexp.Regexp
 }
 
@@ -46,23 +47,31 @@ func ParseRule(pattern string) (*Rule, error) {
 		pattern = strings.TrimSuffix(pattern, "/")
 	}
 
-	// Anchored (leading '/')
-	if strings.HasPrefix(pattern, "/") {
+	// Anchored if contains '/')
+	if strings.ContainsRune(pattern, '/') {
 		rule.Anchored = true
 		pattern = strings.TrimPrefix(pattern, "/")
 	}
-	rule.Pattern = pattern
 
+	// Compile to regex
 	var err error
-	rule.Re, err = regexp.Compile(toRegex(rule.Pattern, rule.Anchored))
+	rule.Re, err = regexp.Compile(toRegex(pattern, rule.Anchored))
 	if err != nil {
 		return nil, fmt.Errorf("failed to compile regexp: %w", err)
 	}
 
-	_, err = doublestar.Match(rule.Pattern, "foo")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse dublestar pattern: %w", err)
+	// Tweak for doublestar
+	if !rule.Anchored && !strings.HasPrefix(pattern, "**/") {
+		pattern = "**/" + pattern
 	}
+	if rule.DirOnly {
+		pattern = pattern + "/"
+	}
+	_, err = doublestar.Match(pattern, "foo")
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse doublestar pattern: %w", err)
+	}
+	rule.Globstar = pattern
 
 	return &rule, nil
 }
@@ -80,7 +89,7 @@ func RuleMatchRegex(rule *Rule, path string) (bool, error) {
 }
 
 func RuleMatchDoubleStar(rule *Rule, path string) (bool, error) {
-	return doublestar.Match(rule.Pattern, path)
+	return doublestar.Match(rule.Globstar, path)
 }
 
 func RuleMatchGit(rule *Rule, path string) (bool, error) {
@@ -98,7 +107,7 @@ func RuleMatchGit(rule *Rule, path string) (bool, error) {
 		return false, err
 	}
 	defer fd.Close()
-	_, err = fd.WriteString(rule.Pattern + "\n")
+	_, err = fd.WriteString(rule.Raw + "\n")
 	if err != nil {
 		return false, err
 	}
@@ -110,14 +119,12 @@ func RuleMatchGit(rule *Rule, path string) (bool, error) {
 				return false, nil
 			}
 		}
-		return false, err
+		return rule.Negate, err
 	}
 	res := strings.TrimSuffix(string(out), "\n")
-
-	switch res {
-	case path:
-		return true, nil
-	default:
-		return false, fmt.Errorf("unexpected output %q", out)
+	if res == path {
+		return !rule.Negate, nil
 	}
+
+	return false, fmt.Errorf("unexpected output %q", res)
 }

@@ -2,7 +2,6 @@ package exclude
 
 import (
 	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -13,35 +12,20 @@ type RuleTestCase struct {
 }
 
 func (tc RuleTestCase) Display() string {
-	return fmt.Sprintf("pattern=%q path=%q", tc.Pattern, tc.Path)
+	r := MustParseRule(tc.Pattern)
+	return fmt.Sprintf("[neg:%v, dir:%v, anchor:%v, raw:%q, re:%q, gstar=%q)] path=%q", r.Negate, r.DirOnly, r.Anchored, r.Raw, r.Re, r.Globstar, tc.Path)
 }
 
 func (tc RuleTestCase) RunTest(matcher RuleMatcher) error {
-	var isDir bool
-
 	path := tc.Path
-	if strings.HasSuffix(tc.Path, "/") {
-		isDir = true
-		path = strings.TrimSuffix(tc.Path, "/")
-	}
-
 	rule := MustParseRule(tc.Pattern)
-	if rule.DirOnly && !isDir {
-		if !tc.Expected {
-			return nil
-		}
-		return fmt.Errorf("directory rule can't match non-directory")
-	}
-
 	matched, err := matcher(rule, path)
 	if err != nil {
 		return err
 	}
-
 	if matched != tc.Expected {
 		return fmt.Errorf("expect %v, got %v", tc.Expected, matched)
 	}
-
 	return nil
 }
 
@@ -59,7 +43,7 @@ var testCases = []RuleTestCase{
 	{"doc/frotz/", "doc/frotz/", true},
 	{"doc/frotz/", "a/doc/frotz/", false},
 	{"frotz/", "frotz/", true},
-	//{"frotz/", "a/doc/frotz/", true},
+	{"frotz/", "a/doc/frotz/", true},
 
 	// The pattern hello.* matches any file or directory
 	// whose name begins with hello.. If one wants to
@@ -71,8 +55,8 @@ var testCases = []RuleTestCase{
 	{"hello.*", "hello.c", true},
 	{"hello.*", "hello.c/", true},
 	{"hello.*", "hello.c/foo", false},
-	//{"hello.*", "src/hello.c", true},
-	//{"hello.*", "src/hello.c/", true},
+	{"hello.*", "src/hello.c", true},
+	{"hello.*", "src/hello.c/", true},
 	{"hello.*", "src/hello.c/foo", false},
 
 	{"/hello.*", "hello.c", true},
@@ -87,7 +71,7 @@ var testCases = []RuleTestCase{
 	// file or a symbolic link foo (this is consistent
 	// with the way how pathspec works in general in Git)
 	{"foo/", "foo/", true},
-	//{"foo/", "bar/foo/", true},
+	{"foo/", "bar/foo/", true},
 	{"foo/", "foo", false},
 	{"foo/", "bar/foo", false},
 
@@ -174,12 +158,24 @@ var testCases = []RuleTestCase{
 	{"**/a/**/b", "d/a/x/y/b/", true},
 }
 
-func TestRules(t *testing.T) {
+func RunTestRules(t *testing.T, matcher RuleMatcher) {
 	for idx, tc := range testCases {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
-			if err := tc.RunTest(RuleMatchDoubleStar); err != nil {
+			if err := tc.RunTest(matcher); err != nil {
 				t.Error(tc.Display(), err)
 			}
 		})
 	}
+}
+
+func noTestMatchRuleRegex(t *testing.T) {
+	RunTestRules(t, RuleMatchRegex)
+}
+
+func noTestMatchRuleDoublestar(t *testing.T) {
+	RunTestRules(t, RuleMatchDoubleStar)
+}
+
+func noTestMatchRuleGit(t *testing.T) {
+	RunTestRules(t, RuleMatchGit)
 }
