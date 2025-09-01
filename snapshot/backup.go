@@ -17,13 +17,13 @@ import (
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/gabriel-vasile/mimetype"
-	"github.com/gobwas/glob"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -36,7 +36,7 @@ type BackupIndexes struct {
 
 type BackupContext struct {
 	imp            importer.Importer
-	excludes       []glob.Glob
+	excludes       *exclude.RuleSet
 	maxConcurrency uint64
 
 	scanCache *caching.ScanCache
@@ -120,14 +120,7 @@ func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *
 		return false
 	}
 
-	doExclude := false
-	for _, exclude := range backupCtx.excludes {
-		if exclude.Match(pathname) {
-			doExclude = true
-			break
-		}
-	}
-	return doExclude
+	return backupCtx.excludes.IsExcluded(pathname, record.Record.FileInfo.IsDir())
 }
 
 func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
@@ -648,14 +641,9 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		stateId:        snap.Header.Identifier,
 	}
 
-	for i := range backupOpts.Excludes {
-		g, err := glob.Compile(backupOpts.Excludes[i])
-		if err != nil {
-			err = fmt.Errorf("failed to compile exclude pattern %s: %w",
-				backupOpts.Excludes[i], err)
-			return nil, err
-		}
-		backupCtx.excludes = append(backupCtx.excludes, g)
+	backupCtx.excludes = exclude.NewRuleSet("")
+	if err := backupCtx.excludes.AddRulesFromArray(backupOpts.Excludes); err != nil {
+		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
 
 	if bi, err := snap.makeBackupIndexes(); err != nil {

@@ -4,18 +4,17 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"strings"
 )
 
 type RuleSet struct {
-	Root    string
-	Rules   []*Rule
-	Matcher RuleMatcher
+	Root  string
+	Rules []*Rule
 }
 
-func NewRuleSet(root string, matcher RuleMatcher) *RuleSet {
+func NewRuleSet(root string) *RuleSet {
 	return &RuleSet{
-		Root:    toSlashNoTrail(root),
-		Matcher: matcher,
+		Root: toSlashNoTrail(root),
 	}
 }
 
@@ -59,32 +58,26 @@ func (ruleset *RuleSet) AddRulesFromFile(filename string) error {
 	return ruleset.AddRules(iterFile(filename))
 }
 
-// Ignore reports whether path (relative or absolute) is ignored.
-// isDir should be true if `path` is a directory (needed for patterns with trailing '/').
 func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule, error) {
-	//rel := relativeTo(path, ruleset.Root)
-	//rel = strings.TrimLeft(rel, "/") // .gitignore patterns see paths relative to the file
-	rel := path
+	comps := strings.Split(path, "/")
 
 	var matchedRule *Rule
-	matched := false
+	ignore := false
 	for _, rule := range ruleset.Rules {
-		if rule.DirOnly && !isDir {
-			continue
-		}
-		if isDir {
-			rel = rel + "/"
-		}
-		m, err := ruleset.Matcher(rule, rel)
+		matched, excluded, err := RuleMatch(rule, comps, isDir)
 		if err != nil {
 			return false, rule, err
 		}
-		if m {
+		if matched {
+			ignore = excluded
 			matchedRule = rule
-			matched = !rule.Negate
-			// last match wins; keep scanning
 		}
 	}
 
-	return matched, matchedRule, nil
+	return ignore, matchedRule, nil
+}
+
+func (ruleset *RuleSet) IsExcluded(path string, isDir bool) bool {
+	exclude, _, _ := ruleset.Match(path, isDir)
+	return exclude
 }

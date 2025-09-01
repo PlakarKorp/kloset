@@ -2,6 +2,7 @@ package exclude
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 )
 
@@ -13,19 +14,33 @@ type RuleTestCase struct {
 
 func (tc RuleTestCase) Display() string {
 	r := MustParseRule(tc.Pattern)
-	return fmt.Sprintf("[neg:%v, dir:%v, anchor:%v, raw:%q, re:%q, gstar=%q)] path=%q", r.Negate, r.DirOnly, r.Anchored, r.Raw, r.Re, r.Globstar, tc.Path)
+	//return fmt.Sprintf("[neg:%v, dir:%v, anchor:%v, raw:%q)] path=%q", r.Negate, r.DirOnly, r.Anchored, r.Raw, tc.Path)
+	return fmt.Sprintf("pattern=%q, path=%q", r.Raw, tc.Path)
 }
 
 func (tc RuleTestCase) RunTest(matcher RuleMatcher) error {
-	path := tc.Path
+	path, isDir := strings.CutPrefix(tc.Path, "/")
+	comps := strings.Split(path, "/")
+
 	rule := MustParseRule(tc.Pattern)
-	matched, err := matcher(rule, path)
+
+	// Check what git does
+	expectMatched, expectExcluded, err := RuleMatchGit(rule, comps, isDir)
 	if err != nil {
 		return err
 	}
-	if matched != tc.Expected {
-		return fmt.Errorf("expect %v, got %v", tc.Expected, matched)
+
+	matched, excluded, err := matcher(rule, comps, isDir)
+	if err != nil {
+		return err
 	}
+	if expectMatched != matched {
+		return fmt.Errorf("expect matched %v, got %v", expectMatched, matched)
+	}
+	if expectExcluded != excluded {
+		return fmt.Errorf("expect excluded %v, got %v", expectExcluded, excluded)
+	}
+
 	return nil
 }
 
@@ -168,14 +183,6 @@ func RunTestRules(t *testing.T, matcher RuleMatcher) {
 	}
 }
 
-func noTestMatchRuleRegex(t *testing.T) {
-	RunTestRules(t, RuleMatchRegex)
-}
-
-func noTestMatchRuleDoublestar(t *testing.T) {
-	RunTestRules(t, RuleMatchDoubleStar)
-}
-
-func noTestMatchRuleGit(t *testing.T) {
-	RunTestRules(t, RuleMatchGit)
+func TestMatchRule(t *testing.T) {
+	RunTestRules(t, RuleMatch)
 }

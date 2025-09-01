@@ -2,28 +2,25 @@ package exclude
 
 import (
 	"fmt"
-	"os"
-	"os/exec"
-	"regexp"
 	"strings"
 
-	"github.com/bmatcuk/doublestar/v4"
+	"github.com/go-git/go-git/plumbing/format/gitignore"
 )
 
 type Rule struct {
-	Negate   bool // '!' at start
-	DirOnly  bool // trailing '/'
-	Anchored bool // contains non-trailing '/'
-
-	Raw      string // original pattern (for git)
-	Globstar string // resulting globstar pattern (for doublestar)
-	Re       *regexp.Regexp
+	Raw      string // original pattern
+	Negate   bool   // '!' at start
+	DirOnly  bool   // trailing '/'
+	Anchored bool   // contains non-trailing '/'
+	Path     []string
+	Pattern  gitignore.Pattern
 }
 
-type RuleMatcher func(*Rule, string) (bool, error)
+type RuleMatcher func(*Rule, []string, bool) (bool, bool, error)
 
 func ParseRule(pattern string) (*Rule, error) {
 	rule := Rule{}
+	rule.Pattern = gitignore.ParsePattern(pattern, []string{})
 	rule.Raw = pattern
 
 	// Negation
@@ -52,27 +49,7 @@ func ParseRule(pattern string) (*Rule, error) {
 		rule.Anchored = true
 		pattern = strings.TrimPrefix(pattern, "/")
 	}
-
-	// Compile to regex
-	var err error
-	rule.Re, err = regexp.Compile(toRegex(pattern, rule.Anchored))
-	if err != nil {
-		return nil, fmt.Errorf("failed to compile regexp: %w", err)
-	}
-
-	// Tweak for doublestar
-	if !rule.Anchored && !strings.HasPrefix(pattern, "**/") {
-		pattern = "**/" + pattern
-	}
-	if rule.DirOnly {
-		pattern = pattern + "/"
-	}
-	_, err = doublestar.Match(pattern, "foo")
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse doublestar pattern: %w", err)
-	}
-	rule.Globstar = pattern
-
+	rule.Path = strings.Split(pattern, "/")
 	return &rule, nil
 }
 
@@ -84,47 +61,15 @@ func MustParseRule(pattern string) *Rule {
 	return rule
 }
 
-func RuleMatchRegex(rule *Rule, path string) (bool, error) {
-	return rule.Re.MatchString(path), nil
-}
-
-func RuleMatchDoubleStar(rule *Rule, path string) (bool, error) {
-	return doublestar.Match(rule.Globstar, path)
-}
-
-func RuleMatchGit(rule *Rule, path string) (bool, error) {
-	tmp, err := os.MkdirTemp("/tmp", "git.*")
-	if err != nil {
-		return false, err
+func RuleMatch(rule *Rule, path []string, isDir bool) (bool, bool, error) {
+	switch rule.Pattern.Match(path, isDir) {
+	case gitignore.NoMatch:
+		return false, false, nil
+	case gitignore.Exclude:
+		return true, true, nil
+	case gitignore.Include:
+		return true, false, nil
+	default:
+		return false, false, fmt.Errorf("unexpected result")
 	}
-	defer os.RemoveAll(tmp)
-	_, err = exec.Command("git", "-C", tmp, "init").Output()
-	if err != nil {
-		return false, err
-	}
-	fd, err := os.Create(tmp + "/.gitignore")
-	if err != nil {
-		return false, err
-	}
-	defer fd.Close()
-	_, err = fd.WriteString(rule.Raw + "\n")
-	if err != nil {
-		return false, err
-	}
-	fd.Close()
-	out, err := exec.Command("git", "-C", tmp, "check-ignore", path).Output()
-	if err != nil {
-		if exiterr, ok := err.(*exec.ExitError); ok {
-			if exiterr.ExitCode() == 1 {
-				return false, nil
-			}
-		}
-		return rule.Negate, err
-	}
-	res := strings.TrimSuffix(string(out), "\n")
-	if res == path {
-		return !rule.Negate, nil
-	}
-
-	return false, fmt.Errorf("unexpected output %q", res)
 }
