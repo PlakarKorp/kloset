@@ -7,14 +7,13 @@ require (
 	github.com/PlakarKorp/go-human2duration v0.1.6
 	github.com/cockroachdb/pebble/v2 v2.0.7
 	github.com/dustin/go-humanize v1.0.1
-	github.com/gabriel-vasile/mimetype v1.4.9
+	github.com/gabriel-vasile/mimetype v1.4.10
 	github.com/go-git/go-git v4.7.0+incompatible
-	github.com/gobwas/glob v0.2.3
 	github.com/google/uuid v1.6.0
 	github.com/nickball/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5
 	github.com/pierrec/lz4/v4 v4.1.22
 	github.com/pkg/sftp v1.13.9
-	github.com/stretchr/testify v1.11.0
+	github.com/stretchr/testify v1.11.1
 	github.com/tink-crypto/tink-go/v2 v2.4.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/blake3 v0.2.4
