@@ -5,7 +5,6 @@ import (
 	"io"
 	"iter"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -52,40 +51,6 @@ func trimTrailingSpaces(s string) string {
 	}
 	// Otherwise, drop them.
 	return s[:i]
-}
-
-// Convert path to '/' and remove the trailing one if any
-func toSlashNoTrail(p string) string {
-	if p == "" {
-		return ""
-	}
-	p = filepath.Clean(p)
-	p = filepath.ToSlash(p)
-	if p != "/" {
-		p = strings.TrimRight(p, "/")
-	}
-	return p
-}
-
-func relativeTo(path string, root string) string {
-	path = toSlashNoTrail(path)
-
-	// If it's exactly root, rel is empty
-	if path == root {
-		return ""
-	}
-
-	// If absolute or starts with root, make relative to root
-	if strings.HasPrefix(path, root+"/") {
-		return strings.TrimPrefix(path, root+"/")
-	}
-
-	// If absolute but different root, best effort: strip drive letters and leading slashes
-	if filepath.IsAbs(path) {
-		return strings.TrimLeft(path, "/")
-	}
-
-	return path
 }
 
 func iterArray(a []string) iter.Seq2[string, error] {

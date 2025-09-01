@@ -8,14 +8,11 @@ import (
 )
 
 type RuleSet struct {
-	Root  string
 	Rules []*Rule
 }
 
-func NewRuleSet(root string) *RuleSet {
-	return &RuleSet{
-		Root: toSlashNoTrail(root),
-	}
+func NewRuleSet() *RuleSet {
+	return &RuleSet{}
 }
 
 func (ruleset *RuleSet) AddRule(pattern string) error {

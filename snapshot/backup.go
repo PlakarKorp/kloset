@@ -644,7 +644,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		stateId:        snap.Header.Identifier,
 	}
 
-	backupCtx.excludes = exclude.NewRuleSet("")
+	backupCtx.excludes = exclude.NewRuleSet()
 	if err := backupCtx.excludes.AddRulesFromArray(backupOpts.Excludes); err != nil {
 		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
