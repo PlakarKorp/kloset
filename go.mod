@@ -8,7 +8,7 @@ require (
 	github.com/cockroachdb/pebble/v2 v2.0.7
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gabriel-vasile/mimetype v1.4.10
-	github.com/gobwas/glob v0.2.3
+	github.com/go-git/go-git v4.7.0+incompatible
 	github.com/google/uuid v1.6.0
 	github.com/nickball/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5
 	github.com/pierrec/lz4/v4 v4.1.22
@@ -38,6 +38,7 @@ require (
 	github.com/getsentry/sentry-go v0.31.1 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/snappy v1.0.0 // indirect
+	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/klauspost/cpuid/v2 v2.2.10 // indirect
 	github.com/kr/fs v0.1.0 // indirect
@@ -51,10 +52,15 @@ require (
 	github.com/prometheus/common v0.63.0 // indirect
 	github.com/prometheus/procfs v0.16.0 // indirect
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
+	github.com/src-d/gcfg v1.4.0 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/exp v0.0.0-20250305212735-054e65f0b394 // indirect
+	golang.org/x/net v0.42.0 // indirect
 	golang.org/x/sys v0.35.0 // indirect
 	golang.org/x/text v0.28.0 // indirect
 	google.golang.org/protobuf v1.36.6 // indirect
+	gopkg.in/src-d/go-billy.v4 v4.3.2 // indirect
+	gopkg.in/src-d/go-git.v4 v4.13.1 // indirect
+	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
