@@ -23,6 +23,7 @@ type Blob struct {
 const BLOB_RECORD_SIZE = 56
 
 type EncodingFn func(io.Reader) (io.Reader, error)
+type HashFactory func() hash.Hash
 
 // It is the responsability of the packfile, to return a reader (through
 // serialize) that will produce the expected format as documented below:
@@ -40,7 +41,7 @@ type Packfile interface {
 	Cleanup() error
 }
 
-type PackfileCtor func(hash.Hash) Packfile
+type PackfileCtor func(HashFactory) (Packfile, error)
 
 type Configuration struct {
 	MinSize uint64 `json:"min_size"`

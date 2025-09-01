@@ -118,7 +118,12 @@ func (mgr *seqPackerManager) Run() error {
 					}
 
 					if pfile == nil {
-						pfile = mgr.packfileFactory(mgr.hashFactory())
+						var err error
+						pfile, err = mgr.packfileFactory(mgr.hashFactory)
+						if err != nil {
+							return err
+						}
+
 						mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
 					}
 

@@ -245,7 +245,8 @@ func TestPutPackfile(t *testing.T) {
 	require.NotNil(t, writer)
 
 	// Create a packfile
-	pfile := packfile.NewPackfileInMemory(writer.GetMACHasher())
+	pfile, err := packfile.NewPackfileInMemory(writer.GetMACHasher)
+	require.NoError(t, err)
 	require.NotNil(t, pfile)
 
 	// Test putting a packfile
