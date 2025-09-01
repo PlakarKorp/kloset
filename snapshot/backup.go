@@ -109,18 +109,21 @@ func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC obje
 
 func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *importer.ScanResult) bool {
 	var pathname string
+	var isDir bool
 	switch {
 	case record.Record != nil:
 		pathname = record.Record.Pathname
+		isDir = record.Record.FileInfo.IsDir()
 	case record.Error != nil:
 		pathname = record.Error.Pathname
+		isDir = false
 	}
 
 	if pathname == "/" {
 		return false
 	}
 
-	return backupCtx.excludes.IsExcluded(pathname, record.Record.FileInfo.IsDir())
+	return backupCtx.excludes.IsExcluded(pathname, isDir)
 }
 
 func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {

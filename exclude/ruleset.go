@@ -59,6 +59,7 @@ func (ruleset *RuleSet) AddRulesFromFile(filename string) error {
 }
 
 func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule, error) {
+	path = strings.TrimPrefix(path, "/")
 	comps := strings.Split(path, "/")
 
 	var matchedRule *Rule
