@@ -31,7 +31,7 @@ type Builder struct {
 	Header *header.Header
 }
 
-func Create(repo *repository.Repository, packingStrategy repository.RepositoryType) (*Builder, error) {
+func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string) (*Builder, error) {
 	identifier := objects.RandomMAC()
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
@@ -44,7 +44,7 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 
 		Header: header.NewHeader("default", identifier),
 	}
-	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy)
+	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
 
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
@@ -146,7 +146,7 @@ func (src *Snapshot) Fork() (*Builder, error) {
 	snap.Header.Sources = make([]header.Source, len(src.Header.Sources))
 	copy(snap.Header.Sources, src.Header.Sources)
 
-	snap.repository = src.repository.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy)
+	snap.repository = src.repository.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, "")
 
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity

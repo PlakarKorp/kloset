@@ -38,7 +38,7 @@ func TestNewRepositoryWriter(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 }
 
@@ -63,7 +63,7 @@ func TestBlobExists(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Test blob existence
@@ -92,7 +92,7 @@ func TestPutBlobIfNotExists(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Test putting a blob
@@ -125,7 +125,7 @@ func TestPutBlob(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Test putting a blob
@@ -154,7 +154,7 @@ func TestDeleteStateResource(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Test deleting a state resource
@@ -183,7 +183,7 @@ func TestFlushTransaction(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Test flushing a transaction
@@ -212,7 +212,7 @@ func TestCommitTransaction(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Test committing a transaction
@@ -241,7 +241,7 @@ func TestPutPackfile(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Create a packfile
@@ -275,7 +275,7 @@ func TestPutPtarPackfile(t *testing.T) {
 	require.NotNil(t, scanCache)
 
 	// Create a repository writer
-	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType)
+	writer := repo.NewRepositoryWriter(scanCache, snapshotID, repository.DefaultType, "")
 	require.NotNil(t, writer)
 
 	// Create a packing cache
