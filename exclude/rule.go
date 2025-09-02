@@ -3,7 +3,7 @@ package exclude
 import (
 	"fmt"
 
-	"github.com/go-git/go-git/plumbing/format/gitignore"
+	"github.com/go-git/go-git/v5/plumbing/format/gitignore"
 )
 
 type Rule struct {
