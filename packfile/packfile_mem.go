@@ -95,7 +95,12 @@ func NewInMemoryIndexFromBytes(version versioning.Version, serialized []byte) ([
 	return index, nil
 }
 
-func NewPackfileInMemory(hasher hash.Hash) Packfile {
+func NewPackfileInMemory(hf HashFactory) (Packfile, error) {
+	return newPackfileInMemory(hf()), nil
+}
+
+// Compat constructor, the above one is the public API.
+func newPackfileInMemory(hasher hash.Hash) Packfile {
 	return &PackfileInMemory{
 		hasher: hasher,
 		Blobs:  make([]byte, 0),
@@ -146,7 +151,8 @@ func NewPackfileInMemoryFromBytes(hasher hash.Hash, version versioning.Version, 
 	// we won't read the totalLength again
 	remaining := reader.Len() - FOOTER_SIZE
 
-	p := NewPackfileInMemory(hasher).(*PackfileInMemory)
+	// Fake factory, we know it's safe.
+	p := newPackfileInMemory(hasher).(*PackfileInMemory)
 	p.Footer = footer
 	p.Blobs = data
 	p.hasher.Reset()

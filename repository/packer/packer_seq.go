@@ -82,6 +82,10 @@ func (mgr *seqPackerManager) Run() error {
 
 				if err := mgr.flush(pfile); err != nil {
 					err = fmt.Errorf("failed to flush packer: %w", err)
+
+					// We are already in an error path, no need to account for more.
+					_ = pfile.Cleanup()
+
 					for range packerResultChan {
 					}
 
@@ -91,6 +95,11 @@ func (mgr *seqPackerManager) Run() error {
 				for _, record := range pfile.Entries() {
 					mgr.inflightMACs[record.Type].Delete(record.MAC)
 				}
+
+				// What should we do here? I believe it shouldn't be a hard
+				// error, failing to cleanup ressources isn't going to break
+				// the Backup.
+				_ = pfile.Cleanup()
 			}
 			return nil
 		})
@@ -118,7 +127,12 @@ func (mgr *seqPackerManager) Run() error {
 					}
 
 					if pfile == nil {
-						pfile = mgr.packfileFactory(mgr.hashFactory())
+						var err error
+						pfile, err = mgr.packfileFactory(mgr.hashFactory)
+						if err != nil {
+							return err
+						}
+
 						mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
 					}
 

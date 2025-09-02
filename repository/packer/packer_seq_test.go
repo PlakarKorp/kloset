@@ -23,7 +23,7 @@ func TestNewPackerManager(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	storageConf := storage.NewConfiguration()
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 	flusher := func(pf packfile.Packfile) error { return nil }
 
@@ -35,7 +35,7 @@ func TestPackerManager_InsertIfNotPresent(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	storageConf := storage.NewConfiguration()
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 	flusher := func(pf packfile.Packfile) error { return nil }
 
@@ -79,7 +79,7 @@ func TestPackerManager_Exists(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	storageConf := storage.NewConfiguration()
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 	flusher := func(pf packfile.Packfile) error { return nil }
 
@@ -109,7 +109,7 @@ func TestPackerManager_Exists(t *testing.T) {
 func _TestPackerManager_Put(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	storageConf := storage.NewConfiguration()
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 
@@ -144,7 +144,7 @@ func _TestPackerManager_RunAndWait(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	storageConf := storage.NewConfiguration()
 	storageConf.Packfile.MaxSize = 1000 // Small max size to trigger flushing
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 
@@ -187,7 +187,7 @@ func _TestPackerManager_AddPadding(t *testing.T) {
 	storageConf := storage.NewConfiguration()
 	storageConf.Packfile.MaxSize = 1000 // Small max size to trigger flushing
 	storageConf.Chunking.MinSize = 100  // Set min size for padding
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 
@@ -248,7 +248,7 @@ func _TestPackerManager_Concurrency(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	storageConf := storage.NewConfiguration()
 	storageConf.Packfile.MaxSize = 1000 // Small max size to trigger flushing
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
 
@@ -317,7 +317,7 @@ func _TestPackerManager_ErrorHandling(t *testing.T) {
 	storageConf := storage.NewConfiguration()
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
 	hashFactory := func() hash.Hash { return sha256.New() }
-	packfileFactory := func(hash.Hash) packfile.Packfile { return nil }
+	packfileFactory := func(packfile.HashFactory) (packfile.Packfile, error) { return nil, nil }
 
 	// Create a flusher that returns an error
 	flusher := func(pf packfile.Packfile) error {

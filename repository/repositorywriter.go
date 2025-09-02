@@ -32,7 +32,9 @@ const (
 	PtarType                   = iota
 )
 
-func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType) *RepositoryWriter {
+// If packfileTmpDir is empty, we default to memory based packfiles. It's an
+// upper layer responsability to provide a sane default for this.
+func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType, packfileTmpDir string) *RepositoryWriter {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "NewRepositoryWriter(): %s", time.Since(t0))
@@ -48,7 +50,15 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	case PtarType:
 		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPtarPackfile)
 	default:
-		rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, packfile.NewPackfileInMemory, rw.GetMACHasher, rw.PutPackfile)
+		if packfileTmpDir == "" {
+			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, packfile.NewPackfileInMemory, rw.GetMACHasher, rw.PutPackfile)
+		} else {
+			ondiskPackfileCtor := func(hf packfile.HashFactory) (packfile.Packfile, error) {
+				return packfile.NewPackfileOnDisk(packfileTmpDir, hf)
+			}
+
+			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, ondiskPackfileCtor, rw.GetMACHasher, rw.PutPackfile)
+		}
 	}
 
 	// XXX: Better placement for this

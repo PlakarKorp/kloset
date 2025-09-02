@@ -14,7 +14,7 @@ import (
 func TestPackFile(t *testing.T) {
 	hasher := hmac.New(sha256.New, []byte("testkey"))
 
-	p := NewPackfileInMemory(hasher).(*PackfileInMemory)
+	p := newPackfileInMemory(hasher).(*PackfileInMemory)
 
 	// Define some sample chunks
 	chunk1 := []byte("This is chunk number 1")
