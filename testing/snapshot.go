@@ -132,7 +132,7 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	}
 
 	// create a snapshot
-	builder, err := snapshot.Create(repo, repository.DefaultType)
+	builder, err := snapshot.Create(repo, repository.DefaultType, "")
 	require.NoError(t, err)
 	require.NotNil(t, builder)
 
