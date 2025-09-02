@@ -62,7 +62,7 @@ func (ruleset *RuleSet) Match(path string, isDir bool) (bool, *Rule, error) {
 	var matchedRule *Rule
 	ignore := false
 	for _, rule := range ruleset.Rules {
-		matched, excluded, err := RuleMatch(rule, comps, isDir)
+		matched, excluded, err := rule.Match(comps, isDir)
 		if err != nil {
 			return false, rule, err
 		}
