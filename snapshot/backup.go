@@ -873,6 +873,10 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 		return err
 	}
 
+	if data == nil {
+		return fmt.Errorf("path %q not found in the cache", path)
+	}
+
 	cachedPath, err := objects.NewCachedPathFromBytes(data)
 	if err != nil {
 		return err
