@@ -373,7 +373,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
-		return nil
+		return err
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
@@ -871,6 +871,10 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	data, err := backupCtx.vfsCache.GetCachedPath(path)
 	if err != nil {
 		return err
+	}
+
+	if data == nil {
+		return fmt.Errorf("path %q not found in the cache", path)
 	}
 
 	cachedPath, err := objects.NewCachedPathFromBytes(data)
