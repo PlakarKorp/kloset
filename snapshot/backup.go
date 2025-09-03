@@ -373,7 +373,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
-		return nil
+		return err
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
