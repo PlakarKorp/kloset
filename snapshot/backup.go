@@ -67,6 +67,7 @@ type BackupOptions struct {
 	NoCheckpoint    bool
 	NoCommit        bool
 	CleanupVFSCache bool
+	ForcedTimestamp time.Time
 }
 
 var (
@@ -339,6 +340,12 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
+	}
+
+	if !options.ForcedTimestamp.IsZero() {
+		if options.ForcedTimestamp.Before(time.Now()) {
+			snap.Header.Timestamp = options.ForcedTimestamp.UTC()
+		}
 	}
 
 	snap.Header.GetSource(0).Importer.Origin = origin
