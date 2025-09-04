@@ -16,8 +16,9 @@ import (
 )
 
 type RestoreOptions struct {
-	MaxConcurrency uint64
-	Strip          string
+	MaxConcurrency  uint64
+	Strip           string
+	SkipPermissions bool
 }
 
 type restoreContext struct {
@@ -116,10 +117,14 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
 				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			} else if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
-				err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 			} else {
+				if !opts.SkipPermissions {
+					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
+						err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
+						snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+						return nil
+					}
+				}
 				snap.Event(events.FileOKEvent(snap.Header.Identifier, entrypath, e.Size()))
 			}
 			return nil
@@ -163,19 +168,21 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	wg.Wait()
-	sort.Slice(restoreContext.directories, func(i, j int) bool {
-		di := strings.Count(restoreContext.directories[i].path, "/")
-		dj := strings.Count(restoreContext.directories[j].path, "/")
-		return di > dj
-	})
+	if !opts.SkipPermissions {
+		sort.Slice(restoreContext.directories, func(i, j int) bool {
+			di := strings.Count(restoreContext.directories[i].path, "/")
+			dj := strings.Count(restoreContext.directories[j].path, "/")
+			return di > dj
+		})
 
-	for _, d := range restoreContext.directories {
-		if d.path == "/" {
-			continue // Skip the root directory
-		}
-		if err := exp.SetPermissions(snap.AppContext(), d.path, d.info); err != nil {
-			err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
-			snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, d.path, err.Error()))
+		for _, d := range restoreContext.directories {
+			if d.path == "/" {
+				continue // Skip the root directory
+			}
+			if err := exp.SetPermissions(snap.AppContext(), d.path, d.info); err != nil {
+				err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
+				snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, d.path, err.Error()))
+			}
 		}
 	}
 	return nil
