@@ -343,7 +343,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	if !options.ForcedTimestamp.IsZero() {
-		if options.ForcedTimestamp.After(time.Now()) {
+		if options.ForcedTimestamp.Before(time.Now()) {
 			snap.Header.Timestamp = options.ForcedTimestamp.UTC()
 		}
 	}
