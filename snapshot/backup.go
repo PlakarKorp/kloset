@@ -67,6 +67,7 @@ type BackupOptions struct {
 	NoCheckpoint    bool
 	NoCommit        bool
 	CleanupVFSCache bool
+	ForcedTimestamp time.Time
 }
 
 var (
@@ -341,6 +342,12 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 		return err
 	}
 
+	if !options.ForcedTimestamp.IsZero() {
+		if options.ForcedTimestamp.Before(time.Now()) {
+			snap.Header.Timestamp = options.ForcedTimestamp.UTC()
+		}
+	}
+
 	snap.Header.GetSource(0).Importer.Origin = origin
 	snap.Header.GetSource(0).Importer.Type = typ
 	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
@@ -373,7 +380,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
-		return nil
+		return err
 	}
 
 	snap.Header.Duration = time.Since(beginTime)
@@ -871,6 +878,10 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	data, err := backupCtx.vfsCache.GetCachedPath(path)
 	if err != nil {
 		return err
+	}
+
+	if data == nil {
+		return fmt.Errorf("path %q not found in the cache", path)
 	}
 
 	cachedPath, err := objects.NewCachedPathFromBytes(data)

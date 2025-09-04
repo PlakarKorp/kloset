@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/objects"
@@ -16,15 +17,21 @@ import (
 )
 
 type RestoreOptions struct {
-	MaxConcurrency uint64
-	Strip          string
+	MaxConcurrency  uint64
+	Strip           string
+	SkipPermissions bool
+	ForceCompletion bool
 }
 
 type restoreContext struct {
 	hardlinks      map[string]string
 	hardlinksMutex sync.Mutex
+	pathname       string
 	vfs            *vfs.Filesystem
 	directories    []dirRec
+
+	errors atomic.Uint64
+	force  bool
 }
 
 type dirRec struct {
@@ -32,11 +39,23 @@ type dirRec struct {
 	info *objects.FileInfo
 }
 
+func (ctx *restoreContext) reportFailure(snap *Snapshot, err error, evt events.Event) error {
+	if evt != nil {
+		snap.Event(evt)
+	}
+	ctx.errors.Add(1)
+
+	if ctx.force {
+		return nil
+	}
+	return err
+}
+
 func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, opts *RestoreOptions, restoreContext *restoreContext, wg *errgroup.Group) func(entrypath string, e *vfs.Entry, err error) error {
 	return func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
-			snap.Event(events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			return err
+			evt := events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+			return restoreContext.reportFailure(snap, err, evt)
 		}
 
 		if err := snap.AppContext().Err(); err != nil {
@@ -55,15 +74,16 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			if entrypath != "/" {
 				if err := exp.CreateDirectory(snap.AppContext(), dest); err != nil {
 					err := fmt.Errorf("failed to create directory %q: %w", dest, err)
-					snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-					return err
+					evt := events.DirectoryErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+					return restoreContext.reportFailure(snap, err, evt)
 				}
 			}
 
 			// WalkDir handles recursion so we don’t need to iterate children manually.
-			if entrypath != "/" {
+			if entrypath != restoreContext.pathname {
 				restoreContext.directories = append(restoreContext.directories, dirRec{path: dest, info: e.Stat()})
 			}
+
 			snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, entrypath))
 			return nil
 		}
@@ -72,7 +92,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		if !e.Stat().Mode().IsRegular() {
 			if e.Stat().Mode().Type()&fs.ModeSymlink != 0 {
 				if err := exp.CreateLink(snap.AppContext(), e.SymlinkTarget, dest, exporter.SYMLINK); err != nil {
-					snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, fmt.Sprintf("failed to restore symlink: %s\n", err.Error())))
+					evt := events.FileErrorEvent(snap.Header.Identifier, entrypath,
+						fmt.Sprintf("failed to restore symlink: %s\n", err.Error()))
+					restoreContext.reportFailure(snap, err, evt)
 				}
 			}
 			return nil
@@ -86,7 +108,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				v, ok := restoreContext.hardlinks[key]
 				if ok {
 					if err := exp.CreateLink(snap.AppContext(), v, dest, exporter.HARDLINK); err != nil {
-						snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+						evt := events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+						restoreContext.reportFailure(snap, err, evt)
 					}
 					restoreContext.hardlinksMutex.Unlock()
 					return nil
@@ -95,7 +118,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			rd, err := e.Open(restoreContext.vfs)
 			if err != nil {
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+				restoreContext.reportFailure(snap, err,
+					events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 				return nil
 			}
 			defer rd.Close()
@@ -103,7 +127,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			// Ensure the parent directory exists.
 			if err := exp.CreateDirectory(snap.AppContext(), path.Dir(dest)); err != nil {
 				err := fmt.Errorf("failed to create directory %q: %w", dest, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+				restoreContext.reportFailure(snap, err,
+					events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
 			}
 
 			// Restore the file content.
@@ -115,11 +140,17 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
-			} else if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
-				err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
-				snap.Event(events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+				evt := events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+				restoreContext.reportFailure(snap, err, evt)
 			} else {
+				if !opts.SkipPermissions {
+					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
+						err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
+						evt := events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+						restoreContext.reportFailure(snap, err, evt)
+						return nil
+					}
+				}
 				snap.Event(events.FileOKEvent(snap.Header.Identifier, entrypath, e.Size()))
 			}
 			return nil
@@ -146,7 +177,9 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		hardlinks:      make(map[string]string),
 		hardlinksMutex: sync.Mutex{},
 		vfs:            fs,
+		pathname:       pathname,
 		directories:    make([]dirRec, 0, 256),
+		force:          opts.ForceCompletion,
 	}
 
 	base = path.Clean(base)
@@ -163,20 +196,27 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	wg.Wait()
-	sort.Slice(restoreContext.directories, func(i, j int) bool {
-		di := strings.Count(restoreContext.directories[i].path, "/")
-		dj := strings.Count(restoreContext.directories[j].path, "/")
-		return di > dj
-	})
+	if !opts.SkipPermissions {
+		sort.Slice(restoreContext.directories, func(i, j int) bool {
+			di := strings.Count(restoreContext.directories[i].path, "/")
+			dj := strings.Count(restoreContext.directories[j].path, "/")
+			return di > dj
+		})
 
-	for _, d := range restoreContext.directories {
-		if d.path == "/" {
-			continue // Skip the root directory
+		for _, d := range restoreContext.directories {
+			if err := exp.SetPermissions(snap.AppContext(), d.path, d.info); err != nil {
+				err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
+				snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, d.path, err.Error()))
+			}
 		}
-		if err := exp.SetPermissions(snap.AppContext(), d.path, d.info); err != nil {
-			err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
-			snap.Event(events.DirectoryErrorEvent(snap.Header.Identifier, d.path, err.Error()))
+	}
+
+	if n := restoreContext.errors.Load(); n > 0 {
+		errors := "errors"
+		if n == 1 {
+			errors = "error"
 		}
+		return fmt.Errorf("restoration completed with %v %s", n, errors)
 	}
 	return nil
 }

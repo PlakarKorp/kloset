@@ -1,9 +1,6 @@
 package repository
 
 import (
-	"bytes"
-	"encoding/binary"
-	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -35,7 +32,9 @@ const (
 	PtarType                   = iota
 )
 
-func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType) *RepositoryWriter {
+// If packfileTmpDir is empty, we default to memory based packfiles. It's an
+// upper layer responsability to provide a sane default for this.
+func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType, packfileTmpDir string) *RepositoryWriter {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "NewRepositoryWriter(): %s", time.Since(t0))
@@ -51,7 +50,15 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	case PtarType:
 		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPtarPackfile)
 	default:
-		rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPackfile)
+		if packfileTmpDir == "" {
+			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, packfile.NewPackfileInMemory, rw.GetMACHasher, rw.PutPackfile)
+		} else {
+			ondiskPackfileCtor := func(hf packfile.HashFactory) (packfile.Packfile, error) {
+				return packfile.NewPackfileOnDisk(packfileTmpDir, hf)
+			}
+
+			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, ondiskPackfileCtor, rw.GetMACHasher, rw.PutPackfile)
+		}
 	}
 
 	// XXX: Better placement for this
@@ -182,46 +189,18 @@ func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.
 	return r.state.DeleteResource(Type, mac)
 }
 
-func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
+func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "PutPackfile(%x): %s", r.currentStateID, time.Since(t0))
 	}()
 
-	serializedData, err := pfile.SerializeData()
-	if err != nil {
-		return fmt.Errorf("could not serialize pack file data %s", err.Error())
-	}
-	serializedIndex, err := pfile.SerializeIndex()
-	if err != nil {
-		return fmt.Errorf("could not serialize pack file index %s", err.Error())
-	}
-	serializedFooter, err := pfile.SerializeFooter()
-	if err != nil {
-		return fmt.Errorf("could not serialize pack file footer %s", err.Error())
-	}
-
-	encryptedIndex, err := r.encodeBuffer(serializedIndex)
+	serializedPackfile, mac, err := pfile.Serialize(r.encode)
 	if err != nil {
 		return err
 	}
 
-	encryptedFooter, err := r.encodeBuffer(serializedFooter)
-	if err != nil {
-		return err
-	}
-
-	serializedPackfile := append(serializedData, encryptedIndex...)
-	serializedPackfile = append(serializedPackfile, encryptedFooter...)
-
-	/* it is necessary to track the footer _encrypted_ length */
-	encryptedFooterLength := make([]byte, 4)
-	binary.LittleEndian.PutUint32(encryptedFooterLength, uint32(len(encryptedFooter)))
-	serializedPackfile = append(serializedPackfile, encryptedFooterLength...)
-
-	mac := r.ComputeMAC(serializedPackfile)
-
-	rd, err := storage.Serialize(r.GetMACHasher(), resources.RT_PACKFILE, versioning.GetCurrentVersion(resources.RT_PACKFILE), bytes.NewBuffer(serializedPackfile))
+	rd, err := storage.Serialize(r.GetMACHasher(), resources.RT_PACKFILE, versioning.GetCurrentVersion(resources.RT_PACKFILE), serializedPackfile)
 	if err != nil {
 		return err
 	}
@@ -234,15 +213,15 @@ func (r *RepositoryWriter) PutPackfile(pfile *packfile.PackFile) error {
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
-	for idx, blob := range pfile.Index {
+	for _, blob := range pfile.Entries() {
 		delta := &state.DeltaEntry{
 			Type:    blob.Type,
-			Version: pfile.Index[idx].Version,
+			Version: blob.Version,
 			Blob:    blob.MAC,
 			Location: state.Location{
 				Packfile: mac,
-				Offset:   pfile.Index[idx].Offset,
-				Length:   pfile.Index[idx].Length,
+				Offset:   blob.Offset,
+				Length:   blob.Length,
 			},
 		}
 
