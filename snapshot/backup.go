@@ -1104,8 +1104,6 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 }
 
 func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
-	t0 := time.Now()
-
 	filesiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__file__", "0"), true)
 	for filePath := range filesiter {
 		if err := snap.relinkNodesRecursive(backupCtx, filePath); err != nil {
@@ -1120,7 +1118,6 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 		}
 	}
 
-	fmt.Println("relinked in", time.Since(t0))
 	return nil
 }
 
