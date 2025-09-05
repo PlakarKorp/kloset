@@ -416,6 +416,82 @@ func entropy(data []byte) (float64, [256]float64) {
 	return entropy, freq
 }
 
+func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, rd io.Reader) (objects.MAC, error) {
+	object := objects.NewObject()
+
+	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
+	defer releaseGlobalHasher()
+
+	var cdcOffset uint64
+	var object_t32 objects.MAC
+
+	// Helper function to process a chunk
+	processChunk := func(idx int, data []byte) error {
+		var chunk_t32 objects.MAC
+
+		chunkHasher, releaseChunkHasher := snap.repository.GetPooledMACHasher()
+
+		chunkHasher.Write(data)
+		copy(chunk_t32[:], chunkHasher.Sum(nil))
+		releaseChunkHasher()
+
+		chunk := objects.NewChunk()
+		chunk.ContentMAC = chunk_t32
+		chunk.Length = uint32(len(data))
+
+		object.Chunks = append(object.Chunks, *chunk)
+		cdcOffset += uint64(len(data))
+
+		return snap.repository.PutBlobIfNotExistsWithHint(-1, resources.RT_CHUNK, chunk.ContentMAC, data)
+	}
+
+	chk.Reset(rd)
+	ctx := snap.AppContext()
+	for i := 0; ; i++ {
+		if i%1024 == 0 {
+			if err := ctx.Err(); err != nil {
+				return objects.MAC{}, err
+			}
+		}
+
+		cdcChunk, err := chk.Next()
+		if err != nil && err != io.EOF {
+			return objects.MAC{}, err
+		}
+
+		if cdcChunk != nil {
+			chunkCopy := make([]byte, len(cdcChunk))
+			copy(chunkCopy, cdcChunk)
+
+			objectHasher.Write(chunkCopy)
+
+			if err := processChunk(i, chunkCopy); err != nil {
+				return objects.MAC{}, err
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+
+	object.ContentType = "application/octet-stream"
+
+	copy(object_t32[:], objectHasher.Sum(nil))
+	object.ContentMAC = object_t32
+
+	objectSerialized, err := object.Serialize()
+	if err != nil {
+		return objects.MAC{}, err
+	}
+	objectMAC := snap.repository.ComputeMAC(objectSerialized)
+
+	if err := snap.repository.PutBlobIfNotExistsWithHint(-1, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+		return objects.MAC{}, err
+	}
+
+	return objectMAC, nil
+}
+
 func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader) (*objects.Object, objects.MAC, int64, error) {
 	object := objects.NewObject()
 
@@ -1079,7 +1155,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		resCh := make(chan chunkifyResult, 1)
 
 		go func() {
-			_, mac, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
+			mac, err := snap.chunkifyDirpack(chunker, pr)
 			resCh <- chunkifyResult{mac: mac, err: err}
 		}()
 
