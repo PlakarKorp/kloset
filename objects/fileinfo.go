@@ -12,6 +12,8 @@ import (
 	"github.com/dustin/go-humanize"
 )
 
+// Danger: If you add any fields here, be sure to adapt the Equal and
+// EqualIgnoreSize methods.
 type FileInfo struct {
 	Lname      string      `json:"name" msgpack:"name"`
 	Lsize      int64       `json:"size" msgpack:"size"`
@@ -116,7 +118,9 @@ func (fileinfo *FileInfo) Equal(fi *FileInfo) bool {
 		fileinfo.Lino == fi.Lino &&
 		fileinfo.Luid == fi.Luid &&
 		fileinfo.Lgid == fi.Lgid &&
-		fileinfo.Lnlink == fi.Lnlink
+		fileinfo.Lnlink == fi.Lnlink &&
+		fileinfo.Lusername == fi.Lusername &&
+		fileinfo.Lgroupname == fi.Lgroupname
 }
 
 func (fileinfo *FileInfo) EqualIgnoreSize(fi *FileInfo) bool {
@@ -127,7 +131,9 @@ func (fileinfo *FileInfo) EqualIgnoreSize(fi *FileInfo) bool {
 		fileinfo.Lino == fi.Lino &&
 		fileinfo.Luid == fi.Luid &&
 		fileinfo.Lgid == fi.Lgid &&
-		fileinfo.Lnlink == fi.Lnlink
+		fileinfo.Lnlink == fi.Lnlink &&
+		fileinfo.Lusername == fi.Lusername &&
+		fileinfo.Lgroupname == fi.Lgroupname
 }
 
 func (fileinfo *FileInfo) Type() string {
