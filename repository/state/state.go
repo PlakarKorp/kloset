@@ -684,6 +684,30 @@ func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC
 	}
 }
 
+func (ls *LocalState) GetPackfilesForBlob(Type resources.Type, blobMAC objects.MAC) ([]objects.MAC, error) {
+	out := []objects.MAC{}
+
+	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
+		de, err := DeltaEntryFromBytes(buf)
+
+		if err != nil {
+			return nil, err
+		}
+
+		ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+		if err != nil {
+			return nil, err
+		}
+
+		deleted, _ := ls.HasDeletedResource(resources.RT_PACKFILE, de.Location.Packfile)
+		if ok && !deleted {
+			out = append(out, de.Location.Packfile)
+		}
+	}
+
+	return out, nil
+}
+
 func (ls *LocalState) PutPackfile(stateId, packfile objects.MAC) error {
 	pe := PackfileEntry{
 		StateID:   stateId,
