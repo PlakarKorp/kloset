@@ -840,6 +840,8 @@ func (r *Repository) RemoveDeletedPackfile(packfileMAC objects.MAC) error {
 	return r.state.DelDeletedResource(resources.RT_PACKFILE, packfileMAC)
 }
 
+// This is the function you are looking for, it'll give you access to a blob
+// from one of the packfile that includes it....
 func (r *Repository) GetPackfileForBlob(Type resources.Type, mac objects.MAC) (objects.MAC, bool, error) {
 	t0 := time.Now()
 	defer func() {
@@ -849,6 +851,20 @@ func (r *Repository) GetPackfileForBlob(Type resources.Type, mac objects.MAC) (o
 	packfile, exists, err := r.state.GetSubpartForBlob(Type, mac)
 
 	return packfile.Packfile, exists, err
+}
+
+// ... This function exists _mainly_ for the maintenance code which needs an
+// exhaustive view of blobs situation in packfiles. If a blob is in usage, we
+// can not delete any of the packfiles that contains it, because we don't
+// really control which packfile the state will serve a blob from (at least for
+// now).
+func (r *Repository) GetPackfilesForBlob(Type resources.Type, mac objects.MAC) ([]objects.MAC, error) {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "GetPackfileForBlob(%x): %s", mac, time.Since(t0))
+	}()
+
+	return r.state.GetPackfilesForBlob(Type, mac)
 }
 
 func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize uint32) iter.Seq2[[]byte, error] {
