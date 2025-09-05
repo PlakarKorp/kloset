@@ -5,10 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/fs"
 	"iter"
 	"math"
 	"mime"
+	"os"
 	"path"
 	"strings"
 	"sync/atomic"
@@ -1008,36 +1008,38 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 		return nil
 	}
 
-	fileEntry := vfs.NewEntry(path.Dir(parentDir), &importer.ScanRecord{
+	dirEntry := vfs.NewEntry(path.Dir(parentDir), &importer.ScanRecord{
 		Pathname: parentDir,
 		FileInfo: objects.FileInfo{
 			Lname:    path.Base(parentDir),
-			Lmode:    fs.ModeDir | 0550,
-			Lsize:    0,
+			Lmode:    os.ModeDir | 0750,
 			LmodTime: time.Unix(0, 0).UTC(),
 		},
 	})
 
-	backupCtx.recordEntry(fileEntry)
+	if err := backupCtx.recordEntry(dirEntry); err != nil {
+		return err
+	}
 	if parentDir == pathname {
 		return nil
 	}
+
 	return snap.relinkNodesRecursive(backupCtx, parentDir)
 }
 
 func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 	t0 := time.Now()
 
-	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
-	for dirPath := range diriter {
-		if err := snap.relinkNodesRecursive(backupCtx, dirPath); err != nil {
+	filesiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__file__", "0"), true)
+	for filePath := range filesiter {
+		if err := snap.relinkNodesRecursive(backupCtx, filePath); err != nil {
 			return err
 		}
 	}
 
-	filesiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__file__", "0"), true)
-	for filePath := range filesiter {
-		if err := snap.relinkNodesRecursive(backupCtx, filePath); err != nil {
+	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
+	for dirPath := range diriter {
+		if err := snap.relinkNodesRecursive(backupCtx, dirPath); err != nil {
 			return err
 		}
 	}
