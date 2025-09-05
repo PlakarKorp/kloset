@@ -134,6 +134,17 @@ func getPackfileForBlobWithError(snap *Snapshot, res resources.Type, mac objects
 	}
 }
 
+func getPackfileForBlobWithErrorWithKey(snap *Snapshot, at string, res resources.Type, mac objects.MAC) (objects.MAC, error) {
+	packfile, exists, err := snap.repository.GetPackfileForBlob(res, mac)
+	if err != nil {
+		return objects.MAC{}, fmt.Errorf("Error %s while trying to locate packfile for blob %x of type %s for key %s", err, mac, res, at)
+	} else if !exists {
+		return objects.MAC{}, fmt.Errorf("Could not find packfile for blob %x of type %s for key %s", mac, res, at)
+	} else {
+		return packfile, nil
+	}
+}
+
 func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 	pvfs, err := snap.Filesystem()
 	if err != nil {
@@ -163,8 +174,8 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				return
 			}
 
-			for _, entry := range node.Values {
-				if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_ENTRY, entry)) {
+			for i, entry := range node.Values {
+				if !yield(getPackfileForBlobWithErrorWithKey(snap, node.Keys[i], resources.RT_VFS_ENTRY, entry)) {
 					return
 				}
 
