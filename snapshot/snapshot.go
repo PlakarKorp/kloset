@@ -238,6 +238,9 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		// Lastly going over the indexes.
+		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.Sources[0].Indexes[0].Value)) {
+			return
+		}
 		tree, err := snap.ContentTypeIdx()
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
@@ -256,6 +259,9 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		dirpack, err := snap.DirPack()
+		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.Sources[0].Indexes[1].Value)) {
+			return
+		}
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
 				return
@@ -273,6 +279,19 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				for _, dirpackObject := range node.Values {
 					if !yield(getPackfileForBlobWithError(snap, resources.RT_OBJECT, dirpackObject)) {
 						return
+					}
+
+					obj, err := snap.LookupObject(dirpackObject)
+					if err != nil {
+						if !yield(objects.MAC{}, fmt.Errorf("Failed to lookup dirpack object %x: %s", dirpackObject, err)) {
+							return
+						}
+					}
+
+					for _, chunk := range obj.Chunks {
+						if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
+							return
+						}
 					}
 				}
 			}
