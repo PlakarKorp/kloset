@@ -416,6 +416,112 @@ func entropy(data []byte) (float64, [256]float64) {
 	return entropy, freq
 }
 
+func (snap *Builder) chunkifyDirpack(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader) (*objects.Object, objects.MAC, int64, error) {
+	object := objects.NewObject()
+
+	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
+	defer releaseGlobalHasher()
+
+	var cdcOffset uint64
+	var object_t32 objects.MAC
+
+	var totalEntropy float64
+	var totalFreq [256]float64
+	var totalDataSize int64
+
+	// Helper function to process a chunk
+	processChunk := func(idx int, data []byte) error {
+		var chunk_t32 objects.MAC
+
+		chunkHasher, releaseChunkHasher := snap.repository.GetPooledMACHasher()
+		if idx == 0 {
+			if object.ContentType == "" {
+				object.ContentType = mimetype.Detect(data).String()
+			}
+		}
+
+		chunkHasher.Write(data)
+		copy(chunk_t32[:], chunkHasher.Sum(nil))
+		releaseChunkHasher()
+
+		entropyScore, freq := entropy(data)
+		if len(data) > 0 {
+			for i := range 256 {
+				totalFreq[i] += freq[i]
+			}
+		}
+		chunk := objects.NewChunk()
+		chunk.ContentMAC = chunk_t32
+		chunk.Length = uint32(len(data))
+		chunk.Entropy = entropyScore
+
+		object.Chunks = append(object.Chunks, *chunk)
+		cdcOffset += uint64(len(data))
+
+		totalEntropy += chunk.Entropy * float64(len(data))
+		totalDataSize += int64(len(data))
+
+		return snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_CHUNK, chunk.ContentMAC, data)
+	}
+
+	chk.Reset(rd)
+	ctx := snap.AppContext()
+	for i := 0; ; i++ {
+		if i%1024 == 0 {
+			if err := ctx.Err(); err != nil {
+				return nil, objects.MAC{}, -1, err
+			}
+		}
+
+		cdcChunk, err := chk.Next()
+		if err != nil && err != io.EOF {
+			return nil, objects.MAC{}, -1, err
+		}
+
+		if cdcChunk != nil {
+			chunkCopy := make([]byte, len(cdcChunk))
+			copy(chunkCopy, cdcChunk)
+
+			objectHasher.Write(chunkCopy)
+
+			if err := processChunk(i, chunkCopy); err != nil {
+				return nil, objects.MAC{}, -1, err
+			}
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+
+	if totalDataSize > 0 {
+		object.Entropy = totalEntropy / float64(totalDataSize)
+	} else {
+		object.Entropy = 0.0
+	}
+
+	if object.ContentType == "" {
+		object.ContentType = mime.TypeByExtension(path.Ext(pathname))
+		if object.ContentType == "" {
+			object.ContentType = "application/octet-stream"
+		}
+	}
+
+	copy(object_t32[:], objectHasher.Sum(nil))
+	object.ContentMAC = object_t32
+
+	objectSerialized, err := object.Serialize()
+	if err != nil {
+		return nil, objects.MAC{}, -1, err
+	}
+	objectMAC := snap.repository.ComputeMAC(objectSerialized)
+
+	if err := snap.repository.PutBlobWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+		return nil, objects.MAC{}, -1, err
+	}
+
+	return object, objectMAC, totalDataSize, nil
+}
+
 func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader) (*objects.Object, objects.MAC, int64, error) {
 	object := objects.NewObject()
 
@@ -1079,7 +1185,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		resCh := make(chan chunkifyResult, 1)
 
 		go func() {
-			_, mac, _, err := snap.chunkify(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
+			_, mac, _, err := snap.chunkifyDirpack(-1, chunker, fmt.Sprintf("dirpack:%s", dirPath), pr)
 			resCh <- chunkifyResult{mac: mac, err: err}
 		}()
 
