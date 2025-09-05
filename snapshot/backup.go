@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"iter"
 	"math"
 	"mime"
@@ -819,6 +820,10 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 }
 
 func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
+	if err := snap.relinkNodes(backupCtx); err != nil {
+		return nil, nil, nil, err
+	}
+
 	vfsHeader, summary, err := snap.persistVFS(backupCtx)
 	if err != nil {
 		return nil, nil, nil, err
@@ -990,6 +995,55 @@ func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) er
 	_, err := w.Write(mac[:])
 	return err
 
+}
+
+func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname string) error {
+	parentDir := path.Dir(pathname)
+
+	item, err := backupCtx.scanCache.GetDirectory(0, parentDir)
+	if err != nil {
+		return err
+	}
+	if item != nil {
+		return nil
+	}
+
+	fileEntry := vfs.NewEntry(path.Dir(parentDir), &importer.ScanRecord{
+		Pathname: parentDir,
+		FileInfo: objects.FileInfo{
+			Lname:    path.Base(parentDir),
+			Lmode:    fs.ModeDir | 0550,
+			Lsize:    0,
+			LmodTime: time.Unix(0, 0).UTC(),
+		},
+	})
+
+	backupCtx.recordEntry(fileEntry)
+	if parentDir == pathname {
+		return nil
+	}
+	return snap.relinkNodesRecursive(backupCtx, parentDir)
+}
+
+func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
+	t0 := time.Now()
+
+	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
+	for dirPath := range diriter {
+		if err := snap.relinkNodesRecursive(backupCtx, dirPath); err != nil {
+			return err
+		}
+	}
+
+	filesiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__file__", "0"), true)
+	for filePath := range filesiter {
+		if err := snap.relinkNodesRecursive(backupCtx, filePath); err != nil {
+			return err
+		}
+	}
+
+	fmt.Println("relinked in", time.Since(t0))
+	return nil
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
