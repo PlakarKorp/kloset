@@ -977,16 +977,17 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 // unsigned integer and the data follows, all without padding.
 func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) error {
 	mac := builder.repository.ComputeMAC(data)
-	tot := len(data) + len(mac)
-	if tot > math.MaxUint32 {
+	overflowCheck := uint64(len(data)) + uint64(len(mac))
+	if overflowCheck > math.MaxUint32 {
 		return ErrOutOfRange
 	}
 
+	tot := uint32(overflowCheck)
 	endian := binary.LittleEndian
 	if err := binary.Write(w, endian, typ); err != nil {
 		return err
 	}
-	if err := binary.Write(w, endian, uint32(tot)); err != nil {
+	if err := binary.Write(w, endian, tot); err != nil {
 		return err
 	}
 	if _, err := w.Write(data); err != nil {
