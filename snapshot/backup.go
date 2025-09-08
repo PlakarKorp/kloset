@@ -442,7 +442,10 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, rd io.Reader) (objec
 		object.Chunks = append(object.Chunks, *chunk)
 		cdcOffset += uint64(len(data))
 
-		return snap.repository.PutBlobIfNotExistsWithHint(-1, resources.RT_CHUNK, chunk.ContentMAC, data)
+		// It's safe to pin to 0 here, we are not chunkifying files
+		// concurrently so there will be no interleaving, and that means we get
+		// the dirpack's chunk and Object entries in a sequence.
+		return snap.repository.PutBlobIfNotExistsWithHint(0, resources.RT_CHUNK, chunk.ContentMAC, data)
 	}
 
 	chk.Reset(rd)
@@ -485,7 +488,10 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, rd io.Reader) (objec
 	}
 	objectMAC := snap.repository.ComputeMAC(objectSerialized)
 
-	if err := snap.repository.PutBlobIfNotExistsWithHint(-1, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+	// chunkify has only PutBlobWithHint() because the Exists() test is done
+	// _beforehand_, in the dirpack case we do not do the caching layer at all
+	// so we need to do the deduplication here.
+	if err := snap.repository.PutBlobIfNotExistsWithHint(0, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
 		return objects.MAC{}, err
 	}
 
