@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
@@ -134,10 +135,29 @@ func getPackfileForBlobWithError(snap *Snapshot, res resources.Type, mac objects
 	}
 }
 
+func getPackfileForBlobWithErrorWithKey(snap *Snapshot, at string, res resources.Type, mac objects.MAC) (objects.MAC, error) {
+	packfile, exists, err := snap.repository.GetPackfileForBlob(res, mac)
+	if err != nil {
+		return objects.MAC{}, fmt.Errorf("Error %s while trying to locate packfile for blob %x of type %s for key %s", err, mac, res, at)
+	} else if !exists {
+		return objects.MAC{}, fmt.Errorf("Could not find packfile for blob %x of type %s for key %s", mac, res, at)
+	} else {
+		return packfile, nil
+	}
+}
+
 func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 	pvfs, err := snap.Filesystem()
 	if err != nil {
 		return nil, err
+	}
+
+	// Sanity check, first let's verify that we know about everything in this
+	// snapshot otherwise we abort.
+	indexes := slices.Sorted(snap.ListIndexes())
+	expected := []string{"content-type", "dirpack"}
+	if !slices.Equal(indexes, expected) {
+		return nil, fmt.Errorf("Unexpected indexes found, snapshot might have been created with a more recent version.")
 	}
 
 	return func(yield func(objects.MAC, error) bool) {
@@ -163,8 +183,8 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				return
 			}
 
-			for _, entry := range node.Values {
-				if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_ENTRY, entry)) {
+			for i, entry := range node.Values {
+				if !yield(getPackfileForBlobWithErrorWithKey(snap, node.Keys[i], resources.RT_VFS_ENTRY, entry)) {
 					return
 				}
 
@@ -226,7 +246,6 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
-		// Lastly going over the indexes.
 		tree, err := snap.ContentTypeIdx()
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
@@ -235,6 +254,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		if tree != nil {
+			// We know it exists at this point so no need to check for found
+			ctRoot, _ := snap.ContentTypeIdxRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, ctRoot)) {
+				return
+			}
+
 			indexIter := tree.IterDFS()
 			for indexIter.Next() {
 				mac, _ := indexIter.Current()
@@ -252,6 +277,11 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		if dirpack != nil {
+			dirpackRoot, _ := snap.DirPackRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, dirpackRoot)) {
+				return
+			}
+
 			indexIter := dirpack.IterDFS()
 			for indexIter.Next() {
 				mac, node := indexIter.Current()
@@ -262,6 +292,19 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				for _, dirpackObject := range node.Values {
 					if !yield(getPackfileForBlobWithError(snap, resources.RT_OBJECT, dirpackObject)) {
 						return
+					}
+
+					obj, err := snap.LookupObject(dirpackObject)
+					if err != nil {
+						if !yield(objects.MAC{}, fmt.Errorf("Failed to lookup dirpack object %x: %s", dirpackObject, err)) {
+							return
+						}
+					}
+
+					for _, chunk := range obj.Chunks {
+						if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
+							return
+						}
 					}
 				}
 			}
