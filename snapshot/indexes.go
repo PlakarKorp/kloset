@@ -19,8 +19,12 @@ func (snap *Snapshot) getidx(name, kind string) (objects.MAC, bool) {
 	return objects.MAC{}, false
 }
 
+func (snap *Snapshot) ContentTypeIdxRoot() (objects.MAC, bool) {
+	return snap.getidx("content-type", "btree")
+}
+
 func (snap *Snapshot) ContentTypeIdx() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
-	mac, found := snap.getidx("content-type", "btree")
+	mac, found := snap.ContentTypeIdxRoot()
 	if !found {
 		return nil, nil
 	}
@@ -37,8 +41,12 @@ func (snap *Snapshot) ContentTypeIdx() (*btree.BTree[string, objects.MAC, object
 	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
 }
 
+func (snap *Snapshot) DirPackRoot() (objects.MAC, bool) {
+	return snap.getidx("dirpack", "btree")
+}
+
 func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
-	mac, found := snap.getidx("dirpack", "btree")
+	mac, found := snap.DirPackRoot()
 	if !found {
 		return nil, nil
 	}

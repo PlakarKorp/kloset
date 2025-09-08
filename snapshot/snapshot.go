@@ -238,9 +238,6 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		// Lastly going over the indexes.
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.Sources[0].Indexes[0].Value)) {
-			return
-		}
 		tree, err := snap.ContentTypeIdx()
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
@@ -249,6 +246,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		if tree != nil {
+			// We know it exists at this point so no need to check for found
+			ctRoot, _ := snap.ContentTypeIdxRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, ctRoot)) {
+				return
+			}
+
 			indexIter := tree.IterDFS()
 			for indexIter.Next() {
 				mac, _ := indexIter.Current()
@@ -259,9 +262,6 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		dirpack, err := snap.DirPack()
-		if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, snap.Header.Sources[0].Indexes[1].Value)) {
-			return
-		}
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
 				return
@@ -269,6 +269,11 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		}
 
 		if dirpack != nil {
+			dirpackRoot, _ := snap.DirPackRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, dirpackRoot)) {
+				return
+			}
+
 			indexIter := dirpack.IterDFS()
 			for indexIter.Next() {
 				mac, node := indexIter.Current()
