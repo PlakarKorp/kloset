@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"bytes"
+	"iter"
 	"strings"
 
 	"github.com/PlakarKorp/kloset/btree"
@@ -17,6 +18,17 @@ func (snap *Snapshot) getidx(name, kind string) (objects.MAC, bool) {
 		}
 	}
 	return objects.MAC{}, false
+}
+
+func (snap *Snapshot) ListIndexes() iter.Seq[string] {
+	source := snap.Header.GetSource(0)
+	return func(yield func(string) bool) {
+		for i := range source.Indexes {
+			if !yield(source.Indexes[i].Name) {
+				return
+			}
+		}
+	}
 }
 
 func (snap *Snapshot) ContentTypeIdxRoot() (objects.MAC, bool) {

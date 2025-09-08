@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
@@ -151,6 +152,14 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 		return nil, err
 	}
 
+	// Sanity check, first let's verify that we know about everything in this
+	// snapshot otherwise we abort.
+	indexes := slices.Sorted(snap.ListIndexes())
+	expected := []string{"content-type", "dirpack"}
+	if !slices.Equal(indexes, expected) {
+		return nil, fmt.Errorf("Unexpected indexes found, snapshot might have been created with a more recent version.")
+	}
+
 	return func(yield func(objects.MAC, error) bool) {
 		if !yield(getPackfileForBlobWithError(snap, resources.RT_SNAPSHOT, snap.Header.Identifier)) {
 			return
@@ -237,7 +246,6 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
-		// Lastly going over the indexes.
 		tree, err := snap.ContentTypeIdx()
 		if err != nil {
 			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
