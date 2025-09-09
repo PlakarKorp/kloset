@@ -33,7 +33,7 @@ const (
 )
 
 // If packfileTmpDir is empty, we default to memory based packfiles. It's an
-// upper layer responsability to provide a sane default for this.
+// upper layer responsibility to provide a sane default for this.
 func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MAC, typ RepositoryType, packfileTmpDir string) *RepositoryWriter {
 	t0 := time.Now()
 	defer func() {
@@ -112,7 +112,7 @@ func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MA
 		return err
 	}
 
-	/* We are commiting the transaction, publish the new state to our local aggregated state. */
+	/* We are committing the transaction, publish the new state to our local aggregated state. */
 	return r.state.PutState(id)
 }
 
