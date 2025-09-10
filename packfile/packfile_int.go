@@ -25,7 +25,7 @@ const BLOB_RECORD_SIZE = 56
 type EncodingFn func(io.Reader) (io.Reader, error)
 type HashFactory func() hash.Hash
 
-// It is the responsability of the packfile, to return a reader (through
+// It is the responsibility of the packfile, to return a reader (through
 // serialize) that will produce the expected format as documented below:
 //
 // - 0....N Blob bytes (encoded individually)

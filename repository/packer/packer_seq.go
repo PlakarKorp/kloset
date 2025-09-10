@@ -97,7 +97,7 @@ func (mgr *seqPackerManager) Run() error {
 				}
 
 				// What should we do here? I believe it shouldn't be a hard
-				// error, failing to cleanup ressources isn't going to break
+				// error, failing to cleanup resources isn't going to break
 				// the Backup.
 				_ = pfile.Cleanup()
 			}
