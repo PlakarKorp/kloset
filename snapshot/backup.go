@@ -770,6 +770,7 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 	if !same {
 		return nil, nil
 	}
+	record.FileInfo = pathinfo.FileInfo
 	return pathinfo, nil
 }
 
