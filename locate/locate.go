@@ -303,7 +303,9 @@ func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]str
 		if pp.Keep == 0 {
 			windowKeys = make(map[string]any)
 			for _, s := range filtered {
-				windowKeys[period.Key(s.Timestamp)] = struct{}{}
+				if period.Key(period.Start(s.Timestamp)) == period.Key(s.Timestamp) {
+					windowKeys[period.Key(s.Timestamp)] = struct{}{}
+				}
 			}
 		} else {
 			windowKeys = period.LastNKeys(now, pp.Keep)
