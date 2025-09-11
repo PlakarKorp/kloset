@@ -1061,7 +1061,7 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) error {
 	mac := builder.repository.ComputeMAC(data)
 	overflowCheck := uint64(len(data)) + uint64(len(mac))
-	if overflowCheck > math.MaxUint32 {
+	if overflowCheck > uint64(math.MaxUint32) {
 		return ErrOutOfRange
 	}
 
