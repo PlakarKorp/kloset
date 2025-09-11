@@ -130,7 +130,7 @@ func TestWeekdayPeriod_MondayAlignAndPrev(t *testing.T) {
 	}
 
 	// Use the aligned start when checking the key
-	if got, want := Mondays.Key(start), "2025-08-25-monday"; got != want {
+	if got, want := Mondays.Key(start), "2025-W35-monday"; got != want {
 		t.Fatalf("Mondays.Key: got %q want %q", got, want)
 	}
 }
@@ -150,7 +150,7 @@ func TestWeekdayPeriod_ThursdayWeekBoundary(t *testing.T) {
 		t.Fatalf("Thursdays.Prev boundary: got %v want %v", prev, wantPrev)
 	}
 	// Use the aligned start when checking the key
-	if got, want := Thursdays.Key(start), "2026-01-01-thursday"; got != want {
+	if got, want := Thursdays.Key(start), "2026-W01-thursday"; got != want {
 		t.Fatalf("Thursdays.Key: got %q want %q", got, want)
 	}
 }
@@ -160,9 +160,9 @@ func TestLastNKeys_Weekday_Monday(t *testing.T) {
 	keys := Mondays.LastNKeys(now, 3)
 
 	want := map[string]struct{}{
-		"2025-08-25-monday": {},
-		"2025-08-18-monday": {},
-		"2025-08-11-monday": {},
+		"2025-W35-monday": {},
+		"2025-W34-monday": {},
+		"2025-W33-monday": {},
 	}
 	if len(keys) != len(want) {
 		t.Fatalf("LastNKeys Monday len: got %d want %d", len(keys), len(want))

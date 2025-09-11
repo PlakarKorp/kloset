@@ -87,6 +87,9 @@ var Years = Period{
 func (period Period) LastNKeys(now time.Time, n int) map[string]any {
 	keys := make(map[string]any)
 	cur := period.Start(now)
+	if cur.After(now) {
+		cur = period.Prev(cur)
+	}
 	for range n {
 		keys[period.Key(cur)] = nil
 		cur = period.Prev(cur)
@@ -98,7 +101,11 @@ func WeekdayPeriod(target time.Weekday) Period {
 	name := strings.ToLower(target.String())
 	return Period{
 		Name: name,
-		Key:  func(t time.Time) string { return t.UTC().Format("2006-01-02") + "-" + name },
+		Key: func(t time.Time) string {
+			y, w := t.UTC().ISOWeek()
+			weekday := strings.ToLower(t.UTC().Weekday().String())
+			return fmt.Sprintf("%04d-W%02d-%s", y, w, weekday)
+		},
 		Start: func(t time.Time) time.Time {
 			ut := Days.Start(t) // 00:00:00Z of the day
 			wd := int(ut.Weekday())
