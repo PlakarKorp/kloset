@@ -98,6 +98,25 @@ func persistVFS(src *Snapshot, dst *Builder, fs *vfs.Filesystem, ctidx *btree.BT
 	}
 }
 
+func persistDirpackIdx(src *Snapshot, dst *Builder) func(objects.MAC) (objects.MAC, error) {
+	return func(mac objects.MAC) (objects.MAC, error) {
+		object, err := src.LookupObject(mac)
+		if err != nil {
+			return objects.MAC{}, err
+		}
+
+		objectMac := mac
+		if !dst.repository.BlobExists(resources.RT_OBJECT, mac) {
+			objectMac, err = persistObject(src, dst, object)
+			if err != nil {
+				return objects.MAC{}, nil
+			}
+		}
+
+		return objectMac, nil
+	}
+}
+
 func persistErrors(src *Snapshot, dst *Builder) func(objects.MAC) (objects.MAC, error) {
 	return func(mac objects.MAC) (objects.MAC, error) {
 		data, err := src.repository.GetBlobBytes(resources.RT_ERROR_ENTRY, mac)
@@ -191,12 +210,36 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	ctsum, err := persistIndex(dst, ctidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 		return mac, nil
 	})
+	if err != nil {
+		return err
+	}
+
 	dst.Header.GetSource(0).Indexes = []header.Index{
 		{
 			Name:  "content-type",
 			Type:  "btree",
 			Value: ctsum,
 		},
+	}
+
+	dirpackidx, err := src.DirPack()
+	if err != nil {
+		return err
+	}
+
+	if dirpackidx != nil {
+		dirpackSum, err := persistIndex(dst, dirpackidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, persistDirpackIdx(src, dst))
+		if err != nil {
+			return err
+		}
+
+		dst.Header.GetSource(0).Indexes = append(dst.Header.GetSource(0).Indexes,
+			header.Index{
+				Name:  "dirpack",
+				Type:  "btree",
+				Value: dirpackSum,
+			},
+		)
 	}
 
 	return nil
