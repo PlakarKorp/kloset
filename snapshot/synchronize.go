@@ -125,7 +125,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	return results, nil
 }
 
-func (src *Snapshot) Synchronize(dst *Builder) error {
+func (src *Snapshot) Synchronize(dst *Builder, commit bool) error {
 	if src.Header.Identity.Identifier != uuid.Nil {
 		data, err := src.repository.GetBlobBytes(resources.RT_SIGNATURE, src.Header.Identifier)
 		if err != nil {
@@ -173,10 +173,10 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	return dst.ingestSync(imp, &BackupOptions{
 		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
 		CleanupVFSCache: true,
-	})
+	}, commit)
 }
 
-func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions) error {
+func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commit bool) error {
 	done, err := snap.Lock()
 	if err != nil {
 		snap.repository.PackerManager.Wait()
@@ -225,5 +225,5 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions) error
 		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
-	return snap.Commit(backupCtx, true)
+	return snap.Commit(backupCtx, commit)
 }
