@@ -101,6 +101,10 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 
 		i = 0
 		if err := p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
+			if err != nil {
+				return err
+			}
+
 			if i%1024 == 0 {
 				if ctx.Err() != nil {
 					return ctx.Err()
