@@ -140,6 +140,10 @@ func persistXattrs(src *Snapshot, dst *Builder, fs *vfs.Filesystem) func(objects
 		}
 
 		xattr.Object, err = persistObject(src, dst, xattr.ResolvedObject)
+		if err != nil {
+			return objects.MAC{}, err
+		}
+
 		serialized, err := xattr.ToBytes()
 		if err != nil {
 			return objects.MAC{}, err
@@ -181,6 +185,9 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	vfs, errors, xattrs := fs.BTrees()
 
 	ctidx, err := btree.New(&btree.InMemoryStore[string, objects.MAC]{}, strings.Compare, 50)
+	if err != nil {
+		return err
+	}
 
 	dst.Header.GetSource(0).VFS.Root, err = persistIndex(dst, vfs, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, persistVFS(src, dst, fs, ctidx))
