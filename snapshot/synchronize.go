@@ -1,140 +1,55 @@
 package snapshot
 
 import (
+	"bytes"
+	"context"
 	"fmt"
-	"strings"
+	"io"
+	"os"
+	"time"
 
-	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/snapshot/header"
+	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
+	"github.com/pkg/xattr"
 )
 
-func persistObject(src *Snapshot, dst *Builder, object *objects.Object) (objects.MAC, error) {
-	hasher := dst.repository.GetMACHasher()
-	newObject := *object
-	newObject.Chunks = make([]objects.Chunk, 0, len(object.Chunks))
-
-	for _, chunkRef := range object.Chunks {
-		chunk, err := src.repository.GetBlobBytes(resources.RT_CHUNK, chunkRef.ContentMAC)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		hasher.Write(chunk)
-
-		chunkMAC := dst.repository.ComputeMAC(chunk)
-		if !dst.repository.BlobExists(resources.RT_CHUNK, chunkMAC) {
-			err = dst.repository.PutBlob(resources.RT_CHUNK, chunkMAC, chunk)
-			if err != nil {
-				return objects.MAC{}, err
-			}
-		}
-
-		newObject.Chunks = append(newObject.Chunks, objects.Chunk{
-			Version:    chunkRef.Version,
-			ContentMAC: chunkMAC,
-			Length:     chunkRef.Length,
-			Entropy:    chunkRef.Entropy,
-			Flags:      chunkRef.Flags,
-		})
-	}
-
-	newObject.ContentMAC = objects.MAC(hasher.Sum(nil))
-	serializedObject, err := newObject.Serialize()
-	if err != nil {
-		return objects.MAC{}, err
-	}
-
-	mac := dst.repository.ComputeMAC(serializedObject)
-	if !dst.repository.BlobExists(resources.RT_OBJECT, mac) {
-		err = dst.repository.PutBlob(resources.RT_OBJECT, mac, serializedObject)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-	}
-
-	return mac, nil
+// dummy importer
+type syncImporter struct {
+	root   string
+	origin string
+	typ    string
+	walk   func(ctx context.Context, results chan<- *importer.ScanResult)
 }
 
-func persistVFS(src *Snapshot, dst *Builder, fs *vfs.Filesystem, ctidx *btree.BTree[string, int, objects.MAC]) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		entry, err := fs.ResolveEntry(mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		if entry.HasObject() {
-			entry.Object, err = persistObject(src, dst, entry.ResolvedObject)
-			if err != nil {
-				return objects.MAC{}, nil
-			}
-		}
-
-		entryMAC := entry.MAC
-		if !dst.repository.BlobExists(resources.RT_VFS_ENTRY, entryMAC) {
-			serializedEntry, err := entry.ToBytes()
-			if err != nil {
-				return objects.MAC{}, err
-			}
-			err = dst.repository.PutBlob(resources.RT_VFS_ENTRY, entryMAC, serializedEntry)
-			if err != nil {
-				return objects.MAC{}, err
-			}
-		}
-
-		if entry.HasObject() {
-			parts := strings.SplitN(entry.ResolvedObject.ContentType, ";", 2)
-			mime := parts[0]
-			k := fmt.Sprintf("/%s%s", mime, entry.Path())
-			if err := ctidx.Insert(k, entryMAC); err != nil {
-				return objects.MAC{}, err
-			}
-		}
-
-		return entryMAC, nil
-	}
+func (p *syncImporter) Origin(ctx context.Context) (string, error) {
+	return p.origin, nil
 }
 
-func persistErrors(src *Snapshot, dst *Builder) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		data, err := src.repository.GetBlobBytes(resources.RT_ERROR_ENTRY, mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		newmac := dst.repository.ComputeMAC(data)
-		if !dst.repository.BlobExists(resources.RT_ERROR_ENTRY, newmac) {
-			err = dst.repository.PutBlob(resources.RT_ERROR_ENTRY, newmac, data)
-		}
-		return newmac, err
-	}
+func (p *syncImporter) Type(ctx context.Context) (string, error) {
+	return p.typ, nil
 }
 
-func persistXattrs(src *Snapshot, dst *Builder, fs *vfs.Filesystem) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		xattr, err := fs.ResolveXattr(mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
+func (p *syncImporter) Root(ctx context.Context) (string, error) {
+	return p.root, nil
+}
 
-		xattr.Object, err = persistObject(src, dst, xattr.ResolvedObject)
-		serialized, err := xattr.ToBytes()
-		if err != nil {
-			return objects.MAC{}, err
-		}
+func (p *syncImporter) Close(ctx context.Context) error {
+	return nil
+}
 
-		newmac := dst.repository.ComputeMAC(serialized)
-		if !dst.repository.BlobExists(resources.RT_XATTR_ENTRY, newmac) {
-			err = dst.repository.PutBlob(resources.RT_XATTR_ENTRY, newmac, serialized)
-			if err != nil {
-				return objects.MAC{}, err
-			}
-		}
-		return newmac, nil
-	}
+func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, error) {
+	results := make(chan *importer.ScanResult, 1000)
+	go p.walk(ctx, results)
+	return results, nil
+}
+
+type syncOptions struct {
+	MaxConcurrency  uint64
+	CleanupVFSCache bool
 }
 
 func (src *Snapshot) Synchronize(dst *Builder) error {
@@ -159,38 +74,156 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
-	vfs, errors, xattrs := fs.BTrees()
-
-	ctidx, err := btree.New(&btree.InMemoryStore[string, objects.MAC]{}, strings.Compare, 50)
-
-	dst.Header.GetSource(0).VFS.Root, err = persistIndex(dst, vfs, resources.RT_VFS_BTREE,
-		resources.RT_VFS_NODE, persistVFS(src, dst, fs, ctidx))
+	erriter, err := fs.Errors("/")
 	if err != nil {
 		return err
 	}
 
-	dst.Header.GetSource(0).VFS.Errors, err = persistIndex(dst, errors, resources.RT_ERROR_BTREE,
-		resources.RT_ERROR_NODE, persistErrors(src, dst))
+	walk := func(ctx context.Context, results chan<- *importer.ScanResult) {
+		for erritem, err := range erriter {
+			if err != nil {
+				results <- importer.NewScanError("/", err)
+				continue
+			}
+			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
+		}
+
+		err = fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
+			var originFile string
+			if entry.FileInfo.Mode()&os.ModeSymlink != 0 {
+				originFile, err = os.Readlink(path)
+				if err != nil {
+					results <- importer.NewScanError(path, err)
+					return nil
+				}
+			}
+
+			fileinfo := entry.FileInfo
+			extendedAttributes := entry.ExtendedAttributes
+
+			results <- importer.NewScanRecord(path, originFile, fileinfo, extendedAttributes,
+				func() (io.ReadCloser, error) {
+					return os.Open(path)
+				})
+			for _, attr := range extendedAttributes {
+				results <- importer.NewScanXattr(path, attr, objects.AttributeExtended,
+					func() (io.ReadCloser, error) {
+						data, err := xattr.Get(path, attr)
+						if err != nil {
+							return nil, err
+						}
+						return io.NopCloser(bytes.NewReader(data)), nil
+					})
+			}
+			return nil
+		})
+		if err != nil {
+			results <- importer.NewScanError("/", err)
+		}
+		close(results)
+	}
+
+	imp, err := func() (importer.Importer, error) {
+		return &syncImporter{
+			root:   src.Header.GetSource(0).Importer.Directory,
+			typ:    src.Header.GetSource(0).Importer.Type,
+			origin: src.Header.GetSource(0).Importer.Origin,
+			walk:   walk,
+		}, nil
+	}()
 	if err != nil {
 		return err
 	}
 
-	dst.Header.GetSource(0).VFS.Xattrs, err = persistIndex(dst, xattrs, resources.RT_XATTR_BTREE,
-		resources.RT_XATTR_NODE, persistXattrs(src, dst, fs))
-	if err != nil {
-		return err
-	}
+	dst.Header.GetSource(0).Importer.Directory = src.Header.GetSource(0).Importer.Directory
+	dst.Header.GetSource(0).Importer.Origin = src.Header.GetSource(0).Importer.Origin
+	dst.Header.GetSource(0).Importer.Type = src.Header.GetSource(0).Importer.Type
+	dst.Header.Tags = src.Header.Tags
+	dst.Header.Name = src.Header.Name
+	dst.Header.Timestamp = src.Header.Timestamp
+	dst.Header.Duration = src.Header.Duration
 
-	ctsum, err := persistIndex(dst, ctidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-		return mac, nil
+	return dst.ingestSync(imp, &syncOptions{
+		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
+		CleanupVFSCache: false,
 	})
-	dst.Header.GetSource(0).Indexes = []header.Index{
-		{
-			Name:  "content-type",
-			Type:  "btree",
-			Value: ctsum,
-		},
+}
+
+func (snap *Builder) prepareSync(imp importer.Importer, options *syncOptions) (*BackupContext, error) {
+	maxConcurrency := options.MaxConcurrency
+	if maxConcurrency == 0 {
+		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
 	}
 
-	return nil
+	typ, err := imp.Type(snap.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	origin, err := imp.Origin(snap.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, typ, origin, options.CleanupVFSCache)
+	if err != nil {
+		return nil, err
+	}
+
+	syncCtx := &BackupContext{
+		imp:            imp,
+		maxConcurrency: maxConcurrency,
+		scanCache:      snap.scanCache,
+		vfsCache:       vfsCache,
+		flushEnd:       make(chan bool),
+		flushEnded:     make(chan bool),
+		stateId:        snap.Header.Identifier,
+	}
+	syncCtx.excludes = exclude.NewRuleSet()
+
+	if bi, err := snap.makeBackupIndexes(); err != nil {
+		return nil, err
+	} else {
+		syncCtx.indexes = append(syncCtx.indexes, bi)
+	}
+
+	return syncCtx, nil
+}
+
+func (snap *Builder) ingestSync(imp importer.Importer, options *syncOptions) error {
+	done, err := snap.Lock()
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+	defer snap.Unlock(done)
+
+	syncCtx, err := snap.prepareSync(imp, options)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	/* checkpoint handling */
+	syncCtx.flushTick = time.NewTicker(1 * time.Hour)
+	go snap.flushDeltaState(syncCtx)
+
+	/* importer */
+	if err := snap.importerJob(syncCtx); err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	/* tree builders */
+	vfsHeader, rootSummary, indexes, err := snap.persistTrees(syncCtx)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	snap.Header.GetSource(0).VFS = *vfsHeader
+	snap.Header.GetSource(0).Summary = *rootSummary
+	snap.Header.GetSource(0).Indexes = indexes
+
+	return snap.Commit(syncCtx, true)
 }
