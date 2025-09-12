@@ -8,7 +8,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
@@ -45,11 +44,6 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	results := make(chan *importer.ScanResult, 1000)
 	go p.walk(ctx, results)
 	return results, nil
-}
-
-type syncOptions struct {
-	MaxConcurrency  uint64
-	CleanupVFSCache bool
 }
 
 func (src *Snapshot) Synchronize(dst *Builder) error {
@@ -143,54 +137,13 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	dst.Header.Timestamp = src.Header.Timestamp
 	dst.Header.Duration = src.Header.Duration
 
-	return dst.ingestSync(imp, &syncOptions{
+	return dst.ingestSync(imp, &BackupOptions{
 		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
 		CleanupVFSCache: false,
 	})
 }
 
-func (snap *Builder) prepareSync(imp importer.Importer, options *syncOptions) (*BackupContext, error) {
-	maxConcurrency := options.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
-	}
-
-	typ, err := imp.Type(snap.AppContext())
-	if err != nil {
-		return nil, err
-	}
-
-	origin, err := imp.Origin(snap.AppContext())
-	if err != nil {
-		return nil, err
-	}
-
-	vfsCache, err := snap.AppContext().GetCache().VFS(snap.repository.Configuration().RepositoryID, typ, origin, options.CleanupVFSCache)
-	if err != nil {
-		return nil, err
-	}
-
-	syncCtx := &BackupContext{
-		imp:            imp,
-		maxConcurrency: maxConcurrency,
-		scanCache:      snap.scanCache,
-		vfsCache:       vfsCache,
-		flushEnd:       make(chan bool),
-		flushEnded:     make(chan bool),
-		stateId:        snap.Header.Identifier,
-	}
-	syncCtx.excludes = exclude.NewRuleSet()
-
-	if bi, err := snap.makeBackupIndexes(); err != nil {
-		return nil, err
-	} else {
-		syncCtx.indexes = append(syncCtx.indexes, bi)
-	}
-
-	return syncCtx, nil
-}
-
-func (snap *Builder) ingestSync(imp importer.Importer, options *syncOptions) error {
+func (snap *Builder) ingestSync(imp importer.Importer, options *BackupOptions) error {
 	done, err := snap.Lock()
 	if err != nil {
 		snap.repository.PackerManager.Wait()
@@ -198,24 +151,24 @@ func (snap *Builder) ingestSync(imp importer.Importer, options *syncOptions) err
 	}
 	defer snap.Unlock(done)
 
-	syncCtx, err := snap.prepareSync(imp, options)
+	backupCtx, err := snap.prepareBackup(imp, options)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
 	/* checkpoint handling */
-	syncCtx.flushTick = time.NewTicker(1 * time.Hour)
-	go snap.flushDeltaState(syncCtx)
+	backupCtx.flushTick = time.NewTicker(1 * time.Hour)
+	go snap.flushDeltaState(backupCtx)
 
 	/* importer */
-	if err := snap.importerJob(syncCtx); err != nil {
+	if err := snap.importerJob(backupCtx); err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
 	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(syncCtx)
+	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
@@ -225,5 +178,5 @@ func (snap *Builder) ingestSync(imp importer.Importer, options *syncOptions) err
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
 
-	return snap.Commit(syncCtx, true)
+	return snap.Commit(backupCtx, true)
 }
