@@ -154,10 +154,17 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	dst.Header.GetSource(0).Importer.Directory = src.Header.GetSource(0).Importer.Directory
 	dst.Header.GetSource(0).Importer.Origin = src.Header.GetSource(0).Importer.Origin
 	dst.Header.GetSource(0).Importer.Type = src.Header.GetSource(0).Importer.Type
-	dst.Header.Tags = src.Header.Tags
-	dst.Header.Name = src.Header.Name
 	dst.Header.Timestamp = src.Header.Timestamp
 	dst.Header.Duration = src.Header.Duration
+	dst.Header.Name = src.Header.Name
+	dst.Header.Category = src.Header.Category
+	dst.Header.Environment = src.Header.Environment
+	dst.Header.Perimeter = src.Header.Perimeter
+	dst.Header.Job = src.Header.Job
+	dst.Header.Replicas = src.Header.Replicas
+	dst.Header.Classifications = src.Header.Classifications
+	dst.Header.Tags = src.Header.Tags
+	dst.Header.Context = src.Header.Context
 
 	return dst.ingestSync(imp, &BackupOptions{
 		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
