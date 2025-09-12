@@ -1,11 +1,9 @@
 package snapshot
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -13,15 +11,16 @@ import (
 	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
-	"github.com/pkg/xattr"
 )
 
 // dummy importer
 type syncImporter struct {
-	root   string
-	origin string
-	typ    string
-	walk   func(ctx context.Context, results chan<- *importer.ScanResult)
+	root    string
+	origin  string
+	typ     string
+	fs      *vfs.Filesystem
+	src     *Snapshot
+	failure error
 }
 
 func (p *syncImporter) Origin(ctx context.Context) (string, error) {
@@ -41,8 +40,72 @@ func (p *syncImporter) Close(ctx context.Context) error {
 }
 
 func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, error) {
+
+	erriter, err := p.fs.Errors("/")
+	if err != nil {
+		return nil, err
+	}
+
+	_, _, xattrtree := p.fs.BTrees()
+	xattriter, err := xattrtree.ScanFrom("/")
+	if err != nil {
+		return nil, err
+	}
+
 	results := make(chan *importer.ScanResult, 1000)
-	go p.walk(ctx, results)
+
+	go func() {
+		defer close(results)
+
+		for erritem, err := range erriter {
+			if ctx.Err() != nil {
+				p.failure = ctx.Err()
+				return
+			}
+			if err != nil {
+				p.failure = err
+				return
+			}
+			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
+		}
+
+		for xattriter.Next() {
+			if ctx.Err() != nil {
+				p.failure = ctx.Err()
+				return
+			}
+
+			_, xattrmac := xattriter.Current()
+			xattr, err := p.fs.ResolveXattr(xattrmac)
+			if err != nil {
+				p.failure = err
+				return
+			}
+			results <- importer.NewScanXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
+				func() (io.ReadCloser, error) {
+					return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size)), nil
+				})
+		}
+		if err := xattriter.Err(); err != nil {
+			p.failure = err
+			return
+		}
+
+		if err := p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
+			results <- importer.NewScanRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
+				func() (io.ReadCloser, error) {
+					return p.fs.Open(path)
+				})
+			return nil
+		}); err != nil {
+			p.failure = err
+		}
+	}()
+
 	return results, nil
 }
 
@@ -68,65 +131,12 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
-	erriter, err := fs.Errors("/")
-	if err != nil {
-		return err
-	}
-
-	walk := func(ctx context.Context, results chan<- *importer.ScanResult) {
-		for erritem, err := range erriter {
-			if err != nil {
-				results <- importer.NewScanError("/", err)
-				continue
-			}
-			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
-		}
-
-		err = fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
-			var originFile string
-			if entry.FileInfo.Mode()&os.ModeSymlink != 0 {
-				originFile, err = os.Readlink(path)
-				if err != nil {
-					results <- importer.NewScanError(path, err)
-					return nil
-				}
-			}
-
-			fileinfo := entry.FileInfo
-			extendedAttributes := entry.ExtendedAttributes
-
-			results <- importer.NewScanRecord(path, originFile, fileinfo, extendedAttributes,
-				func() (io.ReadCloser, error) {
-					return os.Open(path)
-				})
-			for _, attr := range extendedAttributes {
-				results <- importer.NewScanXattr(path, attr, objects.AttributeExtended,
-					func() (io.ReadCloser, error) {
-						data, err := xattr.Get(path, attr)
-						if err != nil {
-							return nil, err
-						}
-						return io.NopCloser(bytes.NewReader(data)), nil
-					})
-			}
-			return nil
-		})
-		if err != nil {
-			results <- importer.NewScanError("/", err)
-		}
-		close(results)
-	}
-
-	imp, err := func() (importer.Importer, error) {
-		return &syncImporter{
-			root:   src.Header.GetSource(0).Importer.Directory,
-			typ:    src.Header.GetSource(0).Importer.Type,
-			origin: src.Header.GetSource(0).Importer.Origin,
-			walk:   walk,
-		}, nil
-	}()
-	if err != nil {
-		return err
+	imp := &syncImporter{
+		root:   "/",
+		typ:    "sync",
+		origin: fmt.Sprintf("%s:%s:%x", uuid.NewString(), src.repository.Configuration().RepositoryID, src.Header.Identifier),
+		fs:     fs,
+		src:    src,
 	}
 
 	dst.Header.GetSource(0).Importer.Directory = src.Header.GetSource(0).Importer.Directory
@@ -139,11 +149,11 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 
 	return dst.ingestSync(imp, &BackupOptions{
 		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
-		CleanupVFSCache: false,
+		CleanupVFSCache: true,
 	})
 }
 
-func (snap *Builder) ingestSync(imp importer.Importer, options *BackupOptions) error {
+func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions) error {
 	done, err := snap.Lock()
 	if err != nil {
 		snap.repository.PackerManager.Wait()
@@ -158,8 +168,10 @@ func (snap *Builder) ingestSync(imp importer.Importer, options *BackupOptions) e
 	}
 
 	/* checkpoint handling */
-	backupCtx.flushTick = time.NewTicker(1 * time.Hour)
-	go snap.flushDeltaState(backupCtx)
+	if !options.NoCheckpoint {
+		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState(backupCtx)
+	}
 
 	/* importer */
 	if err := snap.importerJob(backupCtx); err != nil {
@@ -174,9 +186,21 @@ func (snap *Builder) ingestSync(imp importer.Importer, options *BackupOptions) e
 		return err
 	}
 
+	if imp.failure != nil {
+		snap.repository.PackerManager.Wait()
+		return imp.failure
+	}
+
 	snap.Header.GetSource(0).VFS = *vfsHeader
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
+
+	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
+	nErrors := snap.Header.GetSource(0).Summary.Directory.Errors + snap.Header.GetSource(0).Summary.Below.Errors
+	if nErrors != srcErrors {
+		snap.repository.PackerManager.Wait()
+		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
+	}
 
 	return snap.Commit(backupCtx, true)
 }
