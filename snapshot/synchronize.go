@@ -1,163 +1,128 @@
 package snapshot
 
 import (
+	"context"
 	"fmt"
-	"strings"
+	"io"
+	"time"
 
-	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/snapshot/header"
+	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
 )
 
-func persistObject(src *Snapshot, dst *Builder, object *objects.Object) (objects.MAC, error) {
-	hasher := dst.repository.GetMACHasher()
-	newObject := *object
-	newObject.Chunks = make([]objects.Chunk, 0, len(object.Chunks))
+// dummy importer
+type syncImporter struct {
+	root    string
+	origin  string
+	typ     string
+	fs      *vfs.Filesystem
+	src     *Snapshot
+	failure error
+}
 
-	for _, chunkRef := range object.Chunks {
-		chunk, err := src.repository.GetBlobBytes(resources.RT_CHUNK, chunkRef.ContentMAC)
-		if err != nil {
-			return objects.MAC{}, err
-		}
+func (p *syncImporter) Origin(ctx context.Context) (string, error) {
+	return p.origin, nil
+}
 
-		hasher.Write(chunk)
+func (p *syncImporter) Type(ctx context.Context) (string, error) {
+	return p.typ, nil
+}
 
-		chunkMAC := dst.repository.ComputeMAC(chunk)
-		if !dst.repository.BlobExists(resources.RT_CHUNK, chunkMAC) {
-			err = dst.repository.PutBlob(resources.RT_CHUNK, chunkMAC, chunk)
-			if err != nil {
-				return objects.MAC{}, err
-			}
-		}
+func (p *syncImporter) Root(ctx context.Context) (string, error) {
+	return p.root, nil
+}
 
-		newObject.Chunks = append(newObject.Chunks, objects.Chunk{
-			Version:    chunkRef.Version,
-			ContentMAC: chunkMAC,
-			Length:     chunkRef.Length,
-			Entropy:    chunkRef.Entropy,
-			Flags:      chunkRef.Flags,
-		})
-	}
+func (p *syncImporter) Close(ctx context.Context) error {
+	return nil
+}
 
-	newObject.ContentMAC = objects.MAC(hasher.Sum(nil))
-	serializedObject, err := newObject.Serialize()
+func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, error) {
+
+	erriter, err := p.fs.Errors("/")
 	if err != nil {
-		return objects.MAC{}, err
+		return nil, err
 	}
 
-	mac := dst.repository.ComputeMAC(serializedObject)
-	if !dst.repository.BlobExists(resources.RT_OBJECT, mac) {
-		err = dst.repository.PutBlob(resources.RT_OBJECT, mac, serializedObject)
-		if err != nil {
-			return objects.MAC{}, err
-		}
+	_, _, xattrtree := p.fs.BTrees()
+	xattriter, err := xattrtree.ScanFrom("/")
+	if err != nil {
+		return nil, err
 	}
 
-	return mac, nil
-}
+	results := make(chan *importer.ScanResult, 1000)
 
-func persistVFS(src *Snapshot, dst *Builder, fs *vfs.Filesystem, ctidx *btree.BTree[string, int, objects.MAC]) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		entry, err := fs.ResolveEntry(mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
+	go func() {
+		defer close(results)
 
-		if entry.HasObject() {
-			entry.Object, err = persistObject(src, dst, entry.ResolvedObject)
+		i := 0
+		for erritem, err := range erriter {
+			if i%1024 == 0 {
+				if ctx.Err() != nil {
+					p.failure = ctx.Err()
+					return
+				}
+			}
+			i++
 			if err != nil {
-				return objects.MAC{}, nil
+				p.failure = err
+				return
 			}
+			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
 		}
 
-		entryMAC := entry.MAC
-		if !dst.repository.BlobExists(resources.RT_VFS_ENTRY, entryMAC) {
-			serializedEntry, err := entry.ToBytes()
+		i = 0
+		for xattriter.Next() {
+			if i%1024 == 0 {
+				if ctx.Err() != nil {
+					p.failure = ctx.Err()
+					return
+				}
+			}
+			i++
+
+			_, xattrmac := xattriter.Current()
+			xattr, err := p.fs.ResolveXattr(xattrmac)
 			if err != nil {
-				return objects.MAC{}, err
+				p.failure = err
+				return
 			}
-			err = dst.repository.PutBlob(resources.RT_VFS_ENTRY, entryMAC, serializedEntry)
+			results <- importer.NewScanXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
+				func() (io.ReadCloser, error) {
+					return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size)), nil
+				})
+		}
+		if err := xattriter.Err(); err != nil {
+			p.failure = err
+			return
+		}
+
+		i = 0
+		if err := p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
 			if err != nil {
-				return objects.MAC{}, err
+				return err
 			}
-		}
 
-		if entry.HasObject() {
-			parts := strings.SplitN(entry.ResolvedObject.ContentType, ";", 2)
-			mime := parts[0]
-			k := fmt.Sprintf("/%s%s", mime, entry.Path())
-			if err := ctidx.Insert(k, entryMAC); err != nil {
-				return objects.MAC{}, err
+			if i%1024 == 0 {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 			}
+			i++
+
+			results <- importer.NewScanRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
+				func() (io.ReadCloser, error) {
+					return p.fs.Open(path)
+				})
+			return nil
+		}); err != nil {
+			p.failure = err
 		}
+	}()
 
-		return entryMAC, nil
-	}
-}
-
-func persistDirpackIdx(src *Snapshot, dst *Builder) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		object, err := src.LookupObject(mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		objectMac := mac
-		if !dst.repository.BlobExists(resources.RT_OBJECT, mac) {
-			objectMac, err = persistObject(src, dst, object)
-			if err != nil {
-				return objects.MAC{}, nil
-			}
-		}
-
-		return objectMac, nil
-	}
-}
-
-func persistErrors(src *Snapshot, dst *Builder) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		data, err := src.repository.GetBlobBytes(resources.RT_ERROR_ENTRY, mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		newmac := dst.repository.ComputeMAC(data)
-		if !dst.repository.BlobExists(resources.RT_ERROR_ENTRY, newmac) {
-			err = dst.repository.PutBlob(resources.RT_ERROR_ENTRY, newmac, data)
-		}
-		return newmac, err
-	}
-}
-
-func persistXattrs(src *Snapshot, dst *Builder, fs *vfs.Filesystem) func(objects.MAC) (objects.MAC, error) {
-	return func(mac objects.MAC) (objects.MAC, error) {
-		xattr, err := fs.ResolveXattr(mac)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		xattr.Object, err = persistObject(src, dst, xattr.ResolvedObject)
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		serialized, err := xattr.ToBytes()
-		if err != nil {
-			return objects.MAC{}, err
-		}
-
-		newmac := dst.repository.ComputeMAC(serialized)
-		if !dst.repository.BlobExists(resources.RT_XATTR_ENTRY, newmac) {
-			err = dst.repository.PutBlob(resources.RT_XATTR_ENTRY, newmac, serialized)
-			if err != nil {
-				return objects.MAC{}, err
-			}
-		}
-		return newmac, nil
-	}
+	return results, nil
 }
 
 func (src *Snapshot) Synchronize(dst *Builder) error {
@@ -182,65 +147,83 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
-	vfs, errors, xattrs := fs.BTrees()
-
-	ctidx, err := btree.New(&btree.InMemoryStore[string, objects.MAC]{}, strings.Compare, 50)
-	if err != nil {
-		return err
+	imp := &syncImporter{
+		root:   "/",
+		typ:    "sync",
+		origin: fmt.Sprintf("%s:%s:%x", uuid.NewString(), src.repository.Configuration().RepositoryID, src.Header.Identifier),
+		fs:     fs,
+		src:    src,
 	}
 
-	dst.Header.GetSource(0).VFS.Root, err = persistIndex(dst, vfs, resources.RT_VFS_BTREE,
-		resources.RT_VFS_NODE, persistVFS(src, dst, fs, ctidx))
-	if err != nil {
-		return err
-	}
+	dst.Header.GetSource(0).Importer.Directory = src.Header.GetSource(0).Importer.Directory
+	dst.Header.GetSource(0).Importer.Origin = src.Header.GetSource(0).Importer.Origin
+	dst.Header.GetSource(0).Importer.Type = src.Header.GetSource(0).Importer.Type
+	dst.Header.Timestamp = src.Header.Timestamp
+	dst.Header.Duration = src.Header.Duration
+	dst.Header.Name = src.Header.Name
+	dst.Header.Category = src.Header.Category
+	dst.Header.Environment = src.Header.Environment
+	dst.Header.Perimeter = src.Header.Perimeter
+	dst.Header.Job = src.Header.Job
+	dst.Header.Replicas = src.Header.Replicas
+	dst.Header.Classifications = src.Header.Classifications
+	dst.Header.Tags = src.Header.Tags
+	dst.Header.Context = src.Header.Context
 
-	dst.Header.GetSource(0).VFS.Errors, err = persistIndex(dst, errors, resources.RT_ERROR_BTREE,
-		resources.RT_ERROR_NODE, persistErrors(src, dst))
-	if err != nil {
-		return err
-	}
-
-	dst.Header.GetSource(0).VFS.Xattrs, err = persistIndex(dst, xattrs, resources.RT_XATTR_BTREE,
-		resources.RT_XATTR_NODE, persistXattrs(src, dst, fs))
-	if err != nil {
-		return err
-	}
-
-	ctsum, err := persistIndex(dst, ctidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-		return mac, nil
+	return dst.ingestSync(imp, &BackupOptions{
+		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
+		CleanupVFSCache: true,
 	})
+}
+
+func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions) error {
+	done, err := snap.Lock()
 	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+	defer snap.Unlock(done)
+
+	backupCtx, err := snap.prepareBackup(imp, options)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	dst.Header.GetSource(0).Indexes = []header.Index{
-		{
-			Name:  "content-type",
-			Type:  "btree",
-			Value: ctsum,
-		},
+	/* checkpoint handling */
+	if !options.NoCheckpoint {
+		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState(backupCtx)
 	}
 
-	dirpackidx, err := src.DirPack()
-	if err != nil {
+	/* importer */
+	if err := snap.importerJob(backupCtx); err != nil {
+		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	if dirpackidx != nil {
-		dirpackSum, err := persistIndex(dst, dirpackidx, resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, persistDirpackIdx(src, dst))
-		if err != nil {
-			return err
-		}
-
-		dst.Header.GetSource(0).Indexes = append(dst.Header.GetSource(0).Indexes,
-			header.Index{
-				Name:  "dirpack",
-				Type:  "btree",
-				Value: dirpackSum,
-			},
-		)
+	/* tree builders */
+	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
 	}
 
-	return nil
+	if imp.failure != nil {
+		snap.repository.PackerManager.Wait()
+		return imp.failure
+	}
+
+	snap.Header.GetSource(0).VFS = *vfsHeader
+	snap.Header.GetSource(0).Summary = *rootSummary
+	snap.Header.GetSource(0).Indexes = indexes
+
+	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
+	nErrors := snap.Header.GetSource(0).Summary.Directory.Errors + snap.Header.GetSource(0).Summary.Below.Errors
+	if nErrors != srcErrors {
+		snap.repository.PackerManager.Wait()
+		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
+	}
+
+	return snap.Commit(backupCtx, true)
 }
