@@ -57,11 +57,15 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	go func() {
 		defer close(results)
 
+		i := 0
 		for erritem, err := range erriter {
-			if ctx.Err() != nil {
-				p.failure = ctx.Err()
-				return
+			if i%1024 == 0 {
+				if ctx.Err() != nil {
+					p.failure = ctx.Err()
+					return
+				}
 			}
+			i++
 			if err != nil {
 				p.failure = err
 				return
@@ -69,11 +73,15 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
 		}
 
+		i = 0
 		for xattriter.Next() {
-			if ctx.Err() != nil {
-				p.failure = ctx.Err()
-				return
+			if i%1024 == 0 {
+				if ctx.Err() != nil {
+					p.failure = ctx.Err()
+					return
+				}
 			}
+			i++
 
 			_, xattrmac := xattriter.Current()
 			xattr, err := p.fs.ResolveXattr(xattrmac)
@@ -91,10 +99,14 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 			return
 		}
 
+		i = 0
 		if err := p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if i%1024 == 0 {
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
 			}
+			i++
 
 			results <- importer.NewScanRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
 				func() (io.ReadCloser, error) {
