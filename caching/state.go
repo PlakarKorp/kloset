@@ -20,6 +20,12 @@ type StateCache interface {
 	GetDeltas() iter.Seq2[objects.MAC, []byte]
 	DelDelta(blobType resources.Type, blobCsum objects.MAC, packfileMAC objects.MAC) error
 
+	NewBatched()
+	PutDeltaToBatch(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error
+	PutDeletedToBatch(blobType resources.Type, blobCsum objects.MAC, data []byte) error
+	PutPackfileToBatch(packfile objects.MAC, data []byte) error
+	CommitBatch() error
+
 	PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error
 	HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error)
 	DelDeleted(blobType resources.Type, blobCsum objects.MAC) error

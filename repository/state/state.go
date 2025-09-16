@@ -502,6 +502,8 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 		return binary.LittleEndian.Uint32(buf), nil
 	}
 
+	ls.cache.NewBatched()
+
 	/* Deserialize LOCATIONS */
 	et_buf := make([]byte, 1)
 	de_buf := make([]byte, DeltaEntrySerializedSize)
@@ -541,7 +543,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize delta entry %w", err)
 			}
 
-			ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf)
+			ls.cache.PutDeltaToBatch(delta.Type, delta.Blob, delta.Location.Packfile, de_buf)
 		case ET_DELETED:
 			if length != DeletedEntrySerializedSize {
 				return fmt.Errorf("failed to read deleted entry wrong length got(%d)/expected(%d)", length, DeletedEntrySerializedSize)
@@ -556,7 +558,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize deleted entry %w", err)
 			}
 
-			ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf)
+			ls.cache.PutDeletedToBatch(deleted.Type, deleted.Blob, deleted_buf)
 		case ET_PACKFILE:
 			if length != PackfileEntrySerializedSize {
 				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d)", length, PackfileEntrySerializedSize)
@@ -571,7 +573,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			ls.cache.PutPackfile(pe.Packfile, pe_buf)
+			ls.cache.PutPackfileToBatch(pe.Packfile, pe_buf)
 
 		case ET_CONFIGURATION:
 			ce_buf := make([]byte, length)

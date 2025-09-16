@@ -20,7 +20,6 @@ type ScanCache struct {
 
 func newScanCache(cacheManager *Manager, snapshotID [32]byte) (*ScanCache, error) {
 	cacheDir := filepath.Join(cacheManager.cacheDir, "scan", fmt.Sprintf("%x", snapshotID))
-
 	db, err := New(cacheDir)
 	if err != nil {
 		return nil, err
@@ -158,6 +157,26 @@ func (c *ScanCache) GetConfiguration(key string) ([]byte, error) {
 
 func (c *ScanCache) GetConfigurations() iter.Seq[[]byte] {
 	return c.getObjects("__configuration__:")
+}
+
+func (c *ScanCache) NewBatched() {
+	c.newBatch()
+}
+
+func (c *ScanCache) PutDeltaToBatch(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
+	return c.putToBatch("__delta__", fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfile), data)
+}
+
+func (c *ScanCache) PutDeletedToBatch(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
+	return c.putToBatch("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum), data)
+}
+
+func (c *ScanCache) PutPackfileToBatch(packfile objects.MAC, data []byte) error {
+	return c.putToBatch("__packfile__", fmt.Sprintf("%x", packfile), data)
+}
+
+func (c *ScanCache) CommitBatch() error {
+	return c.commitBatch()
 }
 
 func (c *ScanCache) EnumerateKeysWithPrefix(prefix string, reverse bool) iter.Seq2[string, []byte] {

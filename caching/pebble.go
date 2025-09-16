@@ -15,6 +15,8 @@ import (
 
 type PebbleCache struct {
 	db *pebble.DB
+
+	currBatch *pebble.Batch
 }
 
 // Lifter from internal/logger pebble.
@@ -111,6 +113,24 @@ func (p *PebbleCache) getObjects(keyPrefix string) iter.Seq[[]byte] {
 			}
 		}
 	}
+}
+
+func (p *PebbleCache) newBatch() {
+	p.currBatch = p.db.NewBatch()
+}
+
+func (p *PebbleCache) putToBatch(prefix, key string, data []byte) error {
+	return p.currBatch.Set([]byte(fmt.Sprintf("%s:%s", prefix, key)), data, pebble.NoSync)
+}
+
+func (p *PebbleCache) commitBatch() error {
+	err := p.db.Apply(p.currBatch, pebble.Sync)
+	if err != nil {
+		return err
+	}
+
+	p.currBatch = nil
+	return nil
 }
 
 func (p *PebbleCache) delete(prefix, key string) error {

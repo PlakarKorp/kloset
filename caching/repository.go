@@ -145,6 +145,26 @@ func (c *_RepositoryCache) GetSnapshot(stateID objects.MAC) ([]byte, error) {
 	return c.get("__snapshot__", fmt.Sprintf("%x", stateID))
 }
 
+func (c *_RepositoryCache) NewBatched() {
+	c.newBatch()
+}
+
+func (c *_RepositoryCache) PutDeltaToBatch(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
+	return c.putToBatch("__delta__", fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfile), data)
+}
+
+func (c *_RepositoryCache) PutDeletedToBatch(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
+	return c.putToBatch("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum), data)
+}
+
+func (c *_RepositoryCache) PutPackfileToBatch(packfile objects.MAC, data []byte) error {
+	return c.putToBatch("__packfile__", fmt.Sprintf("%x", packfile), data)
+}
+
+func (c *_RepositoryCache) CommitBatch() error {
+	return c.commitBatch()
+}
+
 func (c *_RepositoryCache) DelSnapshot(stateID objects.MAC) error {
 	return c.delete("__snapshot__", fmt.Sprintf("%x", stateID))
 }
