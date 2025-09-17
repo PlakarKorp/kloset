@@ -13,7 +13,7 @@ type ScanCache struct {
 	cache Cache
 }
 
-func newScanCache(cons Constructor, snapshotID [32]byte) (*ScanCache, error) {
+func NewScanCache(cons Constructor, snapshotID [32]byte) (*ScanCache, error) {
 	cache, err := cons(CACHE_VERSION, "scan", fmt.Sprintf("%x", snapshotID), DeleteOnClose)
 	if err != nil {
 		return nil, err

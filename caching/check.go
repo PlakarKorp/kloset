@@ -9,7 +9,7 @@ type CheckCache struct {
 	cache Cache
 }
 
-func newCheckCache(cons Constructor) (*CheckCache, error) {
+func NewCheckCache(cons Constructor) (*CheckCache, error) {
 	cache, err := cons(CACHE_VERSION, "check", uuid.NewString(), DeleteOnClose)
 	if err != nil {
 		return nil, err

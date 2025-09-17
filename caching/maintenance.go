@@ -13,7 +13,7 @@ type MaintenanceCache struct {
 	cache Cache
 }
 
-func newMaintenanceCache(cons Constructor, repositoryID uuid.UUID) (*MaintenanceCache, error) {
+func NewMaintenanceCache(cons Constructor, repositoryID uuid.UUID) (*MaintenanceCache, error) {
 	cache, err := cons(CACHE_VERSION, "maintenance", repositoryID.String(), None)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (c *MaintenanceCache) HasPackfile(packfileMAC objects.MAC) bool {
 
 func (c *MaintenanceCache) GetPackfiles(snapshotID objects.MAC) iter.Seq[objects.MAC] {
 	return func(yield func(objects.MAC) bool) {
-		for _, p := range c.cache.Scan(key("__packfile__", snapshotID), false) {
+		for _, p := range c.cache.Scan([]byte("__packfile__"), false) {
 			if !yield(objects.MAC(p)) {
 				return
 			}

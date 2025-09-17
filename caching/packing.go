@@ -12,7 +12,7 @@ type PackingCache struct {
 	cache Cache
 }
 
-func newPackingCache(cons Constructor) (*PackingCache, error) {
+func NewPackingCache(cons Constructor) (*PackingCache, error) {
 	cache, err := cons(CACHE_VERSION, "packing", uuid.NewString(), DeleteOnClose)
 	if err != nil {
 		return nil, err

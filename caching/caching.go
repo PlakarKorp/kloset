@@ -113,7 +113,7 @@ func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string, dele
 		opt = DeleteOnClose
 	}
 
-	if cache, err := newVFSCache(m.cons, repositoryID, scheme, origin, opt); err != nil {
+	if cache, err := NewVFSCache(m.cons, repositoryID, scheme, origin, opt); err != nil {
 		return nil, err
 	} else {
 		m.vfsCache[key] = cache
@@ -133,7 +133,7 @@ func (m *Manager) Repository(repositoryID uuid.UUID) (*_RepositoryCache, error) 
 		return cache, nil
 	}
 
-	if cache, err := newRepositoryCache(m.cons, repositoryID); err != nil {
+	if cache, err := NewRepositoryCache(m.cons, repositoryID); err != nil {
 		return nil, err
 	} else {
 		m.repositoryCache[repositoryID] = cache
@@ -153,7 +153,7 @@ func (m *Manager) Maintenance(repositoryID uuid.UUID) (*MaintenanceCache, error)
 		return cache, nil
 	}
 
-	if cache, err := newMaintenanceCache(m.cons, repositoryID); err != nil {
+	if cache, err := NewMaintenanceCache(m.cons, repositoryID); err != nil {
 		return nil, err
 	} else {
 		m.maintenanceCache[repositoryID] = cache
@@ -163,15 +163,15 @@ func (m *Manager) Maintenance(repositoryID uuid.UUID) (*MaintenanceCache, error)
 
 // XXX - beware that caller has responsibility to call Close() on the returned cache
 func (m *Manager) Scan(snapshotID objects.MAC) (*ScanCache, error) {
-	return newScanCache(m.cons, snapshotID)
+	return NewScanCache(m.cons, snapshotID)
 }
 
 // XXX - beware that caller has responsibility to call Close() on the returned cache
 func (m *Manager) Check() (*CheckCache, error) {
-	return newCheckCache(m.cons)
+	return NewCheckCache(m.cons)
 }
 
 // XXX - beware that caller has responsibility to call Close() on the returned cache
 func (m *Manager) Packing() (*PackingCache, error) {
-	return newPackingCache(m.cons)
+	return NewPackingCache(m.cons)
 }

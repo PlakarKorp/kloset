@@ -13,7 +13,7 @@ type _RepositoryCache struct {
 	cache Cache
 }
 
-func newRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryCache, error) {
+func NewRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryCache, error) {
 	cache, err := cons(CACHE_VERSION, "repository", repositoryID.String(), None)
 	if err != nil {
 		return nil, err
