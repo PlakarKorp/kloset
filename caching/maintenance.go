@@ -3,52 +3,45 @@ package caching
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"iter"
-	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/objects"
-	"github.com/cockroachdb/pebble/v2"
 	"github.com/google/uuid"
 )
 
 type MaintenanceCache struct {
-	*PebbleCache
-	manager *Manager
+	cache Cache
 }
 
-func newMaintenanceCache(cacheManager *Manager, repositoryID uuid.UUID) (*MaintenanceCache, error) {
-	cacheDir := filepath.Join(cacheManager.cacheDir, "maintenance", repositoryID.String())
-
-	db, err := New(cacheDir)
+func newMaintenanceCache(cons Constructor, repositoryID uuid.UUID) (*MaintenanceCache, error) {
+	cache, err := cons(CACHE_VERSION, "maintenance", repositoryID.String(), None)
 	if err != nil {
 		return nil, err
 	}
 
-	return &MaintenanceCache{
-		PebbleCache: db,
-		manager:     cacheManager,
-	}, nil
+	return &MaintenanceCache{cache}, nil
 }
 
+func (c *MaintenanceCache) Close() error { return c.cache.Close() }
+
 func (c *MaintenanceCache) PutSnapshot(snapshotID objects.MAC, data []byte) error {
-	return c.put("__snapshot__", fmt.Sprintf("%x", snapshotID), data)
+	return c.cache.Put(key("__snapshot__", snapshotID), data)
 }
 
 func (c *MaintenanceCache) HasSnapshot(snapshotID objects.MAC) (bool, error) {
-	return c.has("__snapshot__", fmt.Sprintf("%x", snapshotID))
+	return c.cache.Has(key("__snapshot__", snapshotID))
 }
 
 func (c *MaintenanceCache) DeleteSnapshot(snapshotID objects.MAC) error {
-	return c.delete("__snapshot__", fmt.Sprintf("%x", snapshotID))
+	return c.cache.Delete(key("__snapshot__", snapshotID))
 }
 
 func (c *MaintenanceCache) PutPackfile(snapshotID, packfileMAC objects.MAC) error {
-	return c.put("__packfile__", fmt.Sprintf("%x:%x", packfileMAC, snapshotID), packfileMAC[:])
+	return c.cache.Put(key2("__packfile__", packfileMAC, snapshotID), packfileMAC[:])
 }
 
 func (c *MaintenanceCache) HasPackfile(packfileMAC objects.MAC) bool {
-	for range c.getObjects(fmt.Sprintf("__packfile__:%x:", packfileMAC)) {
+	for range c.cache.Scan(key("__packfile__", packfileMAC), false) {
 		return true
 	}
 
@@ -57,7 +50,7 @@ func (c *MaintenanceCache) HasPackfile(packfileMAC objects.MAC) bool {
 
 func (c *MaintenanceCache) GetPackfiles(snapshotID objects.MAC) iter.Seq[objects.MAC] {
 	return func(yield func(objects.MAC) bool) {
-		for p := range c.getObjects("__packfile__:") {
+		for _, p := range c.cache.Scan(key("__packfile__", snapshotID), false) {
 			if !yield(objects.MAC(p)) {
 				return
 			}
@@ -66,11 +59,7 @@ func (c *MaintenanceCache) GetPackfiles(snapshotID objects.MAC) iter.Seq[objects
 }
 
 func (c *MaintenanceCache) DeleletePackfiles(snapshotID objects.MAC) error {
-	iter, _ := c.db.NewIter(&pebble.IterOptions{})
-	defer iter.Close()
-
-	for iter.First(); iter.Valid(); iter.Next() {
-		key := iter.Key()
+	for key, _ := range c.cache.Scan(nil, false) {
 		hex_mac := string(key[bytes.LastIndexByte(key, byte(':'))+1:])
 		mac, err := hex.DecodeString(hex_mac)
 		if err != nil {
@@ -78,7 +67,7 @@ func (c *MaintenanceCache) DeleletePackfiles(snapshotID objects.MAC) error {
 		}
 
 		if objects.MAC(mac) == snapshotID {
-			err := c.db.Delete(iter.Key(), nil)
+			err := c.cache.Delete(key)
 			if err != nil {
 				return err
 			}
