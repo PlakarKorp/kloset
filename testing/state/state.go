@@ -4,13 +4,13 @@ import (
 	"os"
 
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/logging/testlogger"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 )
 
 func NewRepository(local, remote map[objects.MAC][]byte) (*repository.Repository, error) {
-	logger := logging.NewLogger(os.Stdout, os.Stderr)
+	logger := testlogger.NewLogger(os.Stdout, os.Stderr)
 
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logger)
