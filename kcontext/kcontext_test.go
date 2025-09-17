@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/encryption/keypair"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/google/uuid"
@@ -14,7 +15,7 @@ func TestContext_SettersAndGetters(t *testing.T) {
 	ctx := NewKContext()
 
 	defaultLogger := logging.NewLogger(nil, nil)
-	defaultCachingManager := caching.NewManager("/tmp/test_plakar")
+	defaultCachingManager := caching.NewManager(pebble.Constructor("/tmp/test_plakar"))
 	defaultKeyPair, err := keypair.Generate()
 	require.NoError(t, err)
 

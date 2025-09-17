@@ -1,6 +1,7 @@
-package caching
+package pebble
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -11,7 +12,7 @@ func TestPebbleCache(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Initialize a new PebbleCache
-	cache, err := New(tmpDir)
+	cache, err := New(tmpDir, true)
 	require.NoError(t, err)
 	defer cache.Close()
 
@@ -22,7 +23,7 @@ func TestPebbleCache(t *testing.T) {
 		data := []byte("test data")
 
 		// Put data into the cache
-		err := cache.put(prefix, key, data)
+		err := cache.Put(fmt.Append([]byte(prefix), ':', key), data)
 		require.NoError(t, err)
 	})
 
@@ -32,7 +33,7 @@ func TestPebbleCache(t *testing.T) {
 		key := "test_key"
 
 		// Check if the key exists
-		exists, err := cache.has(prefix, key)
+		exists, err := cache.Has(fmt.Append([]byte(prefix), ':', key))
 		require.NoError(t, err)
 		require.True(t, exists)
 	})
@@ -44,7 +45,7 @@ func TestPebbleCache(t *testing.T) {
 		expectedData := []byte("test data")
 
 		// Get data from the cache
-		retrievedData, err := cache.get(prefix, key)
+		retrievedData, err := cache.Get(fmt.Append([]byte(prefix), ':', key))
 		require.NoError(t, err)
 		require.Equal(t, expectedData, retrievedData)
 	})
@@ -55,11 +56,11 @@ func TestPebbleCache(t *testing.T) {
 		key := "test_key"
 
 		// Delete the key from the cache
-		err := cache.delete(prefix, key)
+		err := cache.Delete(fmt.Append([]byte(prefix), ':', key))
 		require.NoError(t, err)
 
 		// Verify the key is deleted
-		exists, err := cache.has(prefix, key)
+		exists, err := cache.Has(fmt.Append([]byte(prefix), ':', key))
 		require.NoError(t, err)
 		require.False(t, exists)
 	})
