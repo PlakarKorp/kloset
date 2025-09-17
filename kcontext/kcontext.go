@@ -17,7 +17,7 @@ import (
 type KContext struct {
 	events *events.Receiver `msgpack:"-"`
 	cache  *caching.Manager `msgpack:"-"`
-	logger *logging.Logger  `msgpack:"-"`
+	logger logging.Logger   `msgpack:"-"`
 	Config *config.Config   `msgpack:"-"`
 
 	Context context.Context    `msgpack:"-"`
@@ -100,10 +100,10 @@ func (c *KContext) GetCache() *caching.Manager {
 	return c.cache
 }
 
-func (c *KContext) SetLogger(logger *logging.Logger) {
+func (c *KContext) SetLogger(logger logging.Logger) {
 	c.logger = logger
 }
 
-func (c *KContext) GetLogger() *logging.Logger {
+func (c *KContext) GetLogger() logging.Logger {
 	return c.logger
 }
