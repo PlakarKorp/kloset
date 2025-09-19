@@ -1,8 +1,10 @@
-package caching
+package caching_test
 
 import (
 	"testing"
 
+	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/stretchr/testify/require"
@@ -11,11 +13,12 @@ import (
 func TestPackingCache(t *testing.T) {
 	// Create a temporary cache manager for testing
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir)
+	cons := pebble.Constructor(tmpDir)
+	manager := caching.NewManager(cons)
 	defer manager.Close()
 
 	// Create a new packing cache
-	cache, err := newPackingCache(manager)
+	cache, err := caching.NewPackingCache(cons)
 	require.NoError(t, err)
 	defer cache.Close()
 
