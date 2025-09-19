@@ -181,7 +181,7 @@ func (snap *Builder) Close() error {
 	return nil
 }
 
-func (snap *Builder) Logger() *logging.Logger {
+func (snap *Builder) Logger() logging.Logger {
 	return snap.AppContext().GetLogger()
 }
 

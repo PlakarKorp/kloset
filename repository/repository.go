@@ -1064,7 +1064,7 @@ func (r *Repository) PutCurrentState() error {
 	return r.PutState(id, pr)
 }
 
-func (r *Repository) Logger() *logging.Logger {
+func (r *Repository) Logger() logging.Logger {
 	return r.AppContext().GetLogger()
 }
 

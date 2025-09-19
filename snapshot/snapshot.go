@@ -313,7 +313,7 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 	}, nil
 }
 
-func (snap *Snapshot) Logger() *logging.Logger {
+func (snap *Snapshot) Logger() logging.Logger {
 	return snap.AppContext().GetLogger()
 }
 
