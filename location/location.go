@@ -83,7 +83,12 @@ func (l *Location[T]) Lookup(uri string) (proto, location string, item T, flags 
 
 	for i, c := range uri {
 		if !allowedInUri(c) {
-			if i != 0 && strings.HasPrefix(uri[i:], ":") {
+			/*
+			 * don't accept one-character URI, it makes
+			 * things confusing for windows where
+			 * E:\path\to\foo is the norm.
+			 */
+			if i > 1 && strings.HasPrefix(uri[i:], ":") {
 				proto = uri[:i]
 				location = uri[i+1:]
 				location = strings.TrimPrefix(location, "//")

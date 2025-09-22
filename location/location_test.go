@@ -104,6 +104,14 @@ func TestLookup(t *testing.T) {
 			wantFound:    false,
 		},
 		{
+			name:         "windows absolute path",
+			uri:          "C:\\Users\\Plakup",
+			wantProto:    "default",
+			wantLocation: "C:\\Users\\Plakup",
+			wantValue:    "",
+			wantFound:    false,
+		},
+		{
 			name:         "empty string",
 			uri:          "",
 			wantProto:    "default",
