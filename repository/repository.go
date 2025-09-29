@@ -860,9 +860,10 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 	return func(yield func([]byte, error) bool) {
 		var currPackfile objects.MAC
 		var offset, nextOffset uint64
-		var size uint32
 		var leftOver bool
 		var currChks []state.Location
+		var size uint32            // size of the current range.
+		var accumulatedSize uint32 // total size we got in this iteration, possibly spanning multiple ranges.
 
 		for i := start; i < len(obj.Chunks); i++ {
 			loc, exists, err := r.state.GetSubpartForBlob(resources.RT_CHUNK, obj.Chunks[i].ContentMAC)
@@ -882,13 +883,14 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				currPackfile = loc.Packfile
 				offset = loc.Offset
 				size = loc.Length
+				accumulatedSize += loc.Length
 				nextOffset = uint64(loc.Length) + loc.Offset
 				leftOver = true
 				currChks = append(currChks, loc)
 				continue
 			}
 
-			if currPackfile != loc.Packfile || nextOffset != loc.Offset || size >= maxSize {
+			if currPackfile != loc.Packfile || nextOffset != loc.Offset {
 				data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 				if err != nil {
 					if !yield(nil, err) {
@@ -925,8 +927,15 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				continue
 			}
 
+			// No boundaries crossed before, now check that we are not over the
+			// limit caller gave us.
+			if accumulatedSize >= maxSize {
+				break
+			}
+
 			nextOffset = loc.Offset + uint64(loc.Length)
 			size += loc.Length
+			accumulatedSize += loc.Length
 
 			currChks = append(currChks, loc)
 		}

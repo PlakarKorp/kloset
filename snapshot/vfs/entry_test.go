@@ -168,7 +168,7 @@ func TestBigFile(t *testing.T) {
 	require.Equal(t, int64(0), seeked)
 
 	for i := int64(0); i < size/6; i++ {
-		n, err := fp.Read(buf[:6])
+		n, err := io.ReadFull(fp, buf[:6])
 		require.NoError(t, err, "at iteration %v", i)
 		require.Equal(t, 6, n, "at iteration %v", i)
 		require.Equal(t, "hello\n", string(buf[:n]), "at iteration %v", i)
