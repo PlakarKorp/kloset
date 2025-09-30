@@ -91,10 +91,26 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		// For non-directory entries, only process regular files.
 		if !e.Stat().Mode().IsRegular() {
 			if e.Stat().Mode().Type()&fs.ModeSymlink != 0 {
-				if err := exp.CreateLink(snap.AppContext(), e.SymlinkTarget, dest, exporter.SYMLINK); err != nil {
-					evt := events.FileErrorEvent(snap.Header.Identifier, entrypath,
-						fmt.Sprintf("failed to restore symlink: %s\n", err.Error()))
+				// Ensure the parent directory exists.
+				parentDir := path.Dir(dest)
+				if err := exp.CreateDirectory(snap.AppContext(), parentDir); err != nil {
+					err := fmt.Errorf("failed to create directory %q for symlink: %w", parentDir, err)
+					evt := events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error())
 					restoreContext.reportFailure(snap, err, evt)
+				} else {
+					if err := exp.CreateLink(snap.AppContext(), e.SymlinkTarget, dest, exporter.SYMLINK); err != nil {
+						evt := events.FileErrorEvent(snap.Header.Identifier, entrypath,
+							fmt.Sprintf("failed to restore symlink: %s\n", err.Error()))
+						restoreContext.reportFailure(snap, err, evt)
+					} else {
+						if !opts.SkipPermissions {
+							if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
+								err := fmt.Errorf("failed to set permissions on symlink %q: %w", entrypath, err)
+								evt := events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+								restoreContext.reportFailure(snap, err, evt)
+							}
+						}
+					}
 				}
 			}
 			return nil
