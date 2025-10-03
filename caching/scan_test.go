@@ -1,8 +1,10 @@
-package caching
+package caching_test
 
 import (
 	"testing"
 
+	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/stretchr/testify/require"
@@ -11,13 +13,16 @@ import (
 func TestScanCache(t *testing.T) {
 	// Create a temporary cache manager for testing
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir)
+	manager := caching.NewManager(pebble.Constructor(tmpDir))
 	defer manager.Close()
 
 	// Create a new scan cache
 	snapshotID := [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
-	cache, err := newScanCache(manager, snapshotID)
+	cache, err := manager.Scan(snapshotID)
 	require.NoError(t, err)
+
+	// down below we close and re-open cache
+	defer func() { cache.Close() }()
 
 	// Test file operations
 	t.Run("File Operations", func(t *testing.T) {
@@ -285,9 +290,8 @@ func TestScanCache(t *testing.T) {
 	t.Run("Key Enumeration", func(t *testing.T) {
 		// Clear the cache by closing and reopening it
 		cache.Close()
-		cache, err = newScanCache(manager, snapshotID)
+		cache, err = manager.Scan(snapshotID)
 		require.NoError(t, err)
-		defer cache.Close()
 
 		// Add some test data
 		err := cache.PutFile(1, "/test/file1.txt", []byte("data1"))

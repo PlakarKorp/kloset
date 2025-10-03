@@ -1,8 +1,10 @@
-package caching
+package caching_test
 
 import (
 	"testing"
 
+	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -10,16 +12,15 @@ import (
 func TestVFSCache(t *testing.T) {
 	// Create a temporary cache manager for testing
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir)
+	manager := caching.NewManager(pebble.Constructor(tmpDir))
 	defer manager.Close()
 
 	// Create a new VFS cache
 	repoID := uuid.New()
 	scheme := "test"
 	origin := "test-origin"
-	cache, err := newVFSCache(manager, repoID, scheme, origin, false)
+	cache, err := manager.VFS(repoID, scheme, origin, false)
 	require.NoError(t, err)
-	defer cache.Close()
 
 	// Test filename operations
 	t.Run("Filename Operations", func(t *testing.T) {

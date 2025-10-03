@@ -1,8 +1,10 @@
-package caching
+package caching_test
 
 import (
 	"testing"
 
+	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/google/uuid"
@@ -12,14 +14,13 @@ import (
 func TestRepositoryCache(t *testing.T) {
 	// Create a temporary cache manager for testing
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir)
+	manager := caching.NewManager(pebble.Constructor(tmpDir))
 	defer manager.Close()
 
 	// Create a new repository cache
 	repoID := uuid.New()
-	cache, err := newRepositoryCache(manager, repoID)
+	cache, err := manager.Repository(repoID)
 	require.NoError(t, err)
-	defer cache.Close()
 
 	// Test state operations
 	t.Run("State Operations", func(t *testing.T) {
