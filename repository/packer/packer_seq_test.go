@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/logging/testlogger"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/repository/packer"
@@ -312,7 +312,7 @@ func _TestPackerManager_Concurrency(t *testing.T) {
 func _TestPackerManager_ErrorHandling(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	// Set up a logger to avoid nil pointer dereference
-	ctx.SetLogger(logging.NewLogger(io.Discard, io.Discard))
+	ctx.SetLogger(testlogger.NewLogger(io.Discard, io.Discard))
 
 	storageConf := storage.NewConfiguration()
 	encodingFunc := func(r io.Reader) (io.Reader, error) { return r, nil }
