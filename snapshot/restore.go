@@ -94,7 +94,14 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				if err := exp.CreateLink(snap.AppContext(), e.SymlinkTarget, dest, exporter.SYMLINK); err != nil {
 					evt := events.FileErrorEvent(snap.Header.Identifier, entrypath,
 						fmt.Sprintf("failed to restore symlink: %s\n", err.Error()))
-					restoreContext.reportFailure(snap, err, evt)
+					return restoreContext.reportFailure(snap, err, evt)
+				}
+				if !opts.SkipPermissions {
+					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
+						err := fmt.Errorf("failed to set permissions on symlink %q: %w", entrypath, err)
+						evt := events.FileErrorEvent(snap.Header.Identifier, entrypath, err.Error())
+						return restoreContext.reportFailure(snap, err, evt)
+					}
 				}
 			}
 			return nil
