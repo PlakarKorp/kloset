@@ -154,10 +154,11 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 
 	// Sanity check, first let's verify that we know about everything in this
 	// snapshot otherwise we abort.
-	indexes := slices.Sorted(snap.ListIndexes())
 	expected := []string{"content-type", "dirpack"}
-	if !slices.Equal(indexes, expected) {
-		return nil, fmt.Errorf("Unexpected indexes found, snapshot might have been created with a more recent version.")
+	for idx := range snap.ListIndexes() {
+		if !slices.Contains(expected, idx) {
+			return nil, fmt.Errorf("Unexpected index %s found, snapshot might have been created with a more recent version.", idx)
+		}
 	}
 
 	return func(yield func(objects.MAC, error) bool) {
