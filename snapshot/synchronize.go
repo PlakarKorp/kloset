@@ -150,7 +150,7 @@ func (src *Snapshot) Synchronize(dst *Builder, commit bool) error {
 	imp := &syncImporter{
 		root:   "/",
 		typ:    "sync",
-		origin: fmt.Sprintf("%s:%s:%x", uuid.NewString(), src.repository.Configuration().RepositoryID, src.Header.Identifier),
+		origin: fmt.Sprintf("%s-%s-%x", uuid.NewString(), src.repository.Configuration().RepositoryID, src.Header.Identifier),
 		fs:     fs,
 		src:    src,
 	}
