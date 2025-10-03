@@ -16,7 +16,7 @@ func TestDBStore(t *testing.T) {
 
 	// Create a new scan cache
 	snapshotID := objects.MAC{1, 2, 3}
-	cache, err := newScanCache(manager, snapshotID)
+	cache, err := manager.Scan(snapshotID)
 	require.NoError(t, err)
 	defer cache.Close()
 
