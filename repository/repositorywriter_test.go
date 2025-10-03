@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/repository"
@@ -28,7 +29,7 @@ func TestNewRepositoryWriter(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -53,7 +54,7 @@ func TestBlobExists(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -82,7 +83,7 @@ func TestPutBlobIfNotExists(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -115,7 +116,7 @@ func TestPutBlob(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -144,7 +145,7 @@ func TestDeleteStateResource(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -173,7 +174,7 @@ func TestFlushTransaction(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -202,7 +203,7 @@ func TestCommitTransaction(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -231,7 +232,7 @@ func TestPutPackfile(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -265,7 +266,7 @@ func TestPutPtarPackfile(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir)
+	cacheManager := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache

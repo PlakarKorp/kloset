@@ -3,8 +3,6 @@ package caching
 import (
 	"fmt"
 	"iter"
-	"os"
-	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -12,28 +10,16 @@ import (
 )
 
 type _RepositoryCache struct {
-	*PebbleCache
-	manager    *Manager
-	cookiesDir string
+	kvcache
 }
 
-func newRepositoryCache(cacheManager *Manager, repositoryID uuid.UUID) (*_RepositoryCache, error) {
-	cookiesDir := filepath.Join(cacheManager.cacheDir, "cookies", repositoryID.String())
-	if err := os.MkdirAll(cookiesDir, 0700); err != nil {
-		return nil, err
-	}
-
-	cacheDir := filepath.Join(cacheManager.cacheDir, "repository", repositoryID.String())
-	db, err := New(cacheDir)
+func newRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryCache, error) {
+	cache, err := cons(CACHE_VERSION, "repository", repositoryID.String(), None)
 	if err != nil {
 		return nil, err
 	}
 
-	return &_RepositoryCache{
-		manager:     cacheManager,
-		cookiesDir:  cookiesDir,
-		PebbleCache: db,
-	}, nil
+	return &_RepositoryCache{kvcache{cache}}, nil
 }
 
 func (c *_RepositoryCache) PutState(stateID objects.MAC, data []byte) error {
