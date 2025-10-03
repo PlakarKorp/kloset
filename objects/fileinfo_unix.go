@@ -15,12 +15,12 @@ func FileInfoFromStat(stat fs.FileInfo) FileInfo {
 	Lgid := uint64(0)
 	Lnlink := uint16(0)
 
-	if _, ok := stat.Sys().(*syscall.Stat_t); ok {
-		Ldev = uint64(stat.Sys().(*syscall.Stat_t).Dev)
-		Lino = uint64(stat.Sys().(*syscall.Stat_t).Ino)
-		Luid = uint64(stat.Sys().(*syscall.Stat_t).Uid)
-		Lgid = uint64(stat.Sys().(*syscall.Stat_t).Gid)
-		Lnlink = uint16(stat.Sys().(*syscall.Stat_t).Nlink)
+	if sys, ok := stat.Sys().(*syscall.Stat_t); ok {
+		Ldev = uint64(sys.Dev)
+		Lino = uint64(sys.Ino)
+		Luid = uint64(sys.Uid)
+		Lgid = uint64(sys.Gid)
+		Lnlink = uint16(sys.Nlink)
 	}
 
 	return FileInfo{
