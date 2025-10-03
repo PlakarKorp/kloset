@@ -17,9 +17,8 @@ func TestRepositoryCache(t *testing.T) {
 
 	// Create a new repository cache
 	repoID := uuid.New()
-	cache, err := newRepositoryCache(manager, repoID)
+	cache, err := manager.Repository(repoID)
 	require.NoError(t, err)
-	defer cache.Close()
 
 	// Test state operations
 	t.Run("State Operations", func(t *testing.T) {

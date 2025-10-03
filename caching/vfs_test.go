@@ -17,9 +17,8 @@ func TestVFSCache(t *testing.T) {
 	repoID := uuid.New()
 	scheme := "test"
 	origin := "test-origin"
-	cache, err := newVFSCache(manager, repoID, scheme, origin, false)
+	cache, err := manager.VFS(repoID, scheme, origin, false)
 	require.NoError(t, err)
-	defer cache.Close()
 
 	// Test filename operations
 	t.Run("Filename Operations", func(t *testing.T) {
