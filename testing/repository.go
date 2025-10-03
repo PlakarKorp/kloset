@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -81,7 +82,7 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 		ctx.Stdout = bufout
 		ctx.Stderr = buferr
 	}
-	cache := caching.NewManager(tmpCacheDir)
+	cache := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	ctx.SetCache(cache)
 
 	// Create a new logger
