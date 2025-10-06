@@ -15,7 +15,7 @@ func TestPackingCache(t *testing.T) {
 	defer manager.Close()
 
 	// Create a new packing cache
-	cache, err := newPackingCache(manager)
+	cache, err := manager.Packing()
 	require.NoError(t, err)
 	defer cache.Close()
 

@@ -16,9 +16,8 @@ func TestMaintenanceCache(t *testing.T) {
 
 	// Create a new maintenance cache
 	repositoryID := uuid.New()
-	cache, err := newMaintenanceCache(manager, repositoryID)
+	cache, err := manager.Maintenance(repositoryID)
 	require.NoError(t, err)
-	defer cache.Close()
 
 	// Test snapshot operations
 	t.Run("Snapshot Operations", func(t *testing.T) {

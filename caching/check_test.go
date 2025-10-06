@@ -14,7 +14,7 @@ func TestCheckCache(t *testing.T) {
 	defer manager.Close()
 
 	// Create a new check cache
-	cache, err := newCheckCache(manager)
+	cache, err := manager.Check()
 	require.NoError(t, err)
 	defer cache.Close()
 
