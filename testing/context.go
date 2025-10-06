@@ -9,6 +9,7 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/logging/testlogger"
 	"github.com/stretchr/testify/require"
 )
 
@@ -39,11 +40,11 @@ func GenerateContext(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer) *
 	ctx.SetCache(cache)
 
 	// Create a new logger
-	var logger *logging.Logger
+	var logger logging.Logger
 	if bufout == nil || buferr == nil {
-		logger = logging.NewLogger(os.Stdout, os.Stderr)
+		logger = testlogger.NewLogger(os.Stdout, os.Stderr)
 	} else {
-		logger = logging.NewLogger(bufout, buferr)
+		logger = testlogger.NewLogger(bufout, buferr)
 	}
 	if bufout != nil && buferr != nil {
 		logger.EnableInfo()

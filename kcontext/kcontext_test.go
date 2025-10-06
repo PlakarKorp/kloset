@@ -5,7 +5,7 @@ import (
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/encryption/keypair"
-	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/logging/testlogger"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
@@ -13,7 +13,7 @@ import (
 func TestContext_SettersAndGetters(t *testing.T) {
 	ctx := NewKContext()
 
-	defaultLogger := logging.NewLogger(nil, nil)
+	defaultLogger := testlogger.NewLogger(nil, nil)
 	defaultCachingManager := caching.NewManager("/tmp/test_plakar")
 	defaultKeyPair, err := keypair.Generate()
 	require.NoError(t, err)

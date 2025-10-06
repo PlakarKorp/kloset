@@ -11,7 +11,7 @@ import (
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/logging/testlogger"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository/packer"
 	"github.com/PlakarKorp/kloset/resources"
@@ -29,7 +29,7 @@ func newTestKContext(t *testing.T) *kcontext.KContext {
 	ctx := kcontext.NewKContext()
 	cacheMgr := caching.NewManager(cachePath)
 	ctx.SetCache(cacheMgr)
-	ctx.SetLogger(logging.NewLogger(nil, nil))
+	ctx.SetLogger(testlogger.NewLogger(nil, nil))
 	return ctx
 }
 
