@@ -995,7 +995,20 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string, updated map[string][]byte) error {
+type dirAgg struct {
+	below vfs.Summary
+
+	children    uint64
+	directories uint64
+}
+
+func (a *dirAgg) foldChildSummary(child *vfs.Summary) {
+	a.children++
+	a.directories++
+	a.below.UpdateBelow(child)
+}
+
+func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -1023,21 +1036,6 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
-			abspath := prefix + dirPath
-
-			if buf, ok := updated[abspath]; ok {
-				dirBytes = buf
-			}
-
-			childDirEntry, err := vfs.EntryFromBytes(dirBytes)
-			if err != nil {
-				return err
-			}
-
-			dirEntry.Summary.Directory.Children++
-			dirEntry.Summary.Directory.Directories++
-			dirEntry.Summary.UpdateBelow(childDirEntry.Summary)
-
 			if err := writeFrame(builder, w, TypeVFSDirectory, dirBytes); err != nil {
 				return err
 			}
@@ -1123,7 +1121,6 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
-	updatedDirs := make(map[string][]byte)
 
 	errcsum, err := persistMACIndex(snap, backupCtx.indexes[0].erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
@@ -1147,6 +1144,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	}
 
 	var rootSummary *vfs.Summary
+
+	pending := make(map[string]*dirAgg)
 
 	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
 	for dirPath, bytes := range diriter {
@@ -1172,7 +1171,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := backupCtx.processChildren(snap, dirEntry, pw, prefix, updatedDirs); err != nil {
+		if err := backupCtx.processChildren(snap, dirEntry, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
@@ -1193,6 +1192,13 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		}
 		if err := erriter.Err(); err != nil {
 			return nil, nil, err
+		}
+
+		if agg := pending[dirPath]; agg != nil {
+			dirEntry.Summary.Directory.Children += agg.children
+			dirEntry.Summary.Directory.Directories += agg.directories
+			dirEntry.Summary.UpdateBelow(&agg.below)
+			delete(pending, dirPath)
 		}
 
 		dirEntry.Summary.UpdateAverages()
@@ -1229,10 +1235,17 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		updatedDirs[dirPath] = serialized
-		//		if err := backupCtx.recordEntry(dirEntry); err != nil {
-		//			return nil, nil, err
-		//}
+		parent := path.Dir(dirPath)
+		if parent != dirPath {
+			if pa := pending[parent]; pa != nil {
+				pa.foldChildSummary(dirEntry.Summary)
+			} else {
+				a := &dirAgg{}
+				a.foldChildSummary(dirEntry.Summary)
+				pending[parent] = a
+			}
+		}
+
 	}
 
 	rootcsum, err := persistIndex(snap, backupCtx.fileidx, resources.RT_VFS_BTREE,
