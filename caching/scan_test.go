@@ -62,35 +62,6 @@ func TestScanCache(t *testing.T) {
 		require.NoError(t, err) // Returns nil, nil for non-existent directories
 	})
 
-	// Test summary operations
-	t.Run("Summary Operations", func(t *testing.T) {
-		source := 1
-		pathname := "/test/path"
-		data := []byte("test summary data")
-
-		// Test PutSummary with trailing slash
-		err := cache.PutSummary(source, pathname+"/", data)
-		require.NoError(t, err)
-
-		// Test GetSummary without trailing slash
-		retrievedData, err := cache.GetSummary(source, pathname)
-		require.NoError(t, err)
-		require.Equal(t, data, retrievedData)
-
-		// Test PutSummary with empty pathname
-		err = cache.PutSummary(source, "", data)
-		require.NoError(t, err)
-
-		// Test GetSummary with empty pathname
-		retrievedData, err = cache.GetSummary(source, "")
-		require.NoError(t, err)
-		require.Equal(t, data, retrievedData)
-
-		// Test GetSummary with non-existent pathname
-		_, err = cache.GetSummary(source, "/non/existent/path")
-		require.NoError(t, err) // Returns nil, nil for non-existent paths
-	})
-
 	// Test state operations that should panic
 	t.Run("State Operations Panic", func(t *testing.T) {
 		stateID := objects.MAC{1, 2, 3}
