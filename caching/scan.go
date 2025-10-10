@@ -5,7 +5,6 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -52,24 +51,6 @@ func (c *ScanCache) PutDirectory(source int, directory string, data []byte) erro
 
 func (c *ScanCache) GetDirectory(source int, directory string) ([]byte, error) {
 	return c.get("__directory__", fmt.Sprintf("%d:%s", source, directory))
-}
-
-func (c *ScanCache) PutSummary(source int, pathname string, data []byte) error {
-	pathname = strings.TrimSuffix(pathname, "/")
-	if pathname == "" {
-		pathname = "/"
-	}
-
-	return c.put("__summary__", fmt.Sprintf("%d:%s", source, pathname), data)
-}
-
-func (c *ScanCache) GetSummary(source int, pathname string) ([]byte, error) {
-	pathname = strings.TrimSuffix(pathname, "/")
-	if pathname == "" {
-		pathname = "/"
-	}
-
-	return c.get("__summary__", fmt.Sprintf("%d:%s", source, pathname))
 }
 
 func (c *ScanCache) PutState(stateID objects.MAC, data []byte) error {

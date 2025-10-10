@@ -995,24 +995,6 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processDir(dirEntry *vfs.Entry, path string) error {
-	data, err := backupCtx.scanCache.GetSummary(0, path)
-	if err != nil {
-		return err
-	}
-
-	childSummary, err := vfs.SummaryFromBytes(data)
-	if err != nil {
-		return err
-	}
-
-	dirEntry.Summary.Directory.Children++
-	dirEntry.Summary.Directory.Directories++
-	dirEntry.Summary.UpdateBelow(childSummary)
-
-	return nil
-}
-
 func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
@@ -1041,10 +1023,15 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
-			abspath := prefix + dirPath
-			if err := backupCtx.processDir(dirEntry, abspath); err != nil {
+			childDirEntry, err := vfs.EntryFromBytes(dirBytes)
+			if err != nil {
 				return err
 			}
+
+			dirEntry.Summary.Directory.Children++
+			dirEntry.Summary.Directory.Directories++
+			dirEntry.Summary.UpdateBelow(childDirEntry.Summary)
+
 			if err := writeFrame(builder, w, TypeVFSDirectory, dirBytes); err != nil {
 				return err
 			}
@@ -1209,18 +1196,6 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		}
 
 		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, res.mac); err != nil {
-			return nil, nil, err
-		}
-
-		serializedSummary, err := dirEntry.Summary.ToBytes()
-		if err != nil {
-			backupCtx.recordError(dirPath, err)
-			return nil, nil, err
-		}
-
-		err = snap.scanCache.PutSummary(0, dirPath, serializedSummary)
-		if err != nil {
-			backupCtx.recordError(dirPath, err)
 			return nil, nil, err
 		}
 
