@@ -995,7 +995,7 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
+func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string, updated map[string][]byte) error {
 	file := directChildIter(backupCtx, "__file__", prefix)
 	dir := directChildIter(backupCtx, "__directory__", prefix)
 
@@ -1023,6 +1023,12 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
+			abspath := prefix + dirPath
+
+			if buf, ok := updated[abspath]; ok {
+				dirBytes = buf
+			}
+
 			childDirEntry, err := vfs.EntryFromBytes(dirBytes)
 			if err != nil {
 				return err
@@ -1117,6 +1123,8 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
+	updatedDirs := make(map[string][]byte)
+
 	errcsum, err := persistMACIndex(snap, backupCtx.indexes[0].erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
 	if err != nil {
@@ -1164,7 +1172,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := backupCtx.processChildren(snap, dirEntry, pw, prefix); err != nil {
+		if err := backupCtx.processChildren(snap, dirEntry, pw, prefix, updatedDirs); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
@@ -1221,9 +1229,10 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		if err := backupCtx.recordEntry(dirEntry); err != nil {
-			return nil, nil, err
-		}
+		updatedDirs[dirPath] = serialized
+		//		if err := backupCtx.recordEntry(dirEntry); err != nil {
+		//			return nil, nil, err
+		//}
 	}
 
 	rootcsum, err := persistIndex(snap, backupCtx.fileidx, resources.RT_VFS_BTREE,
