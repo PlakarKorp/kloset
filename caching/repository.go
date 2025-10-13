@@ -24,7 +24,7 @@ func newRepositoryCache(cacheManager *Manager, repositoryID uuid.UUID) (*_Reposi
 	}
 
 	cacheDir := filepath.Join(cacheManager.cacheDir, "repository", repositoryID.String())
-	db, err := New(cacheDir)
+	db, err := New(cacheDir, cacheManager.MemTableSize())
 	if err != nil {
 		return nil, err
 	}

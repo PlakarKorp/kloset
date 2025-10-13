@@ -35,7 +35,7 @@ func GenerateContext(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer) *
 		ctx.Stdout = bufout
 		ctx.Stderr = buferr
 	}
-	cache := caching.NewManager(tmpCacheDir)
+	cache := caching.NewManager(tmpCacheDir, 0)
 	ctx.SetCache(cache)
 
 	// Create a new logger

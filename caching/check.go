@@ -20,7 +20,7 @@ func newCheckCache(cacheManager *Manager) (*CheckCache, error) {
 	id := uuid.NewString()
 	cacheDir := filepath.Join(cacheManager.cacheDir, "check", id)
 
-	db, err := New(cacheDir)
+	db, err := New(cacheDir, cacheManager.MemTableSize())
 	if err != nil {
 		return nil, err
 	}

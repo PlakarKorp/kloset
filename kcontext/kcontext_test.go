@@ -14,7 +14,7 @@ func TestContext_SettersAndGetters(t *testing.T) {
 	ctx := NewKContext()
 
 	defaultLogger := logging.NewLogger(nil, nil)
-	defaultCachingManager := caching.NewManager("/tmp/test_plakar")
+	defaultCachingManager := caching.NewManager("/tmp/test_plakar", 0)
 	defaultKeyPair, err := keypair.Generate()
 	require.NoError(t, err)
 

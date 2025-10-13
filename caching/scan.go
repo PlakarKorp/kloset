@@ -20,7 +20,7 @@ type ScanCache struct {
 func newScanCache(cacheManager *Manager, snapshotID [32]byte) (*ScanCache, error) {
 	cacheDir := filepath.Join(cacheManager.cacheDir, "scan", fmt.Sprintf("%x", snapshotID))
 
-	db, err := New(cacheDir)
+	db, err := New(cacheDir, cacheManager.MemTableSize())
 	if err != nil {
 		return nil, err
 	}
