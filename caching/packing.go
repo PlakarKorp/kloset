@@ -22,7 +22,7 @@ func newPackingCache(cacheManager *Manager) (*PackingCache, error) {
 	id := uuid.NewString()
 	cacheDir := filepath.Join(cacheManager.cacheDir, "packing", id)
 
-	db, err := New(cacheDir)
+	db, err := New(cacheDir, cacheManager.MemTableSize())
 	if err != nil {
 		return nil, err
 	}

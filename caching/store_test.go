@@ -11,7 +11,7 @@ import (
 func TestDBStore(t *testing.T) {
 	// Create a temporary cache manager for testing
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir)
+	manager := NewManager(tmpDir, 0)
 	defer manager.Close()
 
 	// Create a new scan cache

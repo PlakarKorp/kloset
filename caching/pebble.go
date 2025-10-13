@@ -26,9 +26,9 @@ func (l NoopLoggerAndTracer) Fatalf(format string, args ...interface{})         
 func (l NoopLoggerAndTracer) Eventf(ctx context.Context, format string, args ...interface{}) {}
 func (l NoopLoggerAndTracer) IsTracingEnabled(ctx context.Context) bool                      { return false }
 
-func New(dir string) (*PebbleCache, error) {
+func New(dir string, memTableSize uint64) (*PebbleCache, error) {
 	opts := pebble.Options{
-		MemTableSize: 256 << 20,
+		MemTableSize: memTableSize,
 		Logger:       NoopLoggerAndTracer{},
 	}
 	db, err := pebble.Open(dir, &opts)

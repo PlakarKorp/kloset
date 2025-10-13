@@ -18,7 +18,8 @@ var (
 )
 
 type Manager struct {
-	closed atomic.Bool
+	closed       atomic.Bool
+	memTableSize uint64
 
 	cacheDir string
 
@@ -32,8 +33,23 @@ type Manager struct {
 	maintenanceCacheMutex sync.Mutex
 }
 
-func NewManager(cacheDir string) *Manager {
+func NewManager(cacheDir string, memTableSize uint64) *Manager {
+	switch memTableSize {
+	case 256:
+		memTableSize = 256 << 20
+	case 64:
+		memTableSize = 64 << 20
+	case 32:
+		memTableSize = 32 << 20
+	case 16:
+		memTableSize = 16 << 20
+	default:
+		memTableSize = 128 << 20
+	}
+
 	return &Manager{
+		memTableSize: memTableSize,
+
 		cacheDir: filepath.Join(cacheDir, CACHE_VERSION),
 
 		repositoryCache:  make(map[uuid.UUID]*_RepositoryCache),
@@ -66,6 +82,10 @@ func (m *Manager) Close() error {
 	// we may rework the interface later to allow for error handling
 	// at this point closing is best effort
 	return nil
+}
+
+func (m *Manager) MemTableSize() uint64 {
+	return m.memTableSize
 }
 
 func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
