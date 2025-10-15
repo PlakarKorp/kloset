@@ -27,7 +27,7 @@ func newTestKContext(t *testing.T) *kcontext.KContext {
 		t.Fatalf("failed to create cache dir: %v", err)
 	}
 	ctx := kcontext.NewKContext()
-	cacheMgr := caching.NewManager(cachePath, 0)
+	cacheMgr := caching.NewManager(cachePath)
 	ctx.SetCache(cacheMgr)
 	ctx.SetLogger(logging.NewLogger(nil, nil))
 	return ctx

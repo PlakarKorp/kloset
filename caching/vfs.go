@@ -17,7 +17,7 @@ type VFSCache struct {
 func newVFSCache(cacheManager *Manager, repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
 	cacheDir := filepath.Join(cacheManager.cacheDir, "vfs", repositoryID.String(), scheme, origin)
 
-	db, err := New(cacheDir, cacheManager.MemTableSize())
+	db, err := New(cacheDir)
 	if err != nil {
 		return nil, err
 	}

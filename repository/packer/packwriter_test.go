@@ -78,7 +78,7 @@ func TestNewDefaultConfiguration(t *testing.T) {
 
 func TestNewPackWriter(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -96,7 +96,7 @@ func TestNewPackWriter(t *testing.T) {
 
 func TestPackWriter_WriteBlob(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -117,7 +117,7 @@ func TestPackWriter_WriteBlob(t *testing.T) {
 
 func TestPackWriter_WriteBlobWithEncoder(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -145,7 +145,7 @@ func TestPackWriter_WriteBlobWithEncoder(t *testing.T) {
 
 func TestPackWriter_MultipleBlobs(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -171,7 +171,7 @@ func TestPackWriter_MultipleBlobs(t *testing.T) {
 
 func TestPackWriter_DifferentResourceTypes(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -203,7 +203,7 @@ func TestPackWriter_DifferentResourceTypes(t *testing.T) {
 
 func TestPackWriter_Size(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -222,7 +222,7 @@ func TestPackWriter_Size(t *testing.T) {
 
 func TestPackWriter_Finalize(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestPackWriter_Finalize(t *testing.T) {
 
 func TestPackWriter_FinalizeEmpty(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -263,7 +263,7 @@ func TestPackWriter_FinalizeEmpty(t *testing.T) {
 
 func TestPackWriter_Abort(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -281,7 +281,7 @@ func TestPackWriter_Abort(t *testing.T) {
 
 func TestPackWriter_AbortWithData(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -346,7 +346,7 @@ func TestBlobSerializationRoundTrip(t *testing.T) {
 
 func TestPackWriter_EncoderError(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -369,7 +369,7 @@ func TestPackWriter_EncoderError(t *testing.T) {
 
 func TestPackWriter_WriteBlobError(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -395,7 +395,7 @@ func TestPackWriter_WriteBlobError(t *testing.T) {
 // Whitebox tests that test internal functionality
 func TestPackWriter_WriteBlobInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -423,7 +423,7 @@ func TestPackWriter_WriteBlobInternal(t *testing.T) {
 
 func TestPackWriter_FinalizeInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -443,7 +443,7 @@ func TestPackWriter_FinalizeInternal(t *testing.T) {
 
 func TestPackWriter_SerializeIndexInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -469,7 +469,7 @@ func TestPackWriter_SerializeIndexInternal(t *testing.T) {
 
 func TestPackWriter_SerializeFooterInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -492,7 +492,7 @@ func TestPackWriter_SerializeFooterInternal(t *testing.T) {
 
 func TestPackWriter_WriteAndSumInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -512,7 +512,7 @@ func TestPackWriter_WriteAndSumInternal(t *testing.T) {
 
 func TestPackWriter_ConcurrentAccess(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -547,7 +547,7 @@ func TestPackWriter_ConcurrentAccess(t *testing.T) {
 
 func TestPackWriter_WriteAndSumMethod(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -568,7 +568,7 @@ func TestPackWriter_WriteAndSumMethod(t *testing.T) {
 
 func TestPackWriter_SerializeIndexMethod(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -595,7 +595,7 @@ func TestPackWriter_SerializeIndexMethod(t *testing.T) {
 
 func TestPackWriter_SerializeFooterMethod(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -620,7 +620,7 @@ func TestPackWriter_SerializeFooterMethod(t *testing.T) {
 
 func TestPackWriter_FinalizeFullPipeline(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -647,7 +647,7 @@ func TestPackWriter_FinalizeFullPipeline(t *testing.T) {
 
 func TestPackWriter_InternalStateAccess(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -678,7 +678,7 @@ func TestPackWriter_InternalStateAccess(t *testing.T) {
 
 func TestPackWriter_ErrorHandlingInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -705,7 +705,7 @@ func (fw *failingWriter) Write(p []byte) (n int, err error) {
 
 func TestPackWriter_ConcurrentInternalAccess(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -736,7 +736,7 @@ func TestPackWriter_ConcurrentInternalAccess(t *testing.T) {
 
 func TestPackWriter_CompleteWorkflow(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -769,7 +769,7 @@ func TestPackWriter_CompleteWorkflow(t *testing.T) {
 
 func TestPackWriter_AbortInternal(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -804,7 +804,7 @@ func (n *nopWriteCloser) Close() error { return nil }
 
 func TestPackWriter_serializeIndex_Direct(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)
@@ -844,7 +844,7 @@ func TestPackWriter_serializeIndex_Direct(t *testing.T) {
 
 func TestPackWriter_serializeFooter_Direct(t *testing.T) {
 	tmpDir := t.TempDir()
-	cacheManager := caching.NewManager(tmpDir, 0)
+	cacheManager := caching.NewManager(tmpDir)
 	defer cacheManager.Close()
 	packingCache, err := cacheManager.Packing()
 	require.NoError(t, err)

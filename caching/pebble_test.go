@@ -11,7 +11,7 @@ func TestPebbleCache(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Initialize a new PebbleCache
-	cache, err := New(tmpDir, 128<<20) // 128 MB cache size
+	cache, err := New(tmpDir)
 	require.NoError(t, err)
 	defer cache.Close()
 

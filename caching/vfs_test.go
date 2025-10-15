@@ -10,7 +10,7 @@ import (
 func TestVFSCache(t *testing.T) {
 	// Create a temporary cache manager for testing
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	// Create a new VFS cache

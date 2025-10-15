@@ -12,7 +12,7 @@ func TestNewManager(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Test creating a new manager
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	require.NotNil(t, manager)
 	require.Equal(t, tmpDir+"/"+CACHE_VERSION, manager.cacheDir)
 	require.NotNil(t, manager.repositoryCache)
@@ -22,7 +22,7 @@ func TestNewManager(t *testing.T) {
 
 func TestManagerClose(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 
 	// Test closing the manager
 	err := manager.Close()
@@ -42,7 +42,7 @@ func TestManagerClose(t *testing.T) {
 
 func TestManagerRepository(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	repoID := uuid.New()
@@ -60,7 +60,7 @@ func TestManagerRepository(t *testing.T) {
 
 func TestManagerVFS(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	repoID := uuid.New()
@@ -80,7 +80,7 @@ func TestManagerVFS(t *testing.T) {
 
 func TestManagerMaintenance(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	repoID := uuid.New()
@@ -98,7 +98,7 @@ func TestManagerMaintenance(t *testing.T) {
 
 func TestManagerScan(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	// Create a test MAC
@@ -116,7 +116,7 @@ func TestManagerScan(t *testing.T) {
 
 func TestManagerCheck(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	// Test creating a new check cache
@@ -131,7 +131,7 @@ func TestManagerCheck(t *testing.T) {
 
 func TestManagerPacking(t *testing.T) {
 	tmpDir := t.TempDir()
-	manager := NewManager(tmpDir, 0)
+	manager := NewManager(tmpDir)
 	defer manager.Close()
 
 	// Test creating a new packing cache

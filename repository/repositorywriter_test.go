@@ -28,7 +28,7 @@ func TestNewRepositoryWriter(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -53,7 +53,7 @@ func TestBlobExists(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -82,7 +82,7 @@ func TestPutBlobIfNotExists(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -115,7 +115,7 @@ func TestPutBlob(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -144,7 +144,7 @@ func TestDeleteStateResource(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -173,7 +173,7 @@ func TestFlushTransaction(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -202,7 +202,7 @@ func TestCommitTransaction(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -231,7 +231,7 @@ func TestPutPackfile(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
@@ -265,7 +265,7 @@ func TestPutPtarPackfile(t *testing.T) {
 	defer os.RemoveAll(tmpCacheDir)
 
 	// Create a cache manager
-	cacheManager := caching.NewManager(tmpCacheDir, 0)
+	cacheManager := caching.NewManager(tmpCacheDir)
 	require.NotNil(t, cacheManager)
 
 	// Create a scan cache
