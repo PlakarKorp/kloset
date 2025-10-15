@@ -41,6 +41,10 @@ func (c *ScanBatch) PutDirectory(source int, directory string, data []byte) erro
 	return c.Put([]byte(fmt.Sprintf("__directory__:%d:%s", source, directory)), data)
 }
 
+func (c *ScanBatch) PutFile(source int, file string, data []byte) error {
+	return c.Put([]byte(fmt.Sprintf("__file__:%d:%s", source, file)), data)
+}
+
 func (c *ScanCache) PutDirectory(source int, directory string, data []byte) error {
 	return c.put("__directory__", fmt.Sprintf("%d:%s", source, directory), data)
 }
