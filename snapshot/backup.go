@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,6 +44,9 @@ type BackupContext struct {
 
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
+
+	dirEntBatch *caching.ScanBatch
+	dirEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
 
@@ -78,6 +82,31 @@ type BackupOptions struct {
 var (
 	ErrOutOfRange = errors.New("out of range")
 )
+
+func (bc *BackupContext) recordDirectoryEntry(entry *vfs.Entry) error {
+	path := entry.Path()
+
+	bytes, err := entry.ToBytes()
+	if err != nil {
+		return err
+	}
+
+	if err := bc.dirEntBatch.PutDirectory(0, path, bytes); err != nil {
+		return err
+	}
+
+	bc.dirEntLock.Lock()
+	defer bc.dirEntLock.Unlock()
+	if bc.dirEntBatch.Count() >= 1000 {
+		if err := bc.dirEntBatch.Commit(); err != nil {
+			return err
+		}
+
+		bc.dirEntBatch = bc.scanCache.NewScanBatch()
+	}
+
+	return nil
+}
 
 func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
 	path := entry.Path()
@@ -763,6 +792,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		maxConcurrency: maxConcurrency,
 		noXattr:        backupOpts.NoXattr,
 		scanCache:      snap.scanCache,
+		dirEntBatch:    snap.scanCache.NewScanBatch(),
 		vfsCache:       vfsCache,
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan bool),
