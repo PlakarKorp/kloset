@@ -7,6 +7,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"sync"
 	"syscall"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -22,6 +23,11 @@ type cache struct {
 
 	dir           string
 	deleteOnClose bool
+}
+
+type batch struct {
+	pb  *pebble.Batch
+	mtx sync.Mutex
 }
 
 // Lifter from internal/logger pebble.
@@ -81,6 +87,10 @@ func (c *cache) Has(key []byte) (bool, error) {
 	del.Close()
 
 	return true, nil
+}
+
+func (c *cache) NewBatch() caching.Batch {
+	return &batch{pb: c.db.NewBatch()}
 }
 
 func (c *cache) Get(key []byte) ([]byte, error) {
@@ -156,4 +166,27 @@ func (c *cache) Close() error {
 		}
 	}
 	return ret
+}
+
+func (b *batch) Put(key, data []byte) error {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	return b.pb.Set(key, data, nil)
+}
+
+func (b *batch) Count() uint32 {
+	return b.pb.Count()
+}
+
+func (b *batch) Commit() error {
+	b.mtx.Lock()
+	defer b.mtx.Unlock()
+	if err := b.pb.Commit(pebble.NoSync); err != nil {
+		return err
+	} else {
+		// Only close the batch when commit was successful. See
+		// https://github.com/cockroachdb/pebble/commit/1e7ff1bb0fa43e557dcfeea44f3890c42663bc13
+		b.pb.Close()
+		return nil
+	}
 }
