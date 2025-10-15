@@ -29,6 +29,10 @@ func (c *ScanCache) NewScanBatch() *ScanBatch {
 	return &ScanBatch{c.cache.NewBatch()}
 }
 
+func (c *ScanCache) NewBatch() StateBatch {
+	return c.NewScanBatch()
+}
+
 func (c *ScanCache) PutFile(source int, file string, data []byte) error {
 	return c.put("__file__", fmt.Sprintf("%d:%s", source, file), data)
 }
@@ -43,6 +47,10 @@ func (c *ScanBatch) PutDirectory(source int, directory string, data []byte) erro
 
 func (c *ScanBatch) PutFile(source int, file string, data []byte) error {
 	return c.Put([]byte(fmt.Sprintf("__file__:%d:%s", source, file)), data)
+}
+
+func (c *ScanBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
+	return c.Put([]byte(fmt.Sprintf("__delta__:%d:%x:%x", blobType, blobCsum, packfile)), data)
 }
 
 func (c *ScanCache) PutDirectory(source int, directory string, data []byte) error {
