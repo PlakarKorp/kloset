@@ -2,39 +2,22 @@ package caching
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/google/uuid"
 )
 
 type CheckCache struct {
-	*PebbleCache
-
-	id      string
-	manager *Manager
+	kvcache
 }
 
-func newCheckCache(cacheManager *Manager) (*CheckCache, error) {
-	id := uuid.NewString()
-	cacheDir := filepath.Join(cacheManager.cacheDir, "check", id)
-
-	db, err := New(cacheDir, cacheManager.MemTableSize())
+func newCheckCache(cons Constructor) (*CheckCache, error) {
+	cache, err := cons(CACHE_VERSION, "check", uuid.NewString(), DeleteOnClose)
 	if err != nil {
 		return nil, err
 	}
 
-	return &CheckCache{
-		id:          id,
-		PebbleCache: db,
-		manager:     cacheManager,
-	}, nil
-}
-
-func (c *CheckCache) Close() error {
-	c.PebbleCache.Close()
-	return os.RemoveAll(filepath.Join(c.manager.cacheDir, "check", c.id))
+	return &CheckCache{kvcache{cache}}, nil
 }
 
 func (c *CheckCache) PutPackfileStatus(mac objects.MAC, err []byte) error {

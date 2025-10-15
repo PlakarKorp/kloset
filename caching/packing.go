@@ -3,8 +3,6 @@ package caching
 import (
 	"fmt"
 	"iter"
-	"os"
-	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -12,31 +10,16 @@ import (
 )
 
 type PackingCache struct {
-	*PebbleCache
-
-	id      string
-	manager *Manager
+	kvcache
 }
 
-func newPackingCache(cacheManager *Manager) (*PackingCache, error) {
-	id := uuid.NewString()
-	cacheDir := filepath.Join(cacheManager.cacheDir, "packing", id)
-
-	db, err := New(cacheDir, cacheManager.MemTableSize())
+func newPackingCache(cons Constructor) (*PackingCache, error) {
+	cache, err := cons(CACHE_VERSION, "packing", uuid.NewString(), DeleteOnClose)
 	if err != nil {
 		return nil, err
 	}
 
-	return &PackingCache{
-		id:          id,
-		PebbleCache: db,
-		manager:     cacheManager,
-	}, nil
-}
-
-func (c *PackingCache) Close() error {
-	c.PebbleCache.Close()
-	return os.RemoveAll(filepath.Join(c.manager.cacheDir, "packing", c.id))
+	return &PackingCache{kvcache{cache}}, nil
 }
 
 func (c *PackingCache) PutBlob(Type resources.Type, mac objects.MAC) error {

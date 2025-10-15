@@ -2,7 +2,7 @@ package caching
 
 import (
 	"fmt"
-	"path/filepath"
+	"iter"
 	"sync"
 	"sync/atomic"
 
@@ -13,15 +13,40 @@ import (
 const CACHE_VERSION = "2.0.0"
 
 var (
-	ErrInUse  = fmt.Errorf("cache in use")
 	ErrClosed = fmt.Errorf("cache closed")
 )
 
-type Manager struct {
-	closed       atomic.Bool
-	memTableSize uint64
+type Option int
 
-	cacheDir string
+const (
+	None Option = iota
+
+	DeleteOnClose
+)
+
+type Cache interface {
+	Put([]byte, []byte) error
+	Has([]byte) (bool, error)
+	Get([]byte) ([]byte, error)
+
+	// Must support Delete during Scan
+	Delete([]byte) error
+
+	// reverse is only to accomodate EnumerateKeysWithPrefix, once
+	// that doesn't need it anymore this can become simpler again.
+	// key returned by an iteration might get invalidated on
+	// subsequent iterations.
+	Scan([]byte, bool) iter.Seq2[[]byte, []byte]
+
+	Close() error
+}
+
+type Constructor func(version, name, repoid string, opts Option) (Cache, error)
+
+type Manager struct {
+	closed atomic.Bool
+
+	cons Constructor
 
 	repositoryCache      map[uuid.UUID]*_RepositoryCache
 	repositoryCacheMutex sync.Mutex
@@ -33,24 +58,9 @@ type Manager struct {
 	maintenanceCacheMutex sync.Mutex
 }
 
-func NewManager(cacheDir string, memTableSize uint64) *Manager {
-	switch memTableSize {
-	case 256:
-		memTableSize = 256 << 20
-	case 64:
-		memTableSize = 64 << 20
-	case 32:
-		memTableSize = 32 << 20
-	case 16:
-		memTableSize = 16 << 20
-	default:
-		memTableSize = 128 << 20
-	}
-
+func NewManager(cons Constructor) *Manager {
 	return &Manager{
-		memTableSize: memTableSize,
-
-		cacheDir: filepath.Join(cacheDir, CACHE_VERSION),
+		cons: cons,
 
 		repositoryCache:  make(map[uuid.UUID]*_RepositoryCache),
 		vfsCache:         make(map[string]*VFSCache),
@@ -84,10 +94,6 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func (m *Manager) MemTableSize() uint64 {
-	return m.memTableSize
-}
-
 func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
 	if m.closed.Load() {
 		return nil, ErrClosed
@@ -102,7 +108,12 @@ func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string, dele
 		return cache, nil
 	}
 
-	if cache, err := newVFSCache(m, repositoryID, scheme, origin, deleteOnClose); err != nil {
+	var opt Option
+	if deleteOnClose {
+		opt = DeleteOnClose
+	}
+
+	if cache, err := newVFSCache(m.cons, repositoryID, scheme, origin, opt); err != nil {
 		return nil, err
 	} else {
 		m.vfsCache[key] = cache
@@ -122,7 +133,7 @@ func (m *Manager) Repository(repositoryID uuid.UUID) (*_RepositoryCache, error) 
 		return cache, nil
 	}
 
-	if cache, err := newRepositoryCache(m, repositoryID); err != nil {
+	if cache, err := newRepositoryCache(m.cons, repositoryID); err != nil {
 		return nil, err
 	} else {
 		m.repositoryCache[repositoryID] = cache
@@ -142,7 +153,7 @@ func (m *Manager) Maintenance(repositoryID uuid.UUID) (*MaintenanceCache, error)
 		return cache, nil
 	}
 
-	if cache, err := newMaintenanceCache(m, repositoryID); err != nil {
+	if cache, err := newMaintenanceCache(m.cons, repositoryID); err != nil {
 		return nil, err
 	} else {
 		m.maintenanceCache[repositoryID] = cache
@@ -152,15 +163,15 @@ func (m *Manager) Maintenance(repositoryID uuid.UUID) (*MaintenanceCache, error)
 
 // XXX - beware that caller has responsibility to call Close() on the returned cache
 func (m *Manager) Scan(snapshotID objects.MAC) (*ScanCache, error) {
-	return newScanCache(m, snapshotID)
+	return newScanCache(m.cons, snapshotID)
 }
 
 // XXX - beware that caller has responsibility to call Close() on the returned cache
 func (m *Manager) Check() (*CheckCache, error) {
-	return newCheckCache(m)
+	return newCheckCache(m.cons)
 }
 
 // XXX - beware that caller has responsibility to call Close() on the returned cache
 func (m *Manager) Packing() (*PackingCache, error) {
-	return newPackingCache(m)
+	return newPackingCache(m.cons)
 }

@@ -5,30 +5,22 @@ import (
 	"encoding/hex"
 	"fmt"
 	"iter"
-	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/objects"
-	"github.com/cockroachdb/pebble/v2"
 	"github.com/google/uuid"
 )
 
 type MaintenanceCache struct {
-	*PebbleCache
-	manager *Manager
+	kvcache
 }
 
-func newMaintenanceCache(cacheManager *Manager, repositoryID uuid.UUID) (*MaintenanceCache, error) {
-	cacheDir := filepath.Join(cacheManager.cacheDir, "maintenance", repositoryID.String())
-
-	db, err := New(cacheDir, cacheManager.MemTableSize())
+func newMaintenanceCache(cons Constructor, repositoryID uuid.UUID) (*MaintenanceCache, error) {
+	cache, err := cons(CACHE_VERSION, "maintenance", repositoryID.String(), None)
 	if err != nil {
 		return nil, err
 	}
 
-	return &MaintenanceCache{
-		PebbleCache: db,
-		manager:     cacheManager,
-	}, nil
+	return &MaintenanceCache{kvcache{cache}}, nil
 }
 
 func (c *MaintenanceCache) PutSnapshot(snapshotID objects.MAC, data []byte) error {
@@ -66,11 +58,7 @@ func (c *MaintenanceCache) GetPackfiles(snapshotID objects.MAC) iter.Seq[objects
 }
 
 func (c *MaintenanceCache) DeleletePackfiles(snapshotID objects.MAC) error {
-	iter, _ := c.db.NewIter(&pebble.IterOptions{})
-	defer iter.Close()
-
-	for iter.First(); iter.Valid(); iter.Next() {
-		key := iter.Key()
+	for key, _ := range c.cache.Scan(nil, false) {
 		hex_mac := string(key[bytes.LastIndexByte(key, byte(':'))+1:])
 		mac, err := hex.DecodeString(hex_mac)
 		if err != nil {
@@ -78,7 +66,7 @@ func (c *MaintenanceCache) DeleletePackfiles(snapshotID objects.MAC) error {
 		}
 
 		if objects.MAC(mac) == snapshotID {
-			err := c.db.Delete(iter.Key(), nil)
+			err := c.cache.Delete(key)
 			if err != nil {
 				return err
 			}

@@ -1,47 +1,22 @@
 package caching
 
 import (
-	"os"
-	"path/filepath"
+	"path"
 
 	"github.com/google/uuid"
 )
 
 type VFSCache struct {
-	*PebbleCache
-	manager       *Manager
-	repoId        uuid.UUID
-	deleteOnClose bool
+	kvcache
 }
 
-func newVFSCache(cacheManager *Manager, repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
-	cacheDir := filepath.Join(cacheManager.cacheDir, "vfs", repositoryID.String(), scheme, origin)
-
-	db, err := New(cacheDir, cacheManager.MemTableSize())
+func newVFSCache(cons Constructor, repositoryID uuid.UUID, scheme string, origin string, opt Option) (*VFSCache, error) {
+	cache, err := cons(CACHE_VERSION, "vfs", path.Join(repositoryID.String(), scheme, origin), opt)
 	if err != nil {
 		return nil, err
 	}
 
-	return &VFSCache{
-		PebbleCache:   db,
-		manager:       cacheManager,
-		repoId:        repositoryID,
-		deleteOnClose: deleteOnClose,
-	}, nil
-}
-
-func (c *VFSCache) Close() error {
-	if err := c.PebbleCache.Close(); err != nil {
-		return err
-	}
-
-	if c.deleteOnClose {
-		// Note this is two level above the cache dir, because we don't want to
-		// leave behind empty directories.
-		return os.RemoveAll(filepath.Join(c.manager.cacheDir, "vfs", c.repoId.String()))
-	} else {
-		return nil
-	}
+	return &VFSCache{kvcache{cache}}, nil
 }
 
 func (c *VFSCache) PutCachedPath(pathname string, data []byte) error {

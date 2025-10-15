@@ -3,38 +3,22 @@ package caching
 import (
 	"fmt"
 	"iter"
-	"os"
-	"path/filepath"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 )
 
 type ScanCache struct {
-	*PebbleCache
-
-	snapshotID [32]byte
-	manager    *Manager
+	kvcache
 }
 
-func newScanCache(cacheManager *Manager, snapshotID [32]byte) (*ScanCache, error) {
-	cacheDir := filepath.Join(cacheManager.cacheDir, "scan", fmt.Sprintf("%x", snapshotID))
-
-	db, err := New(cacheDir, cacheManager.MemTableSize())
+func newScanCache(cons Constructor, snapshotID [32]byte) (*ScanCache, error) {
+	cache, err := cons(CACHE_VERSION, "scan", fmt.Sprintf("%x", snapshotID), DeleteOnClose)
 	if err != nil {
 		return nil, err
 	}
 
-	return &ScanCache{
-		PebbleCache: db,
-		snapshotID:  snapshotID,
-		manager:     cacheManager,
-	}, nil
-}
-
-func (c *ScanCache) Close() error {
-	c.PebbleCache.Close()
-	return os.RemoveAll(filepath.Join(c.manager.cacheDir, "scan", fmt.Sprintf("%x", c.snapshotID)))
+	return &ScanCache{kvcache{cache}}, nil
 }
 
 func (c *ScanCache) PutFile(source int, file string, data []byte) error {
@@ -145,25 +129,9 @@ func (c *ScanCache) EnumerateKeysWithPrefix(prefix string, reverse bool) iter.Se
 	l := len(prefix)
 
 	return func(yield func(string, []byte) bool) {
-		iter, _ := c.db.NewIter(MakePrefixIterIterOptions([]byte(prefix)))
-		defer iter.Close()
-
-		if reverse {
-			iter.Last()
-		} else {
-			iter.First()
-		}
-
-		for iter.Valid() {
-			key := iter.Key()
-			if !yield(string(key)[l:], iter.Value()) {
+		for key, val := range c.cache.Scan([]byte(prefix), reverse) {
+			if !yield(string(key)[l:], val) {
 				return
-			}
-
-			if reverse {
-				iter.Prev()
-			} else {
-				iter.Next()
 			}
 		}
 	}
