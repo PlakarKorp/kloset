@@ -91,12 +91,12 @@ func (bc *BackupContext) recordDirectoryEntry(entry *vfs.Entry) error {
 		return err
 	}
 
+	bc.dirEntLock.Lock()
+	defer bc.dirEntLock.Unlock()
+
 	if err := bc.dirEntBatch.PutDirectory(0, path, bytes); err != nil {
 		return err
 	}
-
-	bc.dirEntLock.Lock()
-	defer bc.dirEntLock.Unlock()
 	if bc.dirEntBatch.Count() >= 1000 {
 		if err := bc.dirEntBatch.Commit(); err != nil {
 			return err
@@ -208,7 +208,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		if record.FileInfo.Mode().IsDir() {
 			atomic.AddUint64(&stats.ndirs, +1)
 			entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-			if err := backupCtx.recordEntry(entry); err != nil {
+			if err := backupCtx.recordDirectoryEntry(entry); err != nil {
 				backupCtx.recordError(record.Pathname, err)
 			}
 			return
@@ -304,6 +304,13 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		// have been cancelled while the importer is
 		// trying to still produce some records.
 	}
+
+	// Flush any left over dir entries.
+	if err := backupCtx.dirEntBatch.Commit(); err != nil {
+		return err
+	}
+
+	backupCtx.dirEntBatch = nil
 
 	backupCtx.emitter.Emit("snapshot.backup.importer.done", map[string]any{
 		"snapshot_id": snap.Header.Identifier[:],

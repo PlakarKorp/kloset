@@ -24,7 +24,7 @@ const (
 	DeleteOnClose
 )
 
-// This must be goroutine safe.
+// This is not goroutine safe, external synchronization must be provided.
 type Batch interface {
 	Put([]byte, []byte) error
 	Count() uint32

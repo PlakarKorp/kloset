@@ -7,7 +7,6 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
-	"sync"
 	"syscall"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -26,8 +25,7 @@ type cache struct {
 }
 
 type batch struct {
-	pb  *pebble.Batch
-	mtx sync.Mutex
+	pb *pebble.Batch
 }
 
 // Lifter from internal/logger pebble.
@@ -169,8 +167,6 @@ func (c *cache) Close() error {
 }
 
 func (b *batch) Put(key, data []byte) error {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
 	return b.pb.Set(key, data, nil)
 }
 
@@ -179,8 +175,6 @@ func (b *batch) Count() uint32 {
 }
 
 func (b *batch) Commit() error {
-	b.mtx.Lock()
-	defer b.mtx.Unlock()
 	if err := b.pb.Commit(pebble.NoSync); err != nil {
 		return err
 	} else {
