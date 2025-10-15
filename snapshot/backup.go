@@ -79,7 +79,7 @@ var (
 	ErrOutOfRange = errors.New("out of range")
 )
 
-func (bc *BackupContext) recordDirectoryEntry(entry *vfs.Entry) error {
+func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 	path := entry.Path()
 
 	bytes, err := entry.ToBytes()
@@ -90,9 +90,16 @@ func (bc *BackupContext) recordDirectoryEntry(entry *vfs.Entry) error {
 	bc.dirEntLock.Lock()
 	defer bc.dirEntLock.Unlock()
 
-	if err := bc.dirEntBatch.PutDirectory(0, path, bytes); err != nil {
-		return err
+	if entry.FileInfo.IsDir() {
+		if err := bc.dirEntBatch.PutDirectory(0, path, bytes); err != nil {
+			return err
+		}
+	} else {
+		if err := bc.dirEntBatch.PutFile(0, path, bytes); err != nil {
+			return err
+		}
 	}
+
 	if bc.dirEntBatch.Count() >= 1000 {
 		if err := bc.dirEntBatch.Commit(); err != nil {
 			return err
@@ -188,7 +195,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		if record.FileInfo.Mode().IsDir() {
 			atomic.AddUint64(&stats.ndirs, +1)
 			entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-			if err := backupCtx.recordDirectoryEntry(entry); err != nil {
+			if err := backupCtx.batchRecordEntry(entry); err != nil {
 				backupCtx.recordError(record.Pathname, err)
 			}
 			return
@@ -274,7 +281,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		// trying to still produce some records.
 	}
 
-	// Flush any left over dir entries.
+	// Flush any left over entries.
 	if err := backupCtx.dirEntBatch.Commit(); err != nil {
 		return err
 	}
@@ -918,7 +925,7 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 		return err
 	}
 
-	return backupCtx.recordEntry(fileEntry)
+	return backupCtx.batchRecordEntry(fileEntry)
 }
 
 func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
