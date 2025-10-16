@@ -45,6 +45,11 @@ func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConf
 		inflightsMACs[Type] = &sync.Map{}
 	}
 
+	// Cap maxConcurrency to prevent index out of range errors
+	if maxConcurrency > ctx.MaxConcurrency {
+		maxConcurrency = ctx.MaxConcurrency
+	}
+
 	// VFS entries dedicated channel
 	nChan := maxConcurrency + 1
 	ret := &seqPackerManager{
