@@ -244,11 +244,6 @@ func readDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
 func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	prefix := e.Path()
 
-	// if chroot is set, prefix must be relative to it for ScanFrom to work as expected
-	if fsc.chroot != "" {
-		prefix = path.Join(fsc.chroot, prefix)
-	}
-
 	objectMac, ok, err := fsc.dirpack.Find(prefix)
 	if err != nil {
 		return nil, err
