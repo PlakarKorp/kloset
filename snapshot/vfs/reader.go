@@ -218,3 +218,23 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 
 	return or.off, nil
 }
+
+func (or *ObjectReader) ReadAt(p []byte, off int64) (int, error) {
+	if off < 0 {
+		return 0, os.ErrInvalid
+	}
+	if off >= or.size {
+		return 0, io.EOF
+	}
+
+	cr := NewObjectReader(or.repo, or.object, or.size)
+	if _, err := cr.Seek(off, io.SeekStart); err != nil {
+		return 0, err
+	}
+
+	n, err := io.ReadFull(cr, p)
+	if err == io.ErrUnexpectedEOF {
+		return n, io.EOF
+	}
+	return n, err
+}
