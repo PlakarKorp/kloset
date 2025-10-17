@@ -45,8 +45,8 @@ type BackupContext struct {
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
 
-	dirEntBatch *caching.ScanBatch
-	dirEntLock  sync.Mutex
+	vfsEntBatch *caching.ScanBatch
+	vfsEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
 
@@ -91,25 +91,25 @@ func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 		return err
 	}
 
-	bc.dirEntLock.Lock()
-	defer bc.dirEntLock.Unlock()
+	bc.vfsEntLock.Lock()
+	defer bc.vfsEntLock.Unlock()
 
 	if entry.FileInfo.IsDir() {
-		if err := bc.dirEntBatch.PutDirectory(0, path, bytes); err != nil {
+		if err := bc.vfsEntBatch.PutDirectory(0, path, bytes); err != nil {
 			return err
 		}
 	} else {
-		if err := bc.dirEntBatch.PutFile(0, path, bytes); err != nil {
+		if err := bc.vfsEntBatch.PutFile(0, path, bytes); err != nil {
 			return err
 		}
 	}
 
-	if bc.dirEntBatch.Count() >= 1000 {
-		if err := bc.dirEntBatch.Commit(); err != nil {
+	if bc.vfsEntBatch.Count() >= 1000 {
+		if err := bc.vfsEntBatch.Commit(); err != nil {
 			return err
 		}
 
-		bc.dirEntBatch = bc.scanCache.NewScanBatch()
+		bc.vfsEntBatch = bc.scanCache.NewScanBatch()
 	}
 
 	return nil
@@ -313,11 +313,11 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	}
 
 	// Flush any left over entries.
-	if err := backupCtx.dirEntBatch.Commit(); err != nil {
+	if err := backupCtx.vfsEntBatch.Commit(); err != nil {
 		return err
 	}
 
-	backupCtx.dirEntBatch = nil
+	backupCtx.vfsEntBatch = nil
 
 	backupCtx.emitter.Emit("snapshot.backup.importer.done", map[string]any{
 		"snapshot_id": snap.Header.Identifier[:],
@@ -806,7 +806,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		maxConcurrency: maxConcurrency,
 		noXattr:        backupOpts.NoXattr,
 		scanCache:      snap.scanCache,
-		dirEntBatch:    snap.scanCache.NewScanBatch(),
+		vfsEntBatch:    snap.scanCache.NewScanBatch(),
 		vfsCache:       vfsCache,
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan bool),
