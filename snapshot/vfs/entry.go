@@ -403,6 +403,18 @@ func (vf *vfile) Seek(offset int64, whence int) (int64, error) {
 	return vf.rd.Seek(offset, whence)
 }
 
+func (vf *vfile) ReadAt(p []byte, off int64) (int, error) {
+	if vf.closed {
+		return 0, fs.ErrClosed
+	}
+
+	if vf.entry.ResolvedObject == nil {
+		return 0, fs.ErrInvalid
+	}
+
+	return vf.rd.ReadAt(p, off)
+}
+
 func (vf *vfile) Close() error {
 	if vf.closed {
 		return fs.ErrClosed
