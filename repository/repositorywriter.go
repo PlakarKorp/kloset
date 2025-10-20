@@ -213,6 +213,10 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
+
+	db := r.deltaState.NewBatch()
+	sb := r.state.NewBatch()
+
 	for _, blob := range pfile.Entries() {
 		delta := &state.DeltaEntry{
 			Type:    blob.Type,
@@ -225,14 +229,18 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 			},
 		}
 
-		if err := r.deltaState.PutDelta(delta); err != nil {
+		serialized := delta.ToBytes()
+		if err := db.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, serialized); err != nil {
 			return err
 		}
 
-		if err := r.state.PutDelta(delta); err != nil {
+		if err := sb.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, serialized); err != nil {
 			return err
 		}
 	}
+
+	db.Commit()
+	sb.Commit()
 
 	if err := r.deltaState.PutPackfile(r.currentStateID, mac); err != nil {
 		return err
