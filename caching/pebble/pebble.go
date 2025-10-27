@@ -11,6 +11,7 @@ import (
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/cockroachdb/pebble/v2"
+	"github.com/cockroachdb/pebble/v2/vfs"
 )
 
 var ErrInUse = fmt.Errorf("cache in use")
@@ -39,10 +40,20 @@ func Constructor(dir string) caching.Constructor {
 	}
 }
 
+func InMemoryConstructor() caching.Constructor {
+	return func(version, name, repoid string, opt caching.Option) (caching.Cache, error) {
+		return New("", opt == caching.DeleteOnClose)
+	}
+}
+
 func New(dir string, deletedOnClose bool) (caching.Cache, error) {
 	opts := pebble.Options{
 		MemTableSize: 256 << 20,
 		Logger:       noopLoggerAndTracer{},
+	}
+	if dir == "" {
+		dir = "in-memory"
+		opts.FS = vfs.NewMem()
 	}
 	db, err := pebble.Open(dir, &opts)
 	if err != nil {
