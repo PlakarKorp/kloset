@@ -52,6 +52,8 @@ type BackupContext struct {
 	flushEnded chan bool
 
 	indexes []*BackupIndexes // Aligned with the number of importers.
+
+	emitter *events.Emitter
 }
 
 type scanStats struct {
@@ -133,18 +135,30 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	case record.Error != nil:
 		record := record.Error
 		backupCtx.recordError(record.Pathname, record.Err)
-		snap.Event(events.PathErrorEvent(snap.Header.Identifier, record.Pathname, record.Err.Error()))
+
+		backupCtx.emitter.Emit("backup.path.error", events.Error, map[string]any{
+			"snapshot_id": snap.Header.Identifier[:],
+			"path":        record.Pathname,
+			"error":       record.Err.Error(),
+		})
 
 	case record.Record != nil:
 		record := record.Record
 		defer record.Close()
 
-		snap.Event(events.PathEvent(snap.Header.Identifier, record.Pathname))
+		backupCtx.emitter.Emit("backup.path", events.Info, map[string]any{
+			"snapshot_id": snap.Header.Identifier[:],
+			"path":        record.Pathname,
+		})
 
 		// XXX: Remove this when we introduce the Location object.
 		repoLocation, err := snap.repository.Location()
 		if err != nil {
-			snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
+			backupCtx.emitter.Emit("backup.file.error", events.Error, map[string]any{
+				"snapshot_id": snap.Header.Identifier[:],
+				"path":        record.Pathname,
+				"error":       err.Error(),
+			})
 			backupCtx.recordError(record.Pathname, err)
 			return
 		}
@@ -165,12 +179,23 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 			return
 		}
 
-		snap.Event(events.FileEvent(snap.Header.Identifier, record.Pathname))
+		backupCtx.emitter.Emit("backup.file", events.Error, map[string]any{
+			"snapshot_id": snap.Header.Identifier[:],
+			"path":        record.Pathname,
+		})
+
 		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
-			snap.Event(events.FileErrorEvent(snap.Header.Identifier, record.Pathname, err.Error()))
+			backupCtx.emitter.Emit("backup.file.error", events.Error, map[string]any{
+				"snapshot_id": snap.Header.Identifier[:],
+				"path":        record.Pathname,
+				"error":       err.Error(),
+			})
 			backupCtx.recordError(record.Pathname, err)
 		} else {
-			snap.Event(events.FileOKEvent(snap.Header.Identifier, record.Pathname, record.FileInfo.Size()))
+			backupCtx.emitter.Emit("backup.file.ok", events.Error, map[string]any{
+				"snapshot_id": snap.Header.Identifier[:],
+				"path":        record.Pathname,
+			})
 		}
 
 		if record.IsXattr {
@@ -203,9 +228,9 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
-	startEvent := events.StartImporterEvent()
-	startEvent.SnapshotID = snap.Header.Identifier
-	snap.Event(startEvent)
+	backupCtx.emitter.Emit("backup.importer.start", events.Error, map[string]any{
+		"snapshot_id": snap.Header.Identifier[:],
+	})
 
 	var stats scanStats
 	for i, cker := range ckers {
@@ -245,12 +270,12 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		// trying to still produce some records.
 	}
 
-	doneEvent := events.DoneImporterEvent()
-	doneEvent.SnapshotID = snap.Header.Identifier
-	doneEvent.NumFiles = stats.nfiles
-	doneEvent.NumDirectories = stats.ndirs
-	doneEvent.Size = stats.size
-	snap.Event(doneEvent)
+	backupCtx.emitter.Emit("backup.importer.done", events.Error, map[string]any{
+		"snapshot_id": snap.Header.Identifier[:],
+		"nfiles":      stats.nfiles,
+		"ndirs":       stats.ndirs,
+		"size":        stats.size,
+	})
 
 	return nil
 }
@@ -315,8 +340,10 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 
 func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error {
 	beginTime := time.Now()
-	snap.Event(events.StartEvent())
-	defer snap.Event(events.DoneEvent())
+
+	emitter := snap.AppContext().Events().Emitter()
+	emitter.Emit("snapshot.backup.start", events.Info, map[string]any{})
+	defer emitter.Emit("snapshot.backup.done", events.Info, map[string]any{})
 
 	done, err := snap.Lock()
 	if err != nil {
@@ -364,6 +391,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 		snap.repository.PackerManager.Wait()
 		return err
 	}
+	backupCtx.emitter = emitter
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
@@ -1199,7 +1227,10 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, dirPath))
+		backupCtx.emitter.Emit("backup.directory.ok", events.Error, map[string]any{
+			"snapshot_id": snap.Header.Identifier[:],
+			"path":        dirPath,
+		})
 		if dirPath == "/" {
 			if rootSummary != nil {
 				panic("double /!")

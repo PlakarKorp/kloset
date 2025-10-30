@@ -15,7 +15,8 @@ import (
 )
 
 type KContext struct {
-	events *events.Receiver `msgpack:"-"`
+	events events.EventsBUS `msgpack:"-"`
+
 	cache  *caching.Manager `msgpack:"-"`
 	logger *logging.Logger  `msgpack:"-"`
 	Config *config.Config   `msgpack:"-"`
@@ -51,7 +52,7 @@ func NewKContext() *KContext {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	return &KContext{
-		events:  events.New(),
+		events:  events.NewEventsBUS(0),
 		Stdin:   os.Stdin,
 		Stdout:  os.Stdout,
 		Stderr:  os.Stderr,
@@ -62,7 +63,7 @@ func NewKContext() *KContext {
 
 func NewKContextFrom(template *KContext) *KContext {
 	ctx := *template
-	ctx.events = events.New()
+	ctx.events = events.NewEventsBUS(0)
 	ctx.Context, ctx.Cancel = context.WithCancel(template.Context)
 	return &ctx
 }
@@ -88,7 +89,11 @@ func (c *KContext) Close() {
 	c.Cancel()
 }
 
-func (c *KContext) Events() *events.Receiver {
+func (c *KContext) Events() events.EventsBUS {
+	return c.events
+}
+
+func (c *KContext) REvents() <-chan *events.EventMsg {
 	return c.events
 }
 

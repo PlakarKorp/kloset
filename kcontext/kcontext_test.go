@@ -167,14 +167,14 @@ func TestContext_SettersAndGetters(t *testing.T) {
 
 func TestAppContextCloseEvents(t *testing.T) {
 	ctx := NewKContext()
-	events := ctx.Events()
+	events := ctx.REvents()
 	if events == nil {
 		t.Errorf("events is nil")
 	}
 	ctx.Close()
 	// Check if events is closed
 	select {
-	case <-events.Listen():
+	case <-events:
 		t.Errorf("events is not closed")
 	default:
 		// events is closed
