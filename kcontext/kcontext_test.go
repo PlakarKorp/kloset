@@ -174,7 +174,11 @@ func TestAppContextCloseEvents(t *testing.T) {
 	ctx.Close()
 	// Check if events is closed
 	select {
-	case <-events:
+	case _, ok := <-events.Listen():
+		if !ok {
+			// events is closed
+			return
+		}
 		t.Errorf("events is not closed")
 	default:
 		// events is closed

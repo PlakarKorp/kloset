@@ -4,18 +4,26 @@ import (
 	"time"
 )
 
-type EventsBUS chan *Event
-
-func NewEventsBUS(buffer int) EventsBUS {
-	return make(EventsBUS, buffer)
+type EventsBUS struct {
+	bus chan *Event
 }
 
-func (eb EventsBUS) Close() {
-	close(eb)
+func NewEventsBUS(buffer int) *EventsBUS {
+	return &EventsBUS{
+		bus: make(chan *Event, buffer),
+	}
 }
 
-func (eb EventsBUS) Emitter() *Emitter {
-	return &Emitter{in: eb}
+func (eb *EventsBUS) Close() {
+	close(eb.bus)
+}
+
+func (eb *EventsBUS) Emitter() *Emitter {
+	return &Emitter{in: eb.bus}
+}
+
+func (eb *EventsBUS) Listen() <-chan *Event {
+	return eb.bus
 }
 
 const (

@@ -15,7 +15,7 @@ import (
 )
 
 type KContext struct {
-	events events.EventsBUS `msgpack:"-"`
+	events *events.EventsBUS `msgpack:"-"`
 
 	cache  *caching.Manager `msgpack:"-"`
 	logger *logging.Logger  `msgpack:"-"`
@@ -89,7 +89,7 @@ func (c *KContext) Close() {
 	c.Cancel()
 }
 
-func (c *KContext) Events() events.EventsBUS {
+func (c *KContext) Events() *events.EventsBUS {
 	return c.events
 }
 
