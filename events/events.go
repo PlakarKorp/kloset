@@ -4,7 +4,7 @@ import (
 	"time"
 )
 
-type EventsBUS chan *EventMsg
+type EventsBUS chan *Event
 
 func NewEventsBUS(buffer int) EventsBUS {
 	return make(EventsBUS, buffer)
@@ -24,7 +24,7 @@ const (
 	Error = "error"
 )
 
-type EventMsg struct {
+type Event struct {
 	Version   int            `msgpack:"version"`
 	Timestamp time.Time      `msgpack:"timestamp"`
 	Level     string         `msgpack:"level"`
@@ -33,14 +33,14 @@ type EventMsg struct {
 }
 
 type Emitter struct {
-	in chan<- *EventMsg
+	in chan<- *Event
 }
 
 func NewDummyEmitter() *Emitter {
 	return &Emitter{in: nil}
 }
 
-func NewEmitter(c chan<- *EventMsg) *Emitter {
+func NewEmitter(c chan<- *Event) *Emitter {
 	return &Emitter{in: c}
 }
 
@@ -48,7 +48,7 @@ func (e *Emitter) Emit(typ, level string, kv map[string]any) {
 	if e.in == nil {
 		return
 	}
-	e.in <- &EventMsg{
+	e.in <- &Event{
 		Version: 1, Timestamp: time.Now().UTC(),
 		Level: level, Type: typ, Data: kv,
 	}
