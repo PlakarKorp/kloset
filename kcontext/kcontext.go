@@ -93,10 +93,6 @@ func (c *KContext) Events() events.EventsBUS {
 	return c.events
 }
 
-func (c *KContext) REvents() <-chan *events.EventMsg {
-	return c.events
-}
-
 func (c *KContext) SetCache(cacheManager *caching.Manager) {
 	c.cache = cacheManager
 }

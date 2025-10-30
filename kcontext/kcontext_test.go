@@ -167,7 +167,7 @@ func TestContext_SettersAndGetters(t *testing.T) {
 
 func TestAppContextCloseEvents(t *testing.T) {
 	ctx := NewKContext()
-	events := ctx.REvents()
+	events := ctx.Events()
 	if events == nil {
 		t.Errorf("events is nil")
 	}
