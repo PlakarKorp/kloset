@@ -24,6 +24,13 @@ const (
 	DeleteOnClose
 )
 
+// This is not goroutine safe, external synchronization must be provided.
+type Batch interface {
+	Put([]byte, []byte) error
+	Count() uint32
+	Commit() error
+}
+
 type Cache interface {
 	Put([]byte, []byte) error
 	Has([]byte) (bool, error)
@@ -37,6 +44,8 @@ type Cache interface {
 	// key returned by an iteration might get invalidated on
 	// subsequent iterations.
 	Scan([]byte, bool) iter.Seq2[[]byte, []byte]
+
+	NewBatch() Batch
 
 	Close() error
 }

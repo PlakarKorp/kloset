@@ -13,6 +13,10 @@ type _RepositoryCache struct {
 	kvcache
 }
 
+type repoBatch struct {
+	Batch
+}
+
 func newRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryCache, error) {
 	cache, err := cons(CACHE_VERSION, "repository", repositoryID.String(), None)
 	if err != nil {
@@ -20,6 +24,10 @@ func newRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryC
 	}
 
 	return &_RepositoryCache{kvcache{cache}}, nil
+}
+
+func (c *_RepositoryCache) NewBatch() StateBatch {
+	return &repoBatch{c.cache.NewBatch()}
 }
 
 func (c *_RepositoryCache) PutState(stateID objects.MAC, data []byte) error {
@@ -53,6 +61,10 @@ func (c *_RepositoryCache) GetStates() (map[objects.MAC][]byte, error) {
 
 func (c *_RepositoryCache) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.Seq2[objects.MAC, []byte] {
 	return c.getObjectsWithMAC(fmt.Sprintf("__delta__:%d:%x:", blobType, blobCsum))
+}
+
+func (c *repoBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
+	return c.Put([]byte(fmt.Sprintf("__delta__:%d:%x:%x", blobType, blobCsum, packfile)), data)
 }
 
 func (c *_RepositoryCache) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
