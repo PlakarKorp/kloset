@@ -16,7 +16,9 @@ func NewEventsBUS(buffer int) *EventsBUS {
 }
 
 func (eb *EventsBUS) Close() {
-	close(eb.c)
+	if eb.c != nil {
+		close(eb.c)
+	}
 }
 
 func (eb *EventsBUS) Emitter() *Emitter {
