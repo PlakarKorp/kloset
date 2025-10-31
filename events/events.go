@@ -5,25 +5,29 @@ import (
 )
 
 type EventsBUS struct {
-	bus chan *Event
+	c      chan *Event
+	buffer int
 }
 
 func NewEventsBUS(buffer int) *EventsBUS {
 	return &EventsBUS{
-		bus: make(chan *Event, buffer),
+		buffer: buffer,
 	}
 }
 
 func (eb *EventsBUS) Close() {
-	close(eb.bus)
+	close(eb.c)
 }
 
 func (eb *EventsBUS) Emitter() *Emitter {
-	return &Emitter{in: eb.bus}
+	return &Emitter{bus: eb}
 }
 
 func (eb *EventsBUS) Listen() <-chan *Event {
-	return eb.bus
+	if eb.c == nil {
+		eb.c = make(chan *Event, eb.buffer)
+	}
+	return eb.c
 }
 
 const (
@@ -41,23 +45,39 @@ type Event struct {
 }
 
 type Emitter struct {
-	in chan<- *Event
+	bus *EventsBUS
 }
 
 func NewDummyEmitter() *Emitter {
-	return &Emitter{in: nil}
+	return &Emitter{bus: nil}
 }
 
-func NewEmitter(c chan<- *Event) *Emitter {
-	return &Emitter{in: c}
+func NewEmitter(eb *EventsBUS) *Emitter {
+	return &Emitter{bus: eb}
 }
 
-func (e *Emitter) Emit(typ, level string, kv map[string]any) {
-	if e.in == nil {
+func (e *Emitter) emit(typ, level string, kv map[string]any) {
+	if e.bus == nil || e.bus.c == nil {
 		return
 	}
-	e.in <- &Event{
+	e.bus.c <- &Event{
 		Version: 1, Timestamp: time.Now().UTC(),
 		Level: level, Type: typ, Data: kv,
 	}
+}
+
+func (e *Emitter) Emit(typ string, kv map[string]any) {
+	e.emit(typ, "", kv)
+}
+
+func (e *Emitter) Info(typ string, kv map[string]any) {
+	e.emit(typ, Info, kv)
+}
+
+func (e *Emitter) Warn(typ string, kv map[string]any) {
+	e.emit(typ, Warn, kv)
+}
+
+func (e *Emitter) Error(typ string, kv map[string]any) {
+	e.emit(typ, Error, kv)
 }

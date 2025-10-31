@@ -51,14 +51,14 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 	}
 
 	emitter := checkCtx.emitter
-	emitter.Emit("snapshot.check.chunk", events.Info, map[string]any{
+	emitter.Emit("snapshot.check.chunk", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 		"content_mac": chunk.ContentMAC,
 	})
 
 	if fast {
 		if !snap.repository.BlobExists(resources.RT_CHUNK, chunk.ContentMAC) {
-			emitter.Emit("snapshot.check.chunk.missing", events.Error, map[string]any{
+			emitter.Emit("snapshot.check.chunk.missing", map[string]any{
 				"snapshot_id": snap.Header.Identifier,
 				"content_mac": chunk.ContentMAC,
 				"error":       ErrChunkMissing.Error(),
@@ -67,7 +67,7 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 			return ErrChunkMissing
 		}
 
-		emitter.Emit("snapshot.check.chunk.ok", events.Error, map[string]any{
+		emitter.Emit("snapshot.check.chunk.ok", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"content_mac": chunk.ContentMAC,
 		})
@@ -77,7 +77,7 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 
 	data, err := snap.repository.GetBlobBytes(resources.RT_CHUNK, chunk.ContentMAC)
 	if err != nil {
-		emitter.Emit("snapshot.check.chunk.missing", events.Error, map[string]any{
+		emitter.Emit("snapshot.check.chunk.missing", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"content_mac": chunk.ContentMAC,
 			"error":       ErrChunkMissing.Error(),
@@ -93,7 +93,7 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 
 	mac := snap.repository.ComputeMAC(data)
 	if !bytes.Equal(mac[:], chunk.ContentMAC[:]) {
-		emitter.Emit("snapshot.check.chunk.corrupted", events.Error, map[string]any{
+		emitter.Emit("snapshot.check.chunk.corrupted", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"content_mac": chunk.ContentMAC,
 			"error":       ErrChunkCorrupted.Error(),
@@ -102,7 +102,7 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 		return ErrChunkCorrupted
 	}
 
-	emitter.Emit("snapshot.check.chunk.ok", events.Error, map[string]any{
+	emitter.Emit("snapshot.check.chunk.ok", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 		"content_mac": chunk.ContentMAC,
 	})
@@ -130,7 +130,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 
 	object, err := snap.LookupObject(fileEntry.Object)
 	if err != nil {
-		emmiter.Emit("snapshot.check.object.missing", events.Error, map[string]any{
+		emmiter.Emit("snapshot.check.object.missing", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"object_mac":  fileEntry.Object,
 			"error":       err.Error(),
@@ -140,7 +140,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 	}
 
 	hasher := snap.repository.GetMACHasher()
-	emmiter.Emit("snapshot.check.object", events.Info, map[string]any{
+	emmiter.Emit("snapshot.check.object", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 		"content_mac": object.ContentMAC,
 	})
@@ -153,7 +153,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 	}
 
 	if failed {
-		emmiter.Emit("snapshot.check.object.corrupted", events.Error, map[string]any{
+		emmiter.Emit("snapshot.check.object.corrupted", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"content_mac": object.ContentMAC,
 			"error":       ErrObjectCorrupted.Error(),
@@ -164,7 +164,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 
 	if !fast {
 		if !bytes.Equal(hasher.Sum(nil), object.ContentMAC[:]) {
-			emmiter.Emit("snapshot.check.object.corrupted", events.Error, map[string]any{
+			emmiter.Emit("snapshot.check.object.corrupted", map[string]any{
 				"snapshot_id": snap.Header.Identifier,
 				"content_mac": object.ContentMAC,
 				"error":       ErrObjectCorrupted.Error(),
@@ -174,7 +174,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 		}
 	}
 
-	emmiter.Emit("snapshot.check.object.ok", events.Info, map[string]any{
+	emmiter.Emit("snapshot.check.object.ok", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 		"content_mac": object.ContentMAC,
 	})
@@ -196,17 +196,17 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 	}
 
 	emitter := checkCtx.emitter
-	emitter.Emit("snapshot.check.path", events.Info, map[string]any{
+	emitter.Emit("snapshot.check.path", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 		"path":        entrypath,
 	})
 
 	if e.Stat().Mode().IsDir() {
-		emitter.Emit("snapshot.check.directory", events.Info, map[string]any{
+		emitter.Emit("snapshot.check.directory", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"path":        entrypath,
 		})
-		emitter.Emit("snapshot.check.directory.ok", events.Info, map[string]any{
+		emitter.Emit("snapshot.check.directory.ok", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"path":        entrypath,
 		})
@@ -219,7 +219,7 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 		return nil
 	}
 
-	emitter.Emit("snapshot.check.file", events.Info, map[string]any{
+	emitter.Emit("snapshot.check.file", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 		"path":        entrypath,
 	})
@@ -227,7 +227,7 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 	wg.Go(func() error {
 		err := checkObject(snap, e, opts.FastCheck, checkCtx)
 		if err != nil {
-			emitter.Emit("snapshot.check.file.corrupted", events.Error, map[string]any{
+			emitter.Emit("snapshot.check.file.corrupted", map[string]any{
 				"snapshot_id": snap.Header.Identifier,
 				"path":        entrypath,
 				"error":       err.Error(),
@@ -236,7 +236,7 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 			return err
 		}
 
-		emitter.Emit("snapshot.check.file.ok", events.Info, map[string]any{
+		emitter.Emit("snapshot.check.file.ok", map[string]any{
 			"snapshot_id": snap.Header.Identifier,
 			"path":        entrypath,
 		})
@@ -248,10 +248,10 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 
 func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	emitter := snap.AppContext().Events().Emitter()
-	emitter.Emit("snapshot.check.start", events.Info, map[string]any{
+	emitter.Emit("snapshot.check.start", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 	})
-	defer emitter.Emit("snapshot.check.done", events.Info, map[string]any{
+	defer emitter.Emit("snapshot.check.done", map[string]any{
 		"snapshot_id": snap.Header.Identifier,
 	})
 
@@ -290,7 +290,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	var failed bool
 	err = fs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
-			emitter.Emit("snapshot.check.path.error", events.Error, map[string]any{
+			emitter.Emit("snapshot.check.path.error", map[string]any{
 				"snapshot_id": snap.Header.Identifier,
 				"path":        entrypath,
 				"error":       err.Error(),

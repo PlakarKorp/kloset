@@ -136,7 +136,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		record := record.Error
 		backupCtx.recordError(record.Pathname, record.Err)
 
-		backupCtx.emitter.Emit("snapshot.backup.path.error", events.Error, map[string]any{
+		backupCtx.emitter.Emit("snapshot.backup.path.error", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
 			"path":        record.Pathname,
 			"error":       record.Err.Error(),
@@ -146,7 +146,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		record := record.Record
 		defer record.Close()
 
-		backupCtx.emitter.Emit("snapshot.backup.path", events.Info, map[string]any{
+		backupCtx.emitter.Emit("snapshot.backup.path", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
 			"path":        record.Pathname,
 		})
@@ -154,7 +154,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		// XXX: Remove this when we introduce the Location object.
 		repoLocation, err := snap.repository.Location()
 		if err != nil {
-			backupCtx.emitter.Emit("snapshot.backup.file.error", events.Error, map[string]any{
+			backupCtx.emitter.Emit("snapshot.backup.file.error", map[string]any{
 				"snapshot_id": snap.Header.Identifier[:],
 				"path":        record.Pathname,
 				"error":       err.Error(),
@@ -179,20 +179,20 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 			return
 		}
 
-		backupCtx.emitter.Emit("snapshot.backup.file", events.Error, map[string]any{
+		backupCtx.emitter.Emit("snapshot.backup.file", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
 			"path":        record.Pathname,
 		})
 
 		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
-			backupCtx.emitter.Emit("snapshot.backup.file.error", events.Error, map[string]any{
+			backupCtx.emitter.Emit("snapshot.backup.file.error", map[string]any{
 				"snapshot_id": snap.Header.Identifier[:],
 				"path":        record.Pathname,
 				"error":       err.Error(),
 			})
 			backupCtx.recordError(record.Pathname, err)
 		} else {
-			backupCtx.emitter.Emit("snapshot.backup.file.ok", events.Error, map[string]any{
+			backupCtx.emitter.Emit("snapshot.backup.file.ok", map[string]any{
 				"snapshot_id": snap.Header.Identifier[:],
 				"path":        record.Pathname,
 			})
@@ -228,7 +228,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
-	backupCtx.emitter.Emit("snapshot.backup.importer.start", events.Error, map[string]any{
+	backupCtx.emitter.Emit("snapshot.backup.importer.start", map[string]any{
 		"snapshot_id": snap.Header.Identifier[:],
 	})
 
@@ -270,7 +270,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		// trying to still produce some records.
 	}
 
-	backupCtx.emitter.Emit("snapshot.backup.importer.done", events.Error, map[string]any{
+	backupCtx.emitter.Emit("snapshot.backup.importer.done", map[string]any{
 		"snapshot_id": snap.Header.Identifier[:],
 		"nfiles":      stats.nfiles,
 		"ndirs":       stats.ndirs,
@@ -342,8 +342,8 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	beginTime := time.Now()
 
 	emitter := snap.AppContext().Events().Emitter()
-	emitter.Emit("snapshot.backup.start", events.Info, map[string]any{})
-	defer emitter.Emit("snapshot.backup.done", events.Info, map[string]any{})
+	emitter.Emit("snapshot.backup.start", map[string]any{})
+	defer emitter.Emit("snapshot.backup.done", map[string]any{})
 
 	done, err := snap.Lock()
 	if err != nil {
@@ -1227,7 +1227,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		backupCtx.emitter.Emit("snapshot.backup.directory.ok", events.Error, map[string]any{
+		backupCtx.emitter.Emit("snapshot.backup.directory.ok", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
 			"path":        dirPath,
 		})
