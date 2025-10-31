@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
-	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -187,10 +186,6 @@ func (snap *Builder) Logger() *logging.Logger {
 
 func (snap *Builder) AppContext() *kcontext.KContext {
 	return snap.repository.AppContext()
-}
-
-func (snap *Builder) Event(evt events.Event) {
-	snap.AppContext().Events().Send(evt)
 }
 
 func (snap *Builder) Lock() (chan bool, error) {

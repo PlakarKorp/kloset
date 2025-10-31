@@ -18,6 +18,10 @@ type CheckOptions struct {
 	FastCheck      bool
 }
 
+type checkContext struct {
+	emitter *events.Emitter
+}
+
 var (
 	ErrRootCorrupted   = errors.New("root corrupted")
 	ErrObjectMissing   = errors.New("object is missing")
@@ -26,7 +30,7 @@ var (
 	ErrChunkCorrupted  = errors.New("chunk corrupted")
 )
 
-func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast bool) error {
+func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast bool, checkCtx *checkContext) error {
 	chunkStatus, err := snap.checkCache.GetChunkStatus(chunk.ContentMAC)
 	if err != nil {
 		return err
@@ -46,23 +50,38 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 		seen = true
 	}
 
-	snap.Event(events.ChunkEvent(snap.Header.Identifier, chunk.ContentMAC))
+	emitter := checkCtx.emitter
+	emitter.Emit("snapshot.check.chunk", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"content_mac": chunk.ContentMAC,
+	})
 
 	if fast {
 		if !snap.repository.BlobExists(resources.RT_CHUNK, chunk.ContentMAC) {
-			snap.Event(events.ChunkMissingEvent(snap.Header.Identifier, chunk.ContentMAC))
+			emitter.Emit("snapshot.check.chunk.missing", map[string]any{
+				"snapshot_id": snap.Header.Identifier,
+				"content_mac": chunk.ContentMAC,
+				"error":       ErrChunkMissing.Error(),
+			})
 			snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkMissing.Error()))
 			return ErrChunkMissing
 		}
 
-		snap.Event(events.ChunkOKEvent(snap.Header.Identifier, chunk.ContentMAC))
+		emitter.Emit("snapshot.check.chunk.ok", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"content_mac": chunk.ContentMAC,
+		})
 		snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(""))
 		return nil
 	}
 
 	data, err := snap.repository.GetBlobBytes(resources.RT_CHUNK, chunk.ContentMAC)
 	if err != nil {
-		snap.Event(events.ChunkMissingEvent(snap.Header.Identifier, chunk.ContentMAC))
+		emitter.Emit("snapshot.check.chunk.missing", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"content_mac": chunk.ContentMAC,
+			"error":       ErrChunkMissing.Error(),
+		})
 		snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkMissing.Error()))
 		return ErrChunkMissing
 	}
@@ -74,17 +93,24 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 
 	mac := snap.repository.ComputeMAC(data)
 	if !bytes.Equal(mac[:], chunk.ContentMAC[:]) {
-		snap.Event(events.ChunkCorruptedEvent(snap.Header.Identifier, chunk.ContentMAC))
+		emitter.Emit("snapshot.check.chunk.corrupted", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"content_mac": chunk.ContentMAC,
+			"error":       ErrChunkCorrupted.Error(),
+		})
 		snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkCorrupted.Error()))
 		return ErrChunkCorrupted
 	}
 
-	snap.Event(events.ChunkOKEvent(snap.Header.Identifier, chunk.ContentMAC))
+	emitter.Emit("snapshot.check.chunk.ok", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"content_mac": chunk.ContentMAC,
+	})
 	snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(""))
 	return nil
 }
 
-func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool) error {
+func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *checkContext) error {
 	objectStatus, err := snap.checkCache.GetObjectStatus(fileEntry.Object)
 	if err != nil {
 		return err
@@ -100,43 +126,63 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool) error {
 		return nil
 	}
 
+	emmiter := checkCtx.emitter
+
 	object, err := snap.LookupObject(fileEntry.Object)
 	if err != nil {
-		snap.Event(events.ObjectMissingEvent(snap.Header.Identifier, fileEntry.Object))
+		emmiter.Emit("snapshot.check.object.missing", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"object_mac":  fileEntry.Object,
+			"error":       err.Error(),
+		})
 		snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectMissing.Error()))
 		return ErrObjectMissing
 	}
 
 	hasher := snap.repository.GetMACHasher()
-	snap.Event(events.ObjectEvent(snap.Header.Identifier, object.ContentMAC))
+	emmiter.Emit("snapshot.check.object", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"content_mac": object.ContentMAC,
+	})
 
 	var failed bool
 	for i := range object.Chunks {
-		if err := checkChunk(snap, &object.Chunks[i], hasher, fast); err != nil {
+		if err := checkChunk(snap, &object.Chunks[i], hasher, fast, checkCtx); err != nil {
 			failed = true
 		}
 	}
 
 	if failed {
-		snap.Event(events.ObjectCorruptedEvent(snap.Header.Identifier, object.ContentMAC))
+		emmiter.Emit("snapshot.check.object.corrupted", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"content_mac": object.ContentMAC,
+			"error":       ErrObjectCorrupted.Error(),
+		})
 		snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectCorrupted.Error()))
 		return ErrObjectCorrupted
 	}
 
 	if !fast {
 		if !bytes.Equal(hasher.Sum(nil), object.ContentMAC[:]) {
-			snap.Event(events.ObjectCorruptedEvent(snap.Header.Identifier, object.ContentMAC))
+			emmiter.Emit("snapshot.check.object.corrupted", map[string]any{
+				"snapshot_id": snap.Header.Identifier,
+				"content_mac": object.ContentMAC,
+				"error":       ErrObjectCorrupted.Error(),
+			})
 			snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectCorrupted.Error()))
 			return ErrObjectCorrupted
 		}
 	}
 
-	snap.Event(events.ObjectOKEvent(snap.Header.Identifier, object.ContentMAC))
+	emmiter.Emit("snapshot.check.object.ok", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"content_mac": object.ContentMAC,
+	})
 	snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(""))
 	return nil
 }
 
-func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Entry, wg *errgroup.Group) error {
+func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Entry, wg *errgroup.Group, checkCtx *checkContext) error {
 	entryMAC := e.MAC
 	entryStatus, err := snap.checkCache.GetVFSEntryStatus(entryMAC)
 	if err != nil {
@@ -149,11 +195,21 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 		return nil
 	}
 
-	snap.Event(events.PathEvent(snap.Header.Identifier, entrypath))
+	emitter := checkCtx.emitter
+	emitter.Emit("snapshot.check.path", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"path":        entrypath,
+	})
 
 	if e.Stat().Mode().IsDir() {
-		snap.Event(events.DirectoryEvent(snap.Header.Identifier, entrypath))
-		snap.Event(events.DirectoryOKEvent(snap.Header.Identifier, entrypath))
+		emitter.Emit("snapshot.check.directory", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"path":        entrypath,
+		})
+		emitter.Emit("snapshot.check.directory.ok", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"path":        entrypath,
+		})
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	}
@@ -163,17 +219,27 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 		return nil
 	}
 
-	snap.Event(events.FileEvent(snap.Header.Identifier, entrypath))
+	emitter.Emit("snapshot.check.file", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"path":        entrypath,
+	})
 
 	wg.Go(func() error {
-		err := checkObject(snap, e, opts.FastCheck)
+		err := checkObject(snap, e, opts.FastCheck, checkCtx)
 		if err != nil {
-			snap.Event(events.FileCorruptedEvent(snap.Header.Identifier, entrypath))
+			emitter.Emit("snapshot.check.file.corrupted", map[string]any{
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
+				"error":       err.Error(),
+			})
 			snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(err.Error()))
 			return err
 		}
 
-		snap.Event(events.FileOKEvent(snap.Header.Identifier, entrypath, e.Size()))
+		emitter.Emit("snapshot.check.file.ok", map[string]any{
+			"snapshot_id": snap.Header.Identifier,
+			"path":        entrypath,
+		})
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	})
@@ -181,8 +247,17 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 }
 
 func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
-	snap.Event(events.StartEvent())
-	defer snap.Event(events.DoneEvent())
+	emitter := snap.AppContext().Events().Emitter()
+	emitter.Emit("snapshot.check.start", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+	})
+	defer emitter.Emit("snapshot.check.done", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+	})
+
+	checkCtx := &checkContext{
+		emitter: emitter,
+	}
 
 	vfsStatus, err := snap.checkCache.GetVFSStatus(snap.Header.GetSource(0).VFS.Root)
 	if err != nil {
@@ -215,7 +290,11 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	var failed bool
 	err = fs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
-			snap.Event(events.PathErrorEvent(snap.Header.Identifier, entrypath, err.Error()))
+			emitter.Emit("snapshot.check.path.error", map[string]any{
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
+				"error":       err.Error(),
+			})
 			return err
 		}
 
@@ -223,7 +302,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 			return err
 		}
 
-		if err := checkEntry(snap, opts, entrypath, e, wg); err != nil {
+		if err := checkEntry(snap, opts, entrypath, e, wg, checkCtx); err != nil {
 			// don't stop at the first error; we need to
 			// process all the entries to report all the
 			// findings.
@@ -250,101 +329,3 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(""))
 	return nil
 }
-
-/**/
-/*
-func (snap *Snapshot) CheckPackfile(pathname string, opts *CheckOptions) (bool, error) {
-	snap.Event(events.StartEvent())
-	defer snap.Event(events.DoneEvent())
-
-	vfsStatus, err := snap.checkCache.GetVFSStatus(snap.Header.GetSource(0).VFS.Root)
-	if err != nil {
-		return false, err
-	}
-	if vfsStatus != nil {
-		if len(vfsStatus) == 0 {
-			return true, nil
-		}
-		return false, fmt.Errorf("%s", string(vfsStatus))
-	}
-
-	iter, err := snap.ListPackfiles()
-	if err != nil {
-		return false, err
-	}
-
-	maxConcurrency := opts.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
-	}
-	maxConcurrencyChan := make(chan bool, maxConcurrency)
-	var wg sync.WaitGroup
-	defer wg.Wait()
-	defer close(maxConcurrencyChan)
-
-	var processed sync.Map
-	complete := true
-
-	for packfileID, err := range iter {
-		if err != nil {
-			snap.checkCache.PutPackfileStatus(packfileID, []byte(err.Error()))
-			complete = false
-			continue
-		}
-
-		if _, loaded := processed.LoadOrStore(packfileID, struct{}{}); loaded {
-			// packfileID already being processed
-			continue
-		}
-
-		packfileStatus, err := snap.checkCache.GetPackfileStatus(packfileID)
-		if err != nil {
-			complete = false
-			continue
-		}
-		if packfileStatus != nil {
-			if len(packfileStatus) == 0 {
-				continue
-			}
-			complete = false
-			continue
-		}
-
-		wg.Add(1)
-		maxConcurrencyChan <- true
-		go func(packfileID objects.MAC) {
-			defer wg.Done()
-			defer func() { <-maxConcurrencyChan }()
-
-			rd, err := snap.repository.Store().GetPackfile(packfileID)
-			if err != nil {
-				snap.checkCache.PutPackfileStatus(packfileID, []byte(err.Error()))
-				return
-			}
-
-			_, _, err = storage.Deserialize(snap.repository.GetMACHasher(), resources.RT_PACKFILE, rd)
-			if err != nil {
-				snap.checkCache.PutPackfileStatus(packfileID, []byte(err.Error()))
-				return
-			}
-
-			_, err = io.Copy(io.Discard, rd)
-			if err != nil {
-				snap.checkCache.PutPackfileStatus(packfileID, []byte(err.Error()))
-				return
-			}
-			snap.checkCache.PutPackfileStatus(packfileID, []byte(""))
-		}(packfileID)
-	}
-
-	wg.Wait()
-
-	if !complete {
-		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte("check failed: packfile error"))
-		return false, fmt.Errorf("check failed: packfile error")
-	}
-
-	snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(""))
-	return true, nil
-}
-*/
