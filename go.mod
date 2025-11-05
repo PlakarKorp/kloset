@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/PlakarKorp/go-cdc-chunkers v1.0.2
 	github.com/PlakarKorp/go-human2duration v0.1.6
-	github.com/cockroachdb/pebble/v2 v2.1.0
+	github.com/cockroachdb/pebble/v2 v2.1.1
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gabriel-vasile/mimetype v1.4.11
 	github.com/go-git/go-git/v5 v5.16.3
