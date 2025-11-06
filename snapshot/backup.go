@@ -39,6 +39,7 @@ type BackupContext struct {
 	imp            importer.Importer
 	excludes       *exclude.RuleSet
 	maxConcurrency uint64
+	noXattr        bool
 
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
@@ -69,6 +70,7 @@ type BackupOptions struct {
 	Excludes        []string
 	NoCheckpoint    bool
 	NoCommit        bool
+	NoXattr         bool
 	CleanupVFSCache bool
 	ForcedTimestamp time.Time
 }
@@ -145,6 +147,10 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	case record.Record != nil:
 		record := record.Record
 		defer record.Close()
+
+		if backupCtx.noXattr && record.IsXattr {
+			return
+		}
 
 		backupCtx.emitter.Emit("snapshot.backup.path", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
@@ -755,6 +761,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	backupCtx := &BackupContext{
 		imp:            imp,
 		maxConcurrency: maxConcurrency,
+		noXattr:        backupOpts.NoXattr,
 		scanCache:      snap.scanCache,
 		vfsCache:       vfsCache,
 		flushEnd:       make(chan bool),
