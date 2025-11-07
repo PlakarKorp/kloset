@@ -184,11 +184,17 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commi
 	}
 	defer snap.Unlock(done)
 
+	emitter := snap.AppContext().Events().Emitter()
+	emitter.Emit("snapshot.backup.start", map[string]any{})
+	defer emitter.Emit("snapshot.backup.done", map[string]any{})
+
 	backupCtx, err := snap.prepareBackup(imp, options)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
+
+	backupCtx.emitter = emitter
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
