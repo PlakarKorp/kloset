@@ -55,9 +55,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 	return func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
 			emitter.Emit("snapshot.restore.path.error", map[string]any{
-				"snapshot": snap.Header.Identifier,
-				"path":     entrypath,
-				"error":    err.Error(),
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
+				"error":       err.Error(),
 			})
 			return restoreContext.reportFailure(snap, err)
 		}
@@ -67,8 +67,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		}
 
 		emitter.Emit("snapshot.restore.path", map[string]any{
-			"snapshot": snap.Header.Identifier,
-			"path":     entrypath,
+			"snapshot_id": snap.Header.Identifier,
+			"path":        entrypath,
 		})
 
 		// Determine destination path by stripping the prefix.
@@ -77,8 +77,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		// Directory processing.
 		if e.IsDir() {
 			emitter.Emit("snapshot.restore.directory", map[string]any{
-				"snapshot": snap.Header.Identifier,
-				"path":     entrypath,
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
 			})
 			// Create directory if not root.
 			if entrypath != "/" {
@@ -86,9 +86,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					err := fmt.Errorf("failed to create directory %q: %w", dest, err)
 
 					emitter.Emit("snapshot.restore.directory.error", map[string]any{
-						"snapshot": snap.Header.Identifier,
-						"path":     entrypath,
-						"error":    err.Error(),
+						"snapshot_id": snap.Header.Identifier,
+						"path":        entrypath,
+						"error":       err.Error(),
 					})
 					return restoreContext.reportFailure(snap, err)
 				}
@@ -100,8 +100,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			}
 
 			emitter.Emit("snapshot.restore.directory.ok", map[string]any{
-				"snapshot": snap.Header.Identifier,
-				"path":     entrypath,
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
 			})
 			return nil
 		}
@@ -109,40 +109,40 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		// For non-directory entries, only process regular files.
 		if !e.Stat().Mode().IsRegular() {
 			emitter.Emit("snapshot.restore.symlink", map[string]any{
-				"snapshot": snap.Header.Identifier,
-				"path":     entrypath,
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
 			})
 
 			if e.Stat().Mode().Type()&fs.ModeSymlink != 0 {
 				if err := exp.CreateLink(snap.AppContext(), e.SymlinkTarget, dest, exporter.SYMLINK); err != nil {
 					emitter.Emit("snapshot.restore.symlink.error", map[string]any{
-						"snapshot": snap.Header.Identifier,
-						"path":     entrypath,
-						"error":    err.Error(),
+						"snapshot_id": snap.Header.Identifier,
+						"path":        entrypath,
+						"error":       err.Error(),
 					})
 					return restoreContext.reportFailure(snap, err)
 				}
 				if !opts.SkipPermissions {
 					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
 						emitter.Emit("snapshot.restore.symlink.error", map[string]any{
-							"snapshot": snap.Header.Identifier,
-							"path":     entrypath,
-							"error":    err.Error(),
+							"snapshot_id": snap.Header.Identifier,
+							"path":        entrypath,
+							"error":       err.Error(),
 						})
 						return restoreContext.reportFailure(snap, err)
 					}
 				}
 				emitter.Emit("snapshot.restore.symlink.ok", map[string]any{
-					"snapshot": snap.Header.Identifier,
-					"path":     entrypath,
+					"snapshot_id": snap.Header.Identifier,
+					"path":        entrypath,
 				})
 			}
 			return nil
 		}
 
 		emitter.Emit("snapshot.restore.file", map[string]any{
-			"snapshot": snap.Header.Identifier,
-			"path":     entrypath,
+			"snapshot_id": snap.Header.Identifier,
+			"path":        entrypath,
 		})
 		wg.Go(func() error {
 			if e.Stat().Nlink() > 1 {
@@ -152,9 +152,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				if ok {
 					if err := exp.CreateLink(snap.AppContext(), v, dest, exporter.HARDLINK); err != nil {
 						emitter.Emit("snapshot.restore.file.error", map[string]any{
-							"snapshot": snap.Header.Identifier,
-							"path":     entrypath,
-							"error":    err.Error(),
+							"snapshot_id": snap.Header.Identifier,
+							"path":        entrypath,
+							"error":       err.Error(),
 						})
 						restoreContext.reportFailure(snap, err)
 					}
@@ -166,9 +166,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			rd, err := e.Open(restoreContext.vfs)
 			if err != nil {
 				emitter.Emit("snapshot.restore.file.error", map[string]any{
-					"snapshot": snap.Header.Identifier,
-					"path":     entrypath,
-					"error":    err.Error(),
+					"snapshot_id": snap.Header.Identifier,
+					"path":        entrypath,
+					"error":       err.Error(),
 				})
 				restoreContext.reportFailure(snap, err)
 				return nil
@@ -179,9 +179,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			if err := exp.CreateDirectory(snap.AppContext(), path.Dir(dest)); err != nil {
 				err := fmt.Errorf("failed to create directory %q: %w", dest, err)
 				emitter.Emit("snapshot.restore.file.error", map[string]any{
-					"snapshot": snap.Header.Identifier,
-					"path":     entrypath,
-					"error":    err.Error(),
+					"snapshot_id": snap.Header.Identifier,
+					"path":        entrypath,
+					"error":       err.Error(),
 				})
 				restoreContext.reportFailure(snap, err)
 			}
@@ -196,9 +196,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
 				emitter.Emit("snapshot.restore.file.error", map[string]any{
-					"snapshot": snap.Header.Identifier,
-					"path":     entrypath,
-					"error":    err.Error(),
+					"snapshot_id": snap.Header.Identifier,
+					"path":        entrypath,
+					"error":       err.Error(),
 				})
 				restoreContext.reportFailure(snap, err)
 			} else {
@@ -206,18 +206,18 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
 						err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
 						emitter.Emit("snapshot.restore.file.error", map[string]any{
-							"snapshot": snap.Header.Identifier,
-							"path":     entrypath,
-							"error":    err.Error(),
+							"snapshot_id": snap.Header.Identifier,
+							"path":        entrypath,
+							"error":       err.Error(),
 						})
 						restoreContext.reportFailure(snap, err)
 						return nil
 					}
 				}
 				emitter.Emit("snapshot.restore.file.ok", map[string]any{
-					"snapshot": snap.Header.Identifier,
-					"path":     entrypath,
-					"size":     e.Size(),
+					"snapshot_id": snap.Header.Identifier,
+					"path":        entrypath,
+					"size":        e.Size(),
 				})
 			}
 			return nil
