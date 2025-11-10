@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
@@ -208,6 +209,30 @@ func (m *mockStateCache) GetConfigurations() iter.Seq[[]byte] {
 			}
 		}
 	}
+}
+
+func (m *mockStateCache) NewBatch() caching.StateBatch {
+	return &mockStateBatch{cache: m}
+}
+
+type mockStateBatch struct {
+	cache *mockStateCache
+}
+
+func (b *mockStateBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
+	return b.cache.PutDelta(blobType, blobCsum, packfile, data)
+}
+
+func (b *mockStateBatch) Put(key, data []byte) error {
+	return nil
+}
+
+func (b *mockStateBatch) Commit() error {
+	return nil
+}
+
+func (b *mockStateBatch) Count() uint32 {
+	return 0
 }
 
 func TestNewLocalState(t *testing.T) {

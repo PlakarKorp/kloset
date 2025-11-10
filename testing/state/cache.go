@@ -4,6 +4,7 @@ import (
 	"errors"
 	"iter"
 
+	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 )
@@ -110,4 +111,32 @@ func (c *cache) GetConfiguration(key string) ([]byte, error) {
 
 func (c *cache) GetConfigurations() iter.Seq[[]byte] {
 	return nil
+}
+
+func (c *cache) NewBatch() caching.StateBatch {
+	return &batch{cache: c}
+}
+
+type batch struct {
+	cache *cache
+}
+
+func (b *batch) Put(key, data []byte) error {
+	return unsupported
+}
+
+func (b *batch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
+	return unsupported
+}
+
+func (b *batch) Commit() error {
+	return nil
+}
+
+func (b *batch) Close() error {
+	return nil
+}
+
+func (b *batch) Count() uint32 {
+	return 0
 }
