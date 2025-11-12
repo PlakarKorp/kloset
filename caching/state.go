@@ -34,4 +34,11 @@ type StateCache interface {
 	PutConfiguration(key string, data []byte) error
 	GetConfiguration(key string) ([]byte, error)
 	GetConfigurations() iter.Seq[[]byte]
+
+	NewBatch() StateBatch
+}
+
+type StateBatch interface {
+	Batch
+	PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error
 }

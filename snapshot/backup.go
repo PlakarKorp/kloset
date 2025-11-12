@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -43,6 +44,9 @@ type BackupContext struct {
 
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
+
+	vfsEntBatch *caching.ScanBatch
+	vfsEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
 
@@ -78,6 +82,38 @@ type BackupOptions struct {
 var (
 	ErrOutOfRange = errors.New("out of range")
 )
+
+func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
+	path := entry.Path()
+
+	bytes, err := entry.ToBytes()
+	if err != nil {
+		return err
+	}
+
+	bc.vfsEntLock.Lock()
+	defer bc.vfsEntLock.Unlock()
+
+	if entry.FileInfo.IsDir() {
+		if err := bc.vfsEntBatch.PutDirectory(0, path, bytes); err != nil {
+			return err
+		}
+	} else {
+		if err := bc.vfsEntBatch.PutFile(0, path, bytes); err != nil {
+			return err
+		}
+	}
+
+	if bc.vfsEntBatch.Count() >= 1000 {
+		if err := bc.vfsEntBatch.Commit(); err != nil {
+			return err
+		}
+
+		bc.vfsEntBatch = bc.scanCache.NewScanBatch()
+	}
+
+	return nil
+}
 
 func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
 	path := entry.Path()
@@ -179,7 +215,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		if record.FileInfo.Mode().IsDir() {
 			atomic.AddUint64(&stats.ndirs, +1)
 			entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-			if err := backupCtx.recordEntry(entry); err != nil {
+			if err := backupCtx.batchRecordEntry(entry); err != nil {
 				backupCtx.recordError(record.Pathname, err)
 			}
 			return
@@ -275,6 +311,13 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		// have been cancelled while the importer is
 		// trying to still produce some records.
 	}
+
+	// Flush any left over entries.
+	if err := backupCtx.vfsEntBatch.Commit(); err != nil {
+		return err
+	}
+
+	backupCtx.vfsEntBatch = nil
 
 	backupCtx.emitter.Emit("snapshot.backup.importer.done", map[string]any{
 		"snapshot_id": snap.Header.Identifier[:],
@@ -763,6 +806,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		maxConcurrency: maxConcurrency,
 		noXattr:        backupOpts.NoXattr,
 		scanCache:      snap.scanCache,
+		vfsEntBatch:    snap.scanCache.NewScanBatch(),
 		vfsCache:       vfsCache,
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan bool),
@@ -916,7 +960,7 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 		return err
 	}
 
-	return backupCtx.recordEntry(fileEntry)
+	return backupCtx.batchRecordEntry(fileEntry)
 }
 
 func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
