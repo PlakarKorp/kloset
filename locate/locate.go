@@ -230,25 +230,19 @@ func (lo *LocateOptions) Matches(it Item) bool {
 	if lo.Filters.Job != "" && it.Filters.Job != lo.Filters.Job {
 		return false
 	}
-	if len(lo.Filters.IgnoreTags) > 0 {
-		for _, tag := range lo.Filters.IgnoreTags {
-			if it.Filters.HasTag(tag) {
-				return false
-			}
+	for _, tag := range lo.Filters.IgnoreTags {
+		if it.Filters.HasTag(tag) {
+			return false
 		}
 	}
-	if len(lo.Filters.Tags) > 0 {
-		for _, tag := range lo.Filters.Tags {
-			if !it.Filters.HasTag(tag) {
-				return false
-			}
+	for _, tag := range lo.Filters.Tags {
+		if !it.Filters.HasTag(tag) {
+			return false
 		}
 	}
-	if len(lo.Filters.Roots) > 0 {
-		for _, root := range lo.Filters.Roots {
-			if !it.Filters.HasRoot(root) {
-				return false
-			}
+	for _, root := range lo.Filters.Roots {
+		if !it.Filters.HasRoot(root) {
+			return false
 		}
 	}
 	return true
