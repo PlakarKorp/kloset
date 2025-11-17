@@ -85,6 +85,7 @@ type LocateFilters struct {
 	Perimeter   string   `json:"perimeter,omitempty" yaml:"perimeter,omitempty"`
 	Job         string   `json:"job,omitempty" yaml:"job,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
+	IgnoreTags  []string `json:"ignore_tags,omitempty" yaml:"ignore_tags,omitempty"`
 
 	Latest bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
 	IDs    []string `json:"ids,omitempty" yaml:"ids,omitempty"`
@@ -228,6 +229,13 @@ func (lo *LocateOptions) Matches(it Item) bool {
 	}
 	if lo.Filters.Job != "" && it.Filters.Job != lo.Filters.Job {
 		return false
+	}
+	if len(lo.Filters.IgnoreTags) > 0 {
+		for _, tag := range lo.Filters.IgnoreTags {
+			if it.Filters.HasTag(tag) {
+				return false
+			}
+		}
 	}
 	if len(lo.Filters.Tags) > 0 {
 		for _, tag := range lo.Filters.Tags {
