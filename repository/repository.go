@@ -13,7 +13,6 @@ import (
 	"math/bits"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
@@ -23,6 +22,7 @@ import (
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -78,8 +78,7 @@ type Repository struct {
 
 	secret []byte
 
-	wBytes atomic.Int64
-	rBytes atomic.Int64
+	ioStats *iostat.IOTracker
 
 	storageSize      int64
 	storageSizeDirty bool
@@ -99,6 +98,7 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 		appContext:       ctx,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		ioStats:          iostat.New(),
 	}, nil
 }
 
@@ -142,6 +142,7 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		ioStats:          iostat.New(),
 	}
 
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
@@ -197,6 +198,7 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		ioStats:          iostat.New(),
 	}
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
 		hasher := r.GetMACHasher()
@@ -320,11 +322,11 @@ func (r *Repository) StorageSize() (int64, error) {
 }
 
 func (r *Repository) RBytes() int64 {
-	return r.rBytes.Load()
+	return int64(r.ioStats.Read.Stats().TotalBytes)
 }
 
 func (r *Repository) WBytes() int64 {
-	return r.wBytes.Load()
+	return int64(r.ioStats.Write.Stats().TotalBytes)
 }
 
 func (r *Repository) Close() error {
@@ -332,6 +334,9 @@ func (r *Repository) Close() error {
 	defer func() {
 		r.Logger().Trace("repository", "Close(): %s", time.Since(t0))
 	}()
+
+	fmt.Println(r.ioStats.SummaryString())
+
 	return nil
 }
 
@@ -576,8 +581,9 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		return err
 	}
 
+	span := r.ioStats.ReadSpan()
 	nbytes, err := r.store.PutState(r.appContext, mac, rd)
-	r.wBytes.Add(nbytes)
+	span.Add(nbytes)
 	return err
 }
 
@@ -891,14 +897,14 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 			}
 
 			if currPackfile != loc.Packfile || nextOffset != loc.Offset {
+				span := r.ioStats.ReadSpan()
 				data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 				if err != nil {
 					if !yield(nil, err) {
 						return
 					}
 				}
-
-				r.rBytes.Add(int64(size))
+				span.Add(int64(size))
 
 				currentOffset := 0
 				for _, l := range currChks {
@@ -941,14 +947,14 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 		}
 
 		if leftOver {
+			span := r.ioStats.ReadSpan()
 			data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 			if err != nil {
 				if !yield(nil, err) {
 					return
 				}
 			}
-
-			r.rBytes.Add(int64(size))
+			span.Add(int64(size))
 
 			currentOffset := 0
 			for _, l := range currChks {
@@ -986,12 +992,12 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrPackfileNotFound
 	}
 
+	span := r.ioStats.ReadSpan()
 	rd, err := r.GetPackfileBlob(loc)
 	if err != nil {
 		return nil, err
 	}
-
-	r.rBytes.Add(int64(loc.Length))
+	span.Add(int64(loc.Length))
 
 	return rd, nil
 }

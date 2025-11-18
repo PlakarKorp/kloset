@@ -228,8 +228,9 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		return err
 	}
 
+	span := r.ioStats.WriteSpan()
 	nbytes, err := r.store.PutPackfile(r.appContext, mac, rd)
-	r.wBytes.Add(nbytes)
+	span.Add(nbytes)
 	if err != nil {
 		return err
 	}
@@ -279,8 +280,9 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 		return err
 	}
 
+	span := r.ioStats.WriteSpan()
 	nbytes, err := r.store.PutPackfile(r.appContext, mac, rd)
-	r.wBytes.Add(nbytes)
+	span.Add(nbytes)
 	if err != nil {
 		return err
 	}
