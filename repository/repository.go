@@ -14,7 +14,6 @@ import (
 	"path"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
@@ -24,6 +23,7 @@ import (
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -79,8 +79,7 @@ type Repository struct {
 
 	secret []byte
 
-	wBytes atomic.Int64
-	rBytes atomic.Int64
+	ioStats *iostat.IOTracker
 
 	storageSize      int64
 	storageSizeDirty bool
@@ -100,6 +99,7 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 		appContext:       ctx,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		ioStats:          iostat.New(),
 	}, nil
 }
 
@@ -143,6 +143,7 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		ioStats:          iostat.New(),
 	}
 
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
@@ -198,6 +199,7 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		ioStats:          iostat.New(),
 	}
 
 	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), true)
@@ -335,11 +337,11 @@ func (r *Repository) StorageSize() (int64, error) {
 }
 
 func (r *Repository) RBytes() int64 {
-	return r.rBytes.Load()
+	return int64(r.ioStats.Read.Stats().TotalBytes)
 }
 
 func (r *Repository) WBytes() int64 {
-	return r.wBytes.Load()
+	return int64(r.ioStats.Write.Stats().TotalBytes)
 }
 
 func (r *Repository) Close() error {
@@ -347,6 +349,9 @@ func (r *Repository) Close() error {
 	defer func() {
 		r.Logger().Trace("repository", "Close(): %s", time.Since(t0))
 	}()
+
+	fmt.Println(r.ioStats.SummaryString())
+
 	return nil
 }
 
@@ -591,8 +596,11 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		return err
 	}
 
+	span := r.ioStats.ReadSpan()
 	nbytes, err := r.store.PutState(r.appContext, mac, rd)
-	r.wBytes.Add(nbytes)
+	if nbytes > 0 {
+		span.Add(nbytes)
+	}
 	return err
 }
 
@@ -741,6 +749,7 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	lengthDelta := uint32(uint64(overhead) - offsetDelta)
 
 	realLen := length + uint32(offsetDelta) + lengthDelta
+	span := r.ioStats.ReadSpan()
 	rd, err := r.store.GetPackfileBlob(r.appContext, loc.Packfile, offset+uint64(storage.STORAGE_HEADER_SIZE)-offsetDelta, realLen)
 	if err != nil {
 		return nil, err
@@ -748,13 +757,14 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 
 	// discard the first offsetDelta bytes
 	data := make([]byte, realLen)
-	_, err = io.ReadFull(rd, data)
+	n, err := io.ReadFull(rd, data)
+	if n > 0 {
+		span.Add(int64(n))
+	}
 	rd.Close()
 	if err != nil {
 		return nil, err
 	}
-
-	r.rBytes.Add(int64(len(data)))
 
 	// discard the first offsetDelta bytes and last lengthDelta bytes
 	return data[offsetDelta : length+uint32(offsetDelta)], nil
@@ -999,14 +1009,7 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrPackfileNotFound
 	}
 
-	rd, err := r.GetPackfileBlob(loc)
-	if err != nil {
-		return nil, err
-	}
-
-	r.rBytes.Add(int64(loc.Length))
-
-	return rd, nil
+	return r.GetPackfileBlob(loc)
 }
 
 func (r *Repository) GetBlobBytes(Type resources.Type, mac objects.MAC) ([]byte, error) {

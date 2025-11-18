@@ -10,6 +10,7 @@ import (
 	"github.com/PlakarKorp/kloset/config"
 	"github.com/PlakarKorp/kloset/encryption/keypair"
 	"github.com/PlakarKorp/kloset/events"
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/google/uuid"
 )
@@ -49,18 +50,23 @@ type KContext struct {
 
 	Identity uuid.UUID
 	Keypair  *keypair.KeyPair
+
+	storeIOTracker      *iostat.IOTracker
+	repositoryIOTracker *iostat.IOTracker
 }
 
 func NewKContext() *KContext {
 	ctx, cancel := context.WithCancelCause(context.Background())
 
 	return &KContext{
-		events:  events.NewEventsBUS(0),
-		Stdin:   os.Stdin,
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
-		Context: ctx,
-		Cancel:  cancel,
+		events:              events.NewEventsBUS(0),
+		Stdin:               os.Stdin,
+		Stdout:              os.Stdout,
+		Stderr:              os.Stderr,
+		Context:             ctx,
+		Cancel:              cancel,
+		storeIOTracker:      iostat.New(),
+		repositoryIOTracker: iostat.New(),
 	}
 }
 
@@ -68,6 +74,8 @@ func NewKContextFrom(template *KContext) *KContext {
 	ctx := *template
 	ctx.events = events.NewEventsBUS(0)
 	ctx.Context, ctx.Cancel = context.WithCancelCause(template.Context)
+	ctx.storeIOTracker = iostat.New()
+	ctx.repositoryIOTracker = iostat.New()
 	return &ctx
 }
 
