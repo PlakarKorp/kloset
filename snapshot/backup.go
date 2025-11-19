@@ -330,7 +330,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 }
 
 func (snap *Builder) flushDeltaState(bc *BackupContext) {
-	fmt.Println("###### flushDeltaState started")
 	for {
 		select {
 		case <-snap.repository.AppContext().Done():
@@ -730,7 +729,6 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 
 	cache, err := snap.AppContext().GetCache().Repository(snap.repository.Configuration().RepositoryID)
 	if err == nil {
-		fmt.Println("PutSnapshot in cache")
 		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
 
