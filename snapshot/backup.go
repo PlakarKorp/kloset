@@ -734,7 +734,9 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		close(bc.flushEnd)
 		err = <-bc.flushEnded
 	} else {
-		err = snap.repository.CommitTransaction(snap.Header.Identifier)
+		fmt.Println("Committing snapshot without backup context")
+		//err = snap.repository.CommitTransaction(snap.Header.Identifier)
+		err = nil
 	}
 	if err != nil {
 		snap.Logger().Warn("Failed to push the state to the repository %s", err)
