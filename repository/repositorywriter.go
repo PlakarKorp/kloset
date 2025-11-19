@@ -107,13 +107,7 @@ func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MA
 		}
 	}()
 
-	err := r.PutState(id, pr)
-	if err != nil {
-		return err
-	}
-
-	/* We are committing the transaction, publish the new state to our local aggregated state. */
-	return r.state.PutState(id)
+	return r.PutState(id, pr)
 }
 
 func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool {
@@ -127,7 +121,7 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 		return true
 	}
 
-	return r.state.BlobExists(Type, mac)
+	return r.deltaState.BlobExists(Type, mac) || r.state.BlobExists(Type, mac)
 }
 
 func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
@@ -215,7 +209,6 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	defer r.transactionMtx.RUnlock()
 
 	db := r.deltaState.NewBatch()
-	sb := r.state.NewBatch()
 
 	for _, blob := range pfile.Entries() {
 		delta := &state.DeltaEntry{
@@ -234,19 +227,11 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 			return err
 		}
 
-		if err := sb.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, serialized); err != nil {
-			return err
-		}
 	}
 
 	db.Commit()
-	sb.Commit()
 
-	if err := r.deltaState.PutPackfile(r.currentStateID, mac); err != nil {
-		return err
-	}
-
-	return r.state.PutPackfile(r.currentStateID, mac)
+	return r.deltaState.PutPackfile(r.currentStateID, mac)
 }
 
 func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
@@ -293,15 +278,7 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 		if err := r.deltaState.PutDelta(delta); err != nil {
 			return err
 		}
-
-		if err := r.state.PutDelta(delta); err != nil {
-			return err
-		}
 	}
 
-	if err := r.deltaState.PutPackfile(r.currentStateID, mac); err != nil {
-		return err
-	}
-
-	return r.state.PutPackfile(r.currentStateID, mac)
+	return r.deltaState.PutPackfile(r.currentStateID, mac)
 }

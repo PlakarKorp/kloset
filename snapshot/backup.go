@@ -442,6 +442,8 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	backupCtx.emitter = emitter
 
 	/* checkpoint handling */
+	// XXX: Force no checkpointing for now.
+	options.NoCheckpoint = true
 	if !options.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState(backupCtx)
