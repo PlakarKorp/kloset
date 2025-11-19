@@ -54,7 +54,7 @@ type BackupContext struct {
 
 	flushTick  *time.Ticker
 	flushEnd   chan bool
-	flushEnded chan bool
+	flushEnded chan error
 
 	indexes []*BackupIndexes // Aligned with the number of importers.
 
@@ -330,6 +330,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 }
 
 func (snap *Builder) flushDeltaState(bc *BackupContext) {
+	fmt.Println("###### flushDeltaState started")
 	for {
 		select {
 		case <-snap.repository.AppContext().Done():
@@ -338,7 +339,6 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			// End of backup we push the last and final State. No need to take any locks at this point.
 			err := snap.repository.CommitTransaction(bc.stateId)
 			if err != nil {
-				// XXX: ERROR HANDLING
 				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
 			}
 
@@ -347,7 +347,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 				snap.deltaCache.Close()
 			}
 
-			bc.flushEnded <- true
+			bc.flushEnded <- err
 			close(bc.flushEnded)
 			return
 		case <-bc.flushTick.C:
@@ -719,17 +719,18 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 	if bc != nil && bc.flushTick != nil {
 		bc.flushEnd <- true
 		close(bc.flushEnd)
-		<-bc.flushEnded
+		err = <-bc.flushEnded
 	} else {
 		err = snap.repository.CommitTransaction(snap.Header.Identifier)
-		if err != nil {
-			snap.Logger().Warn("Failed to push the state to the repository %s", err)
-			return err
-		}
+	}
+	if err != nil {
+		snap.Logger().Warn("Failed to push the state to the repository %s", err)
+		return err
 	}
 
 	cache, err := snap.AppContext().GetCache().Repository(snap.repository.Configuration().RepositoryID)
 	if err == nil {
+		fmt.Println("PutSnapshot in cache")
 		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
 
@@ -809,7 +810,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		vfsEntBatch:    snap.scanCache.NewScanBatch(),
 		vfsCache:       vfsCache,
 		flushEnd:       make(chan bool),
-		flushEnded:     make(chan bool),
+		flushEnded:     make(chan error),
 		stateId:        snap.Header.Identifier,
 	}
 
