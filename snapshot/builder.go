@@ -7,7 +7,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -23,7 +22,6 @@ type Builder struct {
 	repository *repository.RepositoryWriter
 
 	//This is protecting the above two pointers, not their underlying objects
-	deltaMtx   sync.RWMutex
 	scanCache  *caching.ScanCache
 	deltaCache *caching.ScanCache
 

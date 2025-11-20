@@ -202,6 +202,25 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader) error {
 	return ls.PutState(stateID)
 }
 
+func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from caching.StateCache) error {
+	has, err := ls.HasState(stateID)
+	if err != nil {
+		return err
+	}
+
+	if has {
+		return nil
+	}
+
+	err = ls.mergeFromCache(from)
+	if err != nil {
+		return err
+	}
+
+	/* We merged the state deltas, we can now publish it */
+	return ls.PutState(stateID)
+}
+
 /* Publishes the current state, by saving the stateID with the current Metadata. */
 func (ls *LocalState) PutState(stateID objects.MAC) error {
 	mt, err := ls.Metadata.ToBytes()
@@ -614,6 +633,49 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 		return fmt.Errorf("failed to read serial: %w", err)
 	}
 	ls.Metadata.Serial = uuid.UUID(serial)
+
+	return nil
+}
+
+func (ls *LocalState) mergeFromCache(from caching.StateCache) error {
+	for _, entry := range from.GetDeltas() {
+		delta, err := DeltaEntryFromBytes(entry)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize delta entry %w", err)
+		}
+
+		ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, entry)
+	}
+
+	for _, deleted_buf := range from.GetDeleteds() {
+		deleted, err := DeletedEntryFromBytes(deleted_buf)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize deleted entry %w", err)
+		}
+
+		ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf)
+	}
+
+	for _, pe_buf := range from.GetPackfiles() {
+		pe, err := PackfileEntryFromBytes(pe_buf)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize packfile entry %w", err)
+		}
+
+		ls.cache.PutPackfile(pe.Packfile, pe_buf)
+	}
+
+	for ce_buf := range from.GetConfigurations() {
+		ce, err := ConfigurationEntryFromBytes(ce_buf)
+		if err != nil {
+			return fmt.Errorf("failed to deserialize configuration entry %w", err)
+		}
+
+		err = ls.insertOrUpdateConfiguration(ce)
+		if err != nil {
+			return fmt.Errorf("failed to insert/update configuration entry %w", err)
+		}
+	}
 
 	return nil
 }

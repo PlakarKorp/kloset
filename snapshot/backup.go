@@ -52,9 +52,10 @@ type BackupContext struct {
 
 	stateId objects.MAC
 
-	flushTick  *time.Ticker
-	flushEnd   chan bool
-	flushEnded chan error
+	flushTick        *time.Ticker
+	flushEnd         chan bool
+	flushEnded       chan error
+	flushTerminating atomic.Bool
 
 	indexes []*BackupIndexes // Aligned with the number of importers.
 
@@ -335,7 +336,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 		case <-snap.repository.AppContext().Done():
 			return
 		case <-bc.flushEnd:
-			// End of backup we push the last and final State. No need to take any locks at this point.
+			// End of backup we push the last and final State.
 			err := snap.repository.CommitTransaction(bc.stateId)
 			if err != nil {
 				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
@@ -350,36 +351,52 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			close(bc.flushEnded)
 			return
 		case <-bc.flushTick.C:
-			// Now make a new state backed by a new cache.
-			snap.deltaMtx.Lock()
+			// In case the previous Flushing operation was too long and the
+			// ticker got a chance to queue another tick we might end up here
+			// rather than in flushEnd so just skip this and go to the final
+			// state push.
+			if bc.flushTerminating.Load() {
+				continue
+			}
+
+			// New Delta
 			oldCache := snap.deltaCache
 			oldStateId := bc.stateId
 
 			identifier := objects.RandomMAC()
-			deltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
+			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
 			if err != nil {
 				// XXX: ERROR HANDLING
-				snap.deltaMtx.Unlock()
 				snap.Logger().Warn("Failed to open deltaCache %s\n", err)
 				break
 			}
 
 			bc.stateId = identifier
-			snap.deltaMtx.Unlock()
+			snap.deltaCache = newDeltaCache
 
 			// Now that the backup is free to progress we can serialize and push
 			// the resulting statefile to the repo.
-			err = snap.repository.FlushTransaction(deltaCache, oldStateId)
+			// Flush Delta-1
+			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, bc.stateId)
 			if err != nil {
 				// XXX: ERROR HANDLING
 				snap.Logger().Warn("Failed to push the state to the repository %s", err)
 			}
+
+			if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
+				// XXX: ERROR HANDLING
+				snap.Logger().Warn("Failed to push the state to the repository %s", err)
+			}
+			fmt.Printf("flushDeltaState: Flush tick, merged old cache()\n")
+
+			snap.repository.RemoveTransaction(oldStateId)
 
 			// The first cache is always the scanCache, only in this function we
 			// allocate a new and different one, so when we first hit this function
 			// do not close the deltaCache, as it'll be closed at the end of the
 			// backup because it's used by other parts of the code.
 			if oldCache != snap.scanCache {
+				fmt.Printf("flushDeltaState: Flush tick, closing old cache.\n")
 				oldCache.Close()
 			}
 		}
@@ -442,8 +459,6 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	backupCtx.emitter = emitter
 
 	/* checkpoint handling */
-	// XXX: Force no checkpointing for now.
-	options.NoCheckpoint = true
 	if !options.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState(backupCtx)
@@ -689,6 +704,7 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 	// If we end up in here without a BackupContext we come from Sync and we
 	// can't rely on the flusher
 	if bc != nil && bc.flushTick != nil {
+		bc.flushTerminating.Store(true)
 		bc.flushTick.Stop()
 	}
 
