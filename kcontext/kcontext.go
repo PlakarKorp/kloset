@@ -21,8 +21,8 @@ type KContext struct {
 	logger *logging.Logger  `msgpack:"-"`
 	Config *config.Config   `msgpack:"-"`
 
-	Context context.Context    `msgpack:"-"`
-	Cancel  context.CancelFunc `msgpack:"-"`
+	Context context.Context         `msgpack:"-"`
+	Cancel  context.CancelCauseFunc `msgpack:"-"`
 
 	Stdin  io.Reader `msgpack:"-"`
 	Stdout io.Writer `msgpack:"-"`
@@ -49,7 +49,7 @@ type KContext struct {
 }
 
 func NewKContext() *KContext {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancelCause(context.Background())
 
 	return &KContext{
 		events:  events.NewEventsBUS(0),
@@ -64,7 +64,7 @@ func NewKContext() *KContext {
 func NewKContextFrom(template *KContext) *KContext {
 	ctx := *template
 	ctx.events = events.NewEventsBUS(0)
-	ctx.Context, ctx.Cancel = context.WithCancel(template.Context)
+	ctx.Context, ctx.Cancel = context.WithCancelCause(template.Context)
 	return &ctx
 }
 
@@ -86,7 +86,7 @@ func (c *KContext) Value(key any) any {
 
 func (c *KContext) Close() {
 	c.events.Close()
-	c.Cancel()
+	c.Cancel(nil)
 }
 
 func (c *KContext) Events() *events.EventsBUS {
