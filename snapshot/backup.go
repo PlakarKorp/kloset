@@ -366,9 +366,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			identifier := objects.RandomMAC()
 			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
 			if err != nil {
-				// XXX: ERROR HANDLING
-				snap.Logger().Warn("Failed to open deltaCache %s\n", err)
-				break
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w\n", err))
 			}
 
 			bc.stateId = identifier
@@ -379,15 +377,12 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			// Flush Delta-1
 			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, bc.stateId)
 			if err != nil {
-				// XXX: ERROR HANDLING
-				snap.Logger().Warn("Failed to push the state to the repository %s", err)
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w\n", err))
 			}
 
 			if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-				// XXX: ERROR HANDLING
-				snap.Logger().Warn("Failed to push the state to the repository %s", err)
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w\n", err))
 			}
-			fmt.Printf("flushDeltaState: Flush tick, merged old cache()\n")
 
 			snap.repository.RemoveTransaction(oldStateId)
 
@@ -396,7 +391,6 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			// do not close the deltaCache, as it'll be closed at the end of the
 			// backup because it's used by other parts of the code.
 			if oldCache != snap.scanCache {
-				fmt.Printf("flushDeltaState: Flush tick, closing old cache.\n")
 				oldCache.Close()
 			}
 		}
