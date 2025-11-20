@@ -367,6 +367,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
 			if err != nil {
 				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w\n", err))
+				return
 			}
 
 			bc.stateId = identifier
@@ -378,10 +379,12 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, bc.stateId)
 			if err != nil {
 				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w\n", err))
+				return
 			}
 
 			if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
 				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w\n", err))
+				return
 			}
 
 			snap.repository.RemoveTransaction(oldStateId)
