@@ -178,6 +178,7 @@ func TestMatches_Headers_Tags_Roots(t *testing.T) {
 		{"job mismatch", func(lo *LocateOptions) { lo.Filters.Job = "restore" }, false},
 		{"tags all-present", func(lo *LocateOptions) { lo.Filters.Tags = []string{"t1", "t2"} }, true},
 		{"tags missing-one", func(lo *LocateOptions) { lo.Filters.Tags = []string{"t1", "t3"} }, false},
+		{"ignore tags", func(lo *LocateOptions) { lo.Filters.IgnoreTags = []string{"t2"} }, false},
 		{"roots all-present", func(lo *LocateOptions) { lo.Filters.Roots = []string{"r1", "r2"} }, true},
 		{"roots missing-one", func(lo *LocateOptions) { lo.Filters.Roots = []string{"r1", "r3"} }, false},
 	}

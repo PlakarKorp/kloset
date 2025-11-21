@@ -31,7 +31,11 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 		func(v string) error {
 			for _, t := range strings.Split(v, ",") {
 				t = strings.TrimSpace(t)
-				if t != "" {
+				if t == "" {
+					continue
+				} else if strings.HasPrefix(t, "!") {
+					po.Filters.IgnoreTags = append(po.Filters.IgnoreTags, t[1:])
+				} else {
 					po.Filters.Tags = append(po.Filters.Tags, t)
 				}
 			}
