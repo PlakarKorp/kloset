@@ -366,7 +366,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			identifier := objects.RandomMAC()
 			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
 			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w\n", err))
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
 				return
 			}
 
@@ -375,15 +375,14 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 
 			// Now that the backup is free to progress we can serialize and push
 			// the resulting statefile to the repo.
-			// Flush Delta-1
 			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, bc.stateId)
 			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w\n", err))
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
 				return
 			}
 
 			if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w\n", err))
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
 				return
 			}
 
