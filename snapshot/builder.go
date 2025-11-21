@@ -28,8 +28,12 @@ type Builder struct {
 	Header *header.Header
 }
 
-func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string) (*Builder, error) {
-	identifier := objects.RandomMAC()
+func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC) (*Builder, error) {
+	identifier := snapId
+	if identifier == objects.NilMac {
+		identifier = objects.RandomMAC()
+	}
+
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
 		return nil, err
