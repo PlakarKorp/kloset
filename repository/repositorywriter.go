@@ -19,7 +19,7 @@ type RepositoryWriter struct {
 	*Repository
 
 	transactionMtx sync.RWMutex
-	deltaState     *state.LocalState
+	deltaState     map[objects.MAC]*state.LocalState
 
 	PackerManager  packer.PackerManagerInt
 	currentStateID objects.MAC
@@ -41,10 +41,12 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	}()
 
 	rw := RepositoryWriter{
-		Repository:     r,
-		deltaState:     r.state.Derive(cache),
+		Repository: r,
+
+		deltaState:     make(map[objects.MAC]*state.LocalState),
 		currentStateID: id,
 	}
+	rw.deltaState[rw.currentStateID] = r.state.Derive(cache)
 
 	switch typ {
 	case PtarType:
@@ -67,32 +69,44 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	return &rw
 }
 
-func (r *RepositoryWriter) FlushTransaction(newCache *caching.ScanCache, id objects.MAC) error {
+func (r *RepositoryWriter) RotateTransaction(newCache *caching.ScanCache, oldStateID, newStateID objects.MAC) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repositorywriter", "FlushTransaction(): %s", time.Since(t0))
 	}()
 
 	r.transactionMtx.Lock()
-	oldState := r.deltaState
-	r.deltaState = r.state.Derive(newCache)
+	oldState := r.deltaState[oldStateID]
+	r.deltaState[newStateID] = r.state.Derive(newCache)
+	r.currentStateID = newStateID
 	r.transactionMtx.Unlock()
 
-	return r.internalCommit(oldState, id)
+	return r.internalCommit(oldState, oldStateID)
 }
 
-func (r *RepositoryWriter) CommitTransaction(id objects.MAC) error {
+func (r *RepositoryWriter) RemoveTransaction(stateID objects.MAC) {
+	r.transactionMtx.Lock()
+	delete(r.deltaState, stateID)
+	r.transactionMtx.Unlock()
+}
+
+func (r *RepositoryWriter) CommitTransaction(oldStateID objects.MAC) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "CommitTransaction(): %s", time.Since(t0))
 	}()
 
-	err := r.internalCommit(r.deltaState, id)
+	err := r.internalCommit(r.deltaState[oldStateID], oldStateID)
 	r.transactionMtx.Lock()
 	r.deltaState = nil
+	r.currentStateID = objects.NilMac
 	r.transactionMtx.Unlock()
 
 	return err
+}
+
+func (r *RepositoryWriter) MergeLocalStateWith(stateID objects.MAC, oldCache *caching.ScanCache) error {
+	return r.state.MergeStateFromCache(stateID, oldCache)
 }
 
 func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MAC) error {
@@ -110,6 +124,12 @@ func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MA
 	return r.PutState(id, pr)
 }
 
+// MUST be called with `r.transactionMtx` at least read locked.
+func (r *RepositoryWriter) currentDeltaState() *state.LocalState {
+	// XXX: Do we want debug assertions here?
+	return r.deltaState[r.currentStateID]
+}
+
 func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool {
 	t0 := time.Now()
 	defer func() {
@@ -121,7 +141,16 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 		return true
 	}
 
-	return r.deltaState.BlobExists(Type, mac) || r.state.BlobExists(Type, mac)
+	r.transactionMtx.RLock()
+	for _, ds := range r.deltaState {
+		if ds.BlobExists(Type, mac) {
+			r.transactionMtx.RUnlock()
+			return true
+		}
+	}
+	r.transactionMtx.RUnlock()
+
+	return r.state.BlobExists(Type, mac)
 }
 
 func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
@@ -176,7 +205,7 @@ func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
-	if err := r.deltaState.DeleteResource(Type, mac); err != nil {
+	if err := r.currentDeltaState().DeleteResource(Type, mac); err != nil {
 		return err
 	}
 
@@ -208,7 +237,7 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
 
-	db := r.deltaState.NewBatch()
+	db := r.currentDeltaState().NewBatch()
 
 	for _, blob := range pfile.Entries() {
 		delta := &state.DeltaEntry{
@@ -231,7 +260,7 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 
 	db.Commit()
 
-	return r.deltaState.PutPackfile(r.currentStateID, mac)
+	return r.currentDeltaState().PutPackfile(r.currentStateID, mac)
 }
 
 func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
@@ -275,10 +304,10 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 			},
 		}
 
-		if err := r.deltaState.PutDelta(delta); err != nil {
+		if err := r.currentDeltaState().PutDelta(delta); err != nil {
 			return err
 		}
 	}
 
-	return r.deltaState.PutPackfile(r.currentStateID, mac)
+	return r.currentDeltaState().PutPackfile(r.currentStateID, mac)
 }

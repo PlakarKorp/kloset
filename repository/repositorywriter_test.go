@@ -163,7 +163,7 @@ func TestDeleteStateResource(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestFlushTransaction(t *testing.T) {
+func TestRotateTransaction(t *testing.T) {
 	// Create a repository
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 	require.NotNil(t, repo)
@@ -188,7 +188,7 @@ func TestFlushTransaction(t *testing.T) {
 	require.NotNil(t, writer)
 
 	// Test flushing a transaction
-	err = writer.FlushTransaction(scanCache, snapshotID)
+	err = writer.RotateTransaction(scanCache, snapshotID, objects.NilMac)
 	require.NoError(t, err)
 }
 
