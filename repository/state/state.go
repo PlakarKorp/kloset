@@ -766,8 +766,19 @@ func (ls *LocalState) DelPackfile(packfile objects.MAC) error {
 
 func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
 	return func(yield func(objects.MAC) bool) {
-		for st, _ := range ls.cache.GetPackfiles() {
+		for st := range ls.cache.GetPackfiles() {
 			if !yield(st) {
+				return
+			}
+		}
+	}
+}
+
+func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
+	return func(yield func(PackfileEntry, error) bool) {
+		for _, buf := range ls.cache.GetPackfiles() {
+			pe, err := PackfileEntryFromBytes(buf)
+			if !yield(pe, err) {
 				return
 			}
 		}

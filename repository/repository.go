@@ -1141,3 +1141,12 @@ func (r *Repository) DeleteLock(lockID objects.MAC) error {
 
 	return r.store.DeleteLock(r.appContext, lockID)
 }
+
+func (r *Repository) ListPackfileEntries() iter.Seq2[state.PackfileEntry, error] {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "ListPackfileEntries(): %s", time.Since(t0))
+	}()
+
+	return r.state.ListPackfileEntries()
+}
