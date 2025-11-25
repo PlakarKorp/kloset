@@ -1115,7 +1115,16 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 			filePath, fileBytes, hasFile = fileNext()
 
 		default:
-			childDirEntry, err := vfs.EntryFromBytes(dirBytes)
+			abspath := prefix + dirPath
+			val, found, err := backupCtx.fileidx.Find(abspath)
+			if err != nil {
+				return err
+			}
+			if !found {
+				return fmt.Errorf("missing summary for directory %q", abspath)
+			}
+
+			childDirEntry, err := vfs.EntryFromBytes(val)
 			if err != nil {
 				return err
 			}
@@ -1313,10 +1322,6 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		}
 
 		if err := backupCtx.fileidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
-			return nil, nil, err
-		}
-
-		if err := backupCtx.recordEntry(dirEntry); err != nil {
 			return nil, nil, err
 		}
 	}
