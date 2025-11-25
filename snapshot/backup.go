@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"database/sql"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -44,6 +45,8 @@ type BackupContext struct {
 
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
+
+	dbstore *sql.DB
 
 	vfsEntBatch *caching.ScanBatch
 	vfsEntLock  sync.Mutex
@@ -473,6 +476,11 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 		return err
 	}
 
+	// XXX: Needs to get factorized too.
+	backupCtx.dbstore.Close()
+	os.Remove(path.Join(snap.AppContext().CacheDir, "dbstore.db"))
+	os.Remove(path.Join(snap.AppContext().CacheDir, "dbstore.db-wal"))
+
 	snap.Header.Duration = time.Since(beginTime)
 	snap.Header.GetSource(0).Importer.Directory = root
 	snap.Header.GetSource(0).VFS = *vfsHeader
@@ -750,47 +758,94 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 	return nil
 }
 
-func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
+func (snap *Builder) makeBackupIndexes(bc *BackupContext) (*BackupIndexes, error) {
 	bi := &BackupIndexes{}
 
-	errstore := caching.DBStore[string, []byte]{
-		Prefix: "__error__",
-		Cache:  snap.scanCache,
-	}
+	/*
+		errstore := caching.DBStore[string, []byte]{
+			Prefix: "__error__",
+			Cache:  snap.scanCache,
+		}
 
-	xattrstore := caching.DBStore[string, []byte]{
-		Prefix: "__xattr__",
-		Cache:  snap.scanCache,
-	}
+		xattrstore := caching.DBStore[string, []byte]{
+			Prefix: "__xattr__",
+			Cache:  snap.scanCache,
+		}
 
-	ctstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__contenttype__",
-		Cache:  snap.scanCache,
-	}
+		ctstore := caching.DBStore[string, objects.MAC]{
+			Prefix: "__contenttype__",
+			Cache:  snap.scanCache,
+		}
 
-	dirpackstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__dirpack__",
-		Cache:  snap.scanCache,
-	}
+		dirpackstore := caching.DBStore[string, objects.MAC]{
+			Prefix: "__dirpack__",
+			Cache:  snap.scanCache,
+		}
+	*/
 
-	var err error
-	if bi.erridx, err = btree.New(&errstore, strings.Compare, 50); err != nil {
+	errstore, err := caching.NewSQLiteDBStore[string, []byte]("error", bc.dbstore)
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.xattridx, err = btree.New(&xattrstore, vfs.PathCmp, 50); err != nil {
+	xattrstore, err := caching.NewSQLiteDBStore[string, []byte]("xattr", bc.dbstore)
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.ctidx, err = btree.New(&ctstore, strings.Compare, 50); err != nil {
+	ctstore, err := caching.NewSQLiteDBStore[string, objects.MAC]("contenttype", bc.dbstore)
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.dirpackidx, err = btree.New(&dirpackstore, strings.Compare, 50); err != nil {
+	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC]("dirpack", bc.dbstore)
+	if err != nil {
+		return nil, err
+	}
+
+	if bi.erridx, err = btree.New(errstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.xattridx, err = btree.New(xattrstore, vfs.PathCmp, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.ctidx, err = btree.New(ctstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.dirpackidx, err = btree.New(dirpackstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
 	return bi, nil
+}
+
+// XXX: To be merged into a sql-cache package.
+func (snap *Builder) createDbStore() (*sql.DB, error) {
+	db, err := sql.Open("sqlite3", path.Join(snap.AppContext().CacheDir, "dbstore.db"))
+	if err != nil {
+		return nil, err
+	}
+
+	pragmas := []string{
+		"PRAGMA journal_mode = WAL;", // one-writer WAL, good for cache
+		"PRAGMA synchronous = OFF;",  // speed; scanlog is scratch
+		"PRAGMA temp_store = MEMORY;",
+		"PRAGMA mmap_size = 0;",
+		"PRAGMA cache_size = -20000;",      // ~20MB
+		"PRAGMA locking_mode = EXCLUSIVE;", // single-process owner
+		"PRAGMA busy_timeout = 5000;",
+	}
+
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			return nil, err
+		}
+	}
+
+	return db, nil
 }
 
 func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
@@ -826,12 +881,19 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		stateId:        snap.Header.Identifier,
 	}
 
+	db, err := snap.createDbStore()
+	if err != nil {
+		return nil, err
+	}
+
+	backupCtx.dbstore = db
+
 	backupCtx.excludes = exclude.NewRuleSet()
 	if err := backupCtx.excludes.AddRulesFromArray(backupOpts.Excludes); err != nil {
 		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
 
-	if bi, err := snap.makeBackupIndexes(); err != nil {
+	if bi, err := snap.makeBackupIndexes(backupCtx); err != nil {
 		return nil, err
 	} else {
 		backupCtx.indexes = append(backupCtx.indexes, bi)
@@ -1215,12 +1277,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	filestore := caching.DBStore[string, []byte]{
-		Prefix: "__path__",
-		Cache:  snap.scanCache,
+	filestore, err := caching.NewSQLiteDBStore[string, []byte]("path", backupCtx.dbstore)
+	if err != nil {
+		return nil, nil, err
 	}
 
-	backupCtx.fileidx, err = btree.New(&filestore, vfs.PathCmp, 50)
+	backupCtx.fileidx, err = btree.New(filestore, vfs.PathCmp, 50)
 	if err != nil {
 		return nil, nil, err
 	}
