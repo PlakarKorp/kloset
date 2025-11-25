@@ -2,6 +2,8 @@ package caching
 
 import (
 	"fmt"
+	"os"
+	"path"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/vmihailenco/msgpack/v5"
@@ -48,28 +50,53 @@ func (ds *DBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
 
 // SQLiteDBStore implements btree.Storer
 type SQLiteDBStore[K any, V any] struct {
-	storeName string
-	idx       int
-	db        *sql.DB
+	dbpath string
+	idx    int
+	db     *sql.DB
 }
 
-func NewSQLiteDBStore[K, V any](storeName string, db *sql.DB) (*SQLiteDBStore[K, V], error) {
-	create :=
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+func NewSQLiteDBStore[K, V any](storePath, storeName string) (*SQLiteDBStore[K, V], error) {
+	dbpath := path.Join(storePath, storeName)
+	if err := os.MkdirAll(dbpath, 0700); err != nil {
+		return nil, err
+	}
+
+	db, err := sql.Open("sqlite3", path.Join(dbpath, "dbstore.db"))
+	if err != nil {
+		return nil, err
+	}
+
+	create := `CREATE TABLE IF NOT EXISTS dbstore (
 		id INTEGER NOT NULL PRIMARY KEY,
 		node BLOB NOT NULL
-	);`, storeName)
+	);`
+
+	pragmas := []string{
+		"PRAGMA journal_mode = WAL;", // one-writer WAL, good for cache
+		"PRAGMA synchronous = OFF;",  // speed; scanlog is scratch
+		"PRAGMA temp_store = MEMORY;",
+		"PRAGMA mmap_size = 0;",
+		"PRAGMA cache_size = -20000;",      // ~20MB
+		"PRAGMA locking_mode = EXCLUSIVE;", // single-process owner
+		"PRAGMA busy_timeout = 5000;",
+	}
+
+	for _, p := range pragmas {
+		if _, err := db.Exec(p); err != nil {
+			return nil, err
+		}
+	}
 
 	if _, err := db.Exec(create); err != nil {
 		return nil, err
 	}
 
-	return &SQLiteDBStore[K, V]{storeName, 0, db}, nil
+	return &SQLiteDBStore[K, V]{dbpath, 0, db}, nil
 }
 
 func (ds *SQLiteDBStore[K, V]) Get(idx int) (*btree.Node[K, int, V], error) {
 	var bytes []byte
-	if err := ds.db.QueryRow(fmt.Sprintf("SELECT node FROM %s WHERE id = ?", ds.storeName), idx).Scan(&bytes); err != nil {
+	if err := ds.db.QueryRow("SELECT node FROM dbstore WHERE id = ?", idx).Scan(&bytes); err != nil {
 		return nil, err
 	}
 
@@ -87,7 +114,7 @@ func (ds *SQLiteDBStore[K, V]) Update(idx int, node *btree.Node[K, int, V]) erro
 		return err
 	}
 
-	_, err = ds.db.Exec(fmt.Sprintf("UPDATE %s SET node=? WHERE id=?", ds.storeName), bytes, idx)
+	_, err = ds.db.Exec("UPDATE dbstore SET node=? WHERE id=?", bytes, idx)
 	return err
 }
 
@@ -99,10 +126,18 @@ func (ds *SQLiteDBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
 		return 0, err
 	}
 
-	_, err = ds.db.Exec(fmt.Sprintf("INSERT INTO %s(id, node) VALUES(?, ?)", ds.storeName), idx, bytes)
+	_, err = ds.db.Exec("INSERT INTO dbstore(id, node) VALUES(?, ?)", idx, bytes)
 	if err != nil {
 		return 0, err
 	}
 
 	return ds.idx, nil
+}
+
+func (ds *SQLiteDBStore[K, V]) Close() error {
+	err := ds.db.Close()
+
+	os.RemoveAll(ds.dbpath)
+
+	return err
 }
