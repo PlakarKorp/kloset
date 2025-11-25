@@ -125,20 +125,6 @@ func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 	return nil
 }
 
-func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
-	path := entry.Path()
-
-	bytes, err := entry.ToBytes()
-	if err != nil {
-		return err
-	}
-
-	if entry.FileInfo.IsDir() {
-		return bc.scanLog.PutDirectory(path, bytes)
-	}
-	return bc.scanLog.PutFile(path, bytes)
-}
-
 func (bc *BackupContext) recordError(path string, err error) error {
 	entry := vfs.NewErrorItem(path, err.Error())
 	serialized, e := entry.ToBytes()
@@ -1191,15 +1177,13 @@ func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) er
 }
 
 func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname string) error {
-	// 1. Already have this directory?
 	item, err := backupCtx.scanLog.GetDirectory(pathname)
 	if err != nil {
 		return err
 	}
-	if item == nil {
-		// 2. Create this directory entry under its parent
-		parent := path.Dir(pathname)
 
+	if item == nil {
+		parent := path.Dir(pathname)
 		dirEntry := vfs.NewEntry(parent, &importer.ScanRecord{
 			Pathname: pathname,
 			FileInfo: objects.FileInfo{
@@ -1208,50 +1192,17 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 				LmodTime: time.Unix(0, 0).UTC(),
 			},
 		})
-
-		if err := backupCtx.recordEntry(dirEntry); err != nil {
+		if err := backupCtx.batchRecordEntry(dirEntry); err != nil {
 			return err
 		}
 	}
 
-	// 3. Recurse on parent until we hit root-like path
 	parent := path.Dir(pathname)
 	if parent == pathname {
-		// e.g. "/" or "."
+		// reached root
 		return nil
 	}
-
 	return snap.relinkNodesRecursive(backupCtx, parent)
-}
-
-func (snap *Builder) relinkNodesRecursive_old(backupCtx *BackupContext, pathname string) error {
-	parentDir := path.Dir(pathname)
-
-	item, err := backupCtx.scanLog.GetDirectory(parentDir)
-	if err != nil {
-		return err
-	}
-	if item != nil {
-		return nil
-	}
-
-	dirEntry := vfs.NewEntry(path.Dir(parentDir), &importer.ScanRecord{
-		Pathname: parentDir,
-		FileInfo: objects.FileInfo{
-			Lname:    path.Base(parentDir),
-			Lmode:    os.ModeDir | 0750,
-			LmodTime: time.Unix(0, 0).UTC(),
-		},
-	})
-
-	if err := backupCtx.recordEntry(dirEntry); err != nil {
-		return err
-	}
-	if parentDir == pathname {
-		return nil
-	}
-
-	return snap.relinkNodesRecursive(backupCtx, parentDir)
 }
 
 func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
@@ -1262,11 +1213,15 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 		delete(missingMap, e.Path)
 	}
 
+	backupCtx.vfsEntBatch = backupCtx.scanLog.NewBatch()
 	for missingDir := range missingMap {
 		if err := snap.relinkNodesRecursive(backupCtx, missingDir); err != nil {
 			return err
 		}
 		delete(missingMap, missingDir)
+	}
+	if err := backupCtx.vfsEntBatch.Commit(); err != nil {
+		return err
 	}
 
 	return nil
