@@ -6,6 +6,7 @@ import (
 	"path"
 
 	"github.com/PlakarKorp/kloset/btree"
+	"github.com/google/uuid"
 	"github.com/vmihailenco/msgpack/v5"
 
 	"database/sql"
@@ -56,6 +57,7 @@ type SQLiteDBStore[K any, V any] struct {
 }
 
 func NewSQLiteDBStore[K, V any](storePath, storeName string) (*SQLiteDBStore[K, V], error) {
+	storeName += uuid.NewString()
 	dbpath := path.Join(storePath, storeName)
 	if err := os.MkdirAll(dbpath, 0700); err != nil {
 		return nil, err
