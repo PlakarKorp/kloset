@@ -8,7 +8,6 @@ import (
 	"iter"
 	"os"
 	"path"
-	"strings"
 
 	"github.com/golang/snappy"
 	_ "github.com/mattn/go-sqlite3"
@@ -124,12 +123,10 @@ func (s *ScanLog) Close() error {
 	return err
 }
 
-// PutDirectory stores a directory entry at path.
 func (s *ScanLog) PutDirectory(p string, payload []byte) error {
 	return s.put(KindDirectory, p, payload)
 }
 
-// PutFile stores a file entry at path.
 func (s *ScanLog) PutFile(p string, payload []byte) error {
 	return s.put(KindFile, p, payload)
 }
@@ -144,12 +141,10 @@ func (s *ScanLog) put(kind EntryKind, p string, payload []byte) error {
 	return err
 }
 
-// GetDirectory returns the serialized directory entry at path, or nil if not found.
 func (s *ScanLog) GetDirectory(p string) ([]byte, error) {
 	return s.get(KindDirectory, p)
 }
 
-// GetFile returns the serialized file entry at path, or nil if not found.
 func (s *ScanLog) GetFile(p string) ([]byte, error) {
 	return s.get(KindFile, p)
 }
@@ -240,271 +235,7 @@ type Entry struct {
 	Payload []byte
 }
 
-// List returns Entry{Kind, Path, Payload} for a prefix range.
-// kind == 0 means "any kind".
-func (s *ScanLog) List(prefix string, reverse bool, kind EntryKind) iter.Seq[Entry] {
-	return func(yield func(Entry) bool) {
-		hi := prefix + string([]byte{0xFF})
-
-		order := "ASC"
-		if reverse {
-			order = "DESC"
-		}
-
-		query := `
-			SELECT kind, path, payload
-			FROM entries
-			WHERE path >= ? AND path < ?
-		`
-		args := []any{prefix, hi}
-
-		if kind != 0 {
-			query += ` AND kind = ?`
-			args = append(args, int(kind))
-		}
-
-		query += ` ORDER BY path ` + order
-
-		rows, err := s.db.Query(query, args...)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var kInt int
-			var p string
-			var stored []byte
-			if err := rows.Scan(&kInt, &p, &stored); err != nil {
-				return
-			}
-
-			payload, err := decodePayload(stored)
-			if err != nil {
-				return
-			}
-
-			if !yield(Entry{
-				Kind:    EntryKind(kInt),
-				Path:    p,
-				Payload: payload,
-			}) {
-				return
-			}
-		}
-	}
-}
-
-func (s *ScanLog) ListFiles(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.List(prefix, reverse, KindFile)
-}
-
-func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.List(prefix, reverse, KindDirectory)
-}
-
-func (s *ScanLog) ListAll(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.List(prefix, reverse, 0)
-}
-
-// ListDirectPathnames returns only direct children of `parent` (no grandchildren),
-// using the parent column instead of subtree scans.
-func (s *ScanLog) ListDirectPathnames2(kind EntryKind, parent string, reverse bool) iter.Seq[Entry] {
-
-	return func(yield func(Entry) bool) {
-		order := "ASC"
-		if reverse {
-			order = "DESC"
-		}
-
-		query := `
-            SELECT kind, path, payload
-            FROM entries
-            WHERE parent = ? AND parent != path
-        `
-		args := []any{parent}
-
-		if kind != 0 {
-			query += ` AND kind = ?`
-			args = append(args, int(kind))
-		}
-
-		query += ` ORDER BY path ` + order
-
-		rows, err := s.db.Query(query, args...)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var k int
-			var p string
-			var stored []byte
-			if err := rows.Scan(&k, &p, &stored); err != nil {
-				return
-			}
-
-			payload, err := decodePayload(stored)
-			if err != nil {
-				return
-			}
-
-			if !yield(Entry{
-				Kind:    EntryKind(k),
-				Path:    p,
-				Payload: payload,
-			}) {
-				return
-			}
-		}
-	}
-}
-
-// ListDirectPathnames returns only direct children of `parent` (no grandchildren),
-// using the parent column instead of subtree scans.
-func (s *ScanLog) ListDirectPathnames(kind EntryKind, parent string, reverse bool) iter.Seq2[string, []byte] {
-	return func(yield func(string, []byte) bool) {
-		order := "ASC"
-		if reverse {
-			order = "DESC"
-		}
-
-		query := `
-            SELECT kind, path, payload
-            FROM entries
-            WHERE parent = ?
-        `
-		args := []any{parent}
-
-		if kind != 0 {
-			query += ` AND kind = ?`
-			args = append(args, int(kind))
-		}
-
-		query += ` ORDER BY path ` + order
-
-		rows, err := s.db.Query(query, args...)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var k int
-			var p string
-			var stored []byte
-			if err := rows.Scan(&k, &p, &stored); err != nil {
-				return
-			}
-
-			// Optional: keep your "directory paths end with /" convention
-			if EntryKind(k) == KindDirectory && !strings.HasSuffix(p, "/") {
-				p += "/"
-			}
-
-			payload, err := decodePayload(stored)
-			if err != nil {
-				return
-			}
-
-			if !yield(p, payload) {
-				return
-			}
-		}
-	}
-}
-
-type DirChildRow struct {
-	DirPath      string
-	DirPayload   []byte
-	HasChild     bool
-	ChildKind    EntryKind
-	ChildPath    string
-	ChildPayload []byte
-}
-
-func (s *ScanLog) ListDirectoryWithChildren(prefix string, reverse bool) iter.Seq[DirChildRow] {
-	return func(yield func(DirChildRow) bool) {
-		hi := prefix + string([]byte{0xFF})
-
-		dirOrder := "ASC"
-		if reverse {
-			dirOrder = "DESC"
-		}
-
-		// We only join directories (d.kind = KindDirectory); children can be files or dirs.
-		query := `
-			SELECT
-				d.path      AS dir_path,
-				d.payload   AS dir_payload,
-				c.kind      AS child_kind,
-				c.path      AS child_path,
-				c.payload   AS child_payload
-			FROM entries AS d
-			LEFT JOIN entries AS c
-			  ON c.parent = d.path
-			WHERE d.kind = ? AND d.path >= ? AND d.path < ?
-			ORDER BY d.path ` + dirOrder + `, c.path ASC
-		`
-
-		rows, err := s.db.Query(query, int(KindDirectory), prefix, hi)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var (
-				dirPath          string
-				dirStoredPayload []byte
-
-				childKindVal       sql.NullInt64
-				childPathVal       sql.NullString
-				childStoredPayload []byte
-			)
-
-			if err := rows.Scan(
-				&dirPath,
-				&dirStoredPayload,
-				&childKindVal,
-				&childPathVal,
-				&childStoredPayload,
-			); err != nil {
-				return
-			}
-
-			dirPayload, err := decodePayload(dirStoredPayload)
-			if err != nil {
-				return
-			}
-
-			row := DirChildRow{
-				DirPath:    dirPath,
-				DirPayload: dirPayload,
-			}
-
-			if childKindVal.Valid && childPathVal.Valid {
-
-				childPayload, err := decodePayload(childStoredPayload)
-				if err != nil {
-					return
-				}
-
-				row.HasChild = true
-				row.ChildKind = EntryKind(childKindVal.Int64)
-				row.ChildPath = childPathVal.String
-				row.ChildPayload = childPayload
-			}
-
-			if !yield(row) {
-				return
-			}
-		}
-	}
-}
-
-func (s *ScanLog) ListPathnames(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
+func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
 	return func(yield func(Entry) bool) {
 		hi := prefix + string([]byte{0xFF})
 
@@ -543,6 +274,65 @@ func (s *ScanLog) ListPathnames(kind EntryKind, prefix string, reverse bool) ite
 			if !yield(Entry{
 				Kind: EntryKind(kInt),
 				Path: p,
+			}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) ListFiles(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
+	return s.list(KindFile, prefix, reverse)
+}
+
+func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq[Entry] {
+	return s.list(KindDirectory, prefix, reverse)
+}
+
+func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq[Entry] {
+	return s.list(0, prefix, reverse)
+}
+
+func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {
+
+	return func(yield func(Entry) bool) {
+		order := "ASC"
+		if reverse {
+			order = "DESC"
+		}
+
+		query := `
+            SELECT kind, path, payload
+            FROM entries
+            WHERE parent = ? AND parent != path
+        `
+		args := []any{parent}
+
+		query += ` ORDER BY path ` + order
+
+		rows, err := s.db.Query(query, args...)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var k int
+			var p string
+			var stored []byte
+			if err := rows.Scan(&k, &p, &stored); err != nil {
+				return
+			}
+
+			payload, err := decodePayload(stored)
+			if err != nil {
+				return
+			}
+
+			if !yield(Entry{
+				Kind:    EntryKind(k),
+				Path:    p,
+				Payload: payload,
 			}) {
 				return
 			}

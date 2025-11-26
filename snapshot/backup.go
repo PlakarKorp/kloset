@@ -1109,12 +1109,12 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
-	if prefix != "/" {
-		prefix = strings.TrimRight(prefix, "/")
+func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
+	if parent != "/" {
+		parent = strings.TrimRight(parent, "/")
 	}
 
-	for e := range backupCtx.scanLog.ListDirectPathnames2(0, prefix, false) {
+	for e := range backupCtx.scanLog.ListDirectPathnames(parent, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
 			err := backupCtx.processFile(dirEntry, e.Payload, e.Path)
@@ -1147,7 +1147,7 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 			}
 
 		default:
-			return fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, prefix+e.Path)
+			return fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
 		}
 
 	}
@@ -1218,7 +1218,7 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 	var missingMap = make(map[string]struct{})
 
-	for e := range backupCtx.scanLog.ListAll("/", true) {
+	for e := range backupCtx.scanLog.ListPathnames("/", true) {
 		missingMap[path.Dir(e.Path)] = struct{}{}
 		delete(missingMap, e.Path)
 	}
@@ -1258,7 +1258,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	var rootSummary *vfs.Summary
 
 	dirPaths := make([]string, 0)
-	for e := range backupCtx.scanLog.ListPathnames(scanlog.KindDirectory, "/", true) {
+	for e := range backupCtx.scanLog.ListDirectories("/", true) {
 		dirPaths = append(dirPaths, e.Path)
 	}
 
