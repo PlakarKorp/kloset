@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"os"
 	"path"
 	"strings"
 
@@ -32,7 +33,8 @@ type batchRec struct {
 }
 
 type ScanLog struct {
-	db *sql.DB
+	db   *sql.DB
+	path string
 }
 
 func New(ctx context.Context, dsn string) (*ScanLog, error) {
@@ -59,7 +61,8 @@ func New(ctx context.Context, dsn string) (*ScanLog, error) {
 	}
 
 	return &ScanLog{
-		db: db,
+		db:   db,
+		path: dsn,
 	}, nil
 }
 
@@ -113,7 +116,12 @@ func decodePayload(stored []byte) ([]byte, error) {
 }
 
 func (s *ScanLog) Close() error {
-	return s.db.Close()
+	err := s.db.Close()
+
+	if s.path != "" {
+		os.RemoveAll(s.path)
+	}
+	return err
 }
 
 // PutDirectory stores a directory entry at path.
@@ -312,7 +320,7 @@ func (s *ScanLog) ListDirectPathnames2(kind EntryKind, parent string, reverse bo
 		query := `
             SELECT kind, path, payload
             FROM entries
-            WHERE parent = ?
+            WHERE parent = ? AND parent != path
         `
 		args := []any{parent}
 
@@ -490,6 +498,52 @@ func (s *ScanLog) ListDirectoryWithChildren(prefix string, reverse bool) iter.Se
 			}
 
 			if !yield(row) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) ListPathnames(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
+	return func(yield func(Entry) bool) {
+		hi := prefix + string([]byte{0xFF})
+
+		order := "ASC"
+		if reverse {
+			order = "DESC"
+		}
+
+		query := `
+			SELECT kind, path
+			FROM entries
+			WHERE path >= ? AND path < ?
+		`
+		args := []any{prefix, hi}
+
+		if kind != 0 {
+			query += ` AND kind = ?`
+			args = append(args, int(kind))
+		}
+
+		query += ` ORDER BY path ` + order
+
+		rows, err := s.db.Query(query, args...)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var kInt int
+			var p string
+			if err := rows.Scan(&kInt, &p); err != nil {
+				return
+			}
+
+			if !yield(Entry{
+				Kind: EntryKind(kInt),
+				Path: p,
+			}) {
 				return
 			}
 		}

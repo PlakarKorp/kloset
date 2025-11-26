@@ -452,6 +452,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	for _, bi := range backupCtx.indexes {
 		defer bi.Close()
 	}
+	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
@@ -844,7 +845,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		return nil, err
 	}
 
-	scanLog, err := scanlog.New(snap.AppContext(), "")
+	scanLog, err := scanlog.New(snap.AppContext(), path.Join(snap.AppContext().CacheDir, fmt.Sprintf("%x.scanlog", snap.Header.Identifier)))
 	if err != nil {
 		return nil, err
 	}
@@ -1109,6 +1110,9 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 }
 
 func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
+	if prefix != "/" {
+		prefix = strings.TrimRight(prefix, "/")
+	}
 
 	for e := range backupCtx.scanLog.ListDirectPathnames2(0, prefix, false) {
 		switch e.Kind {
@@ -1182,8 +1186,9 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 		return err
 	}
 
+	parent := path.Dir(pathname)
+
 	if item == nil {
-		parent := path.Dir(pathname)
 		dirEntry := vfs.NewEntry(parent, &importer.ScanRecord{
 			Pathname: pathname,
 			FileInfo: objects.FileInfo{
@@ -1192,12 +1197,17 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 				LmodTime: time.Unix(0, 0).UTC(),
 			},
 		})
-		if err := backupCtx.batchRecordEntry(dirEntry); err != nil {
+
+		serialized, err := dirEntry.ToBytes()
+		if err != nil {
+			return err
+		}
+
+		if err := backupCtx.scanLog.PutDirectory(pathname, serialized); err != nil {
 			return err
 		}
 	}
 
-	parent := path.Dir(pathname)
 	if parent == pathname {
 		// reached root
 		return nil
@@ -1213,17 +1223,12 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 		delete(missingMap, e.Path)
 	}
 
-	backupCtx.vfsEntBatch = backupCtx.scanLog.NewBatch()
 	for missingDir := range missingMap {
 		if err := snap.relinkNodesRecursive(backupCtx, missingDir); err != nil {
 			return err
 		}
 		delete(missingMap, missingDir)
 	}
-	if err := backupCtx.vfsEntBatch.Commit(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -1252,9 +1257,18 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 	var rootSummary *vfs.Summary
 
-	for e := range backupCtx.scanLog.ListDirectories("/", true) {
-		dirPath := e.Path
-		dirBytes := e.Payload
+	dirPaths := make([]string, 0)
+	for e := range backupCtx.scanLog.ListPathnames(scanlog.KindDirectory, "/", true) {
+		dirPaths = append(dirPaths, e.Path)
+	}
+
+	for _, pathname := range dirPaths {
+		dirPath := pathname
+
+		dirBytes, err := backupCtx.scanLog.GetDirectory(dirPath)
+		if err != nil {
+			return nil, nil, err
+		}
 
 		if err := snap.AppContext().Err(); err != nil {
 			return nil, nil, err
