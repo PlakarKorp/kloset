@@ -39,13 +39,16 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 		return nil, err
 	}
 
+	deltaStateCache, err := caching.NewSQLState(nil, identifier)
+
 	snap := &Builder{
 		scanCache:  scanCache,
 		deltaCache: scanCache,
 
 		Header: header.NewHeader("default", identifier),
 	}
-	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
+
+	snap.repository = repo.NewRepositoryWriter(deltaStateCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
 
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
