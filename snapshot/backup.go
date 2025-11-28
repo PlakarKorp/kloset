@@ -1205,7 +1205,7 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 		}
 	}
 
-	return nil
+	return snap.relinkNodesRecursive(backupCtx, "/")
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
@@ -1297,7 +1297,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		})
 		if dirPath == "/" {
 			if rootSummary != nil {
-				panic("double /!")
+				return nil, nil, fmt.Errorf("importer yield a double root!")
 			}
 			rootSummary = dirEntry.Summary
 		}
@@ -1342,7 +1342,6 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	}
 
 	return vfsHeader, rootSummary, nil
-
 }
 
 func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
