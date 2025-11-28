@@ -120,7 +120,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 						"path":        entrypath,
 						"error":       err.Error(),
 					})
-					return restoreContext.reportFailure(snap, err)
+					restoreContext.reportFailure(snap, err)
+					return nil
 				}
 				if !opts.SkipPermissions {
 					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
@@ -129,7 +130,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 							"path":        entrypath,
 							"error":       err.Error(),
 						})
-						return restoreContext.reportFailure(snap, err)
+						restoreContext.reportFailure(snap, err)
+						return nil
 					}
 				}
 				emitter.Emit("snapshot.restore.symlink.ok", map[string]any{
