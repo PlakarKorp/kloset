@@ -145,3 +145,16 @@ func TestBackupManyError(t *testing.T) {
 	require.Equal(t, summary.Below.Directories, uint64(36))
 	require.Equal(t, summary.Below.Errors, uint64(180))
 }
+
+func emptyGenerator(ch chan<- *importer.ScanResult) {
+	// send no files
+	close(ch)
+}
+
+func TestBackupEmptyScan(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	snap := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(emptyGenerator))
+
+	summary := snap.Header.GetSource(0).Summary
+	require.Equal(t, summary.Below.Directories, uint64(0))
+}
