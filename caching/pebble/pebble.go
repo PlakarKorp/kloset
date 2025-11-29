@@ -52,7 +52,7 @@ func InMemoryConstructor() caching.Constructor {
 
 func New(dir string, deletedOnClose bool) (caching.Cache, error) {
 	opts := pebble.Options{
-		MemTableSize: 256 << 20,
+		MemTableSize: 128 << 20,
 		Logger:       noopLoggerAndTracer{},
 	}
 	if dir == "" {
