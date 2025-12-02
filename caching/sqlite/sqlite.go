@@ -83,6 +83,7 @@ func (s *SQLiteCache) Decode(stored []byte) ([]byte, error) {
 
 func (s *SQLiteCache) Close() error {
 	err := s.DB.Close()
+
 	if s.deleteOnClose {
 		os.RemoveAll(s.dir)
 	}
