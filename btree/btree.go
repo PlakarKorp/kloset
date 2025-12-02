@@ -31,6 +31,8 @@ type Storer[K any, P comparable, V any] interface {
 	Update(P, *Node[K, P, V]) error
 	// Put saves a new node and returns its address, or an error.
 	Put(*Node[K, P, V]) (P, error)
+
+	Close() error
 }
 
 type Node[K any, P comparable, V any] struct {

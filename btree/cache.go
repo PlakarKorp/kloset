@@ -52,5 +52,13 @@ func (c *cache[K, P, V]) Put(node *Node[K, P, V]) (P, error) {
 }
 
 func (c *cache[K, P, V]) Close() error {
-	return c.lru.Close()
+	err := c.lru.Close()
+	if err != nil {
+		// XXX: Admittedly the lru error (potential flush error) is more
+		// important...
+		c.store.Close()
+		return err
+	}
+
+	return c.store.Close()
 }

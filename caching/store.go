@@ -41,3 +41,8 @@ func (ds *DBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
 	}
 	return idx, ds.Cache.cache.Put([]byte(fmt.Sprintf("%s:%d", ds.Prefix, idx)), bytes)
 }
+
+func (ds *DBStore[K, V]) Close() error {
+	// We do not own the cache.
+	return nil
+}

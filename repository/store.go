@@ -40,3 +40,7 @@ func (rs *RepositoryStore[K, V]) Update(sum objects.MAC, node *btree.Node[K, obj
 func (rs *RepositoryStore[K, V]) Put(node *btree.Node[K, objects.MAC, V]) (csum objects.MAC, err error) {
 	return csum, ErrStoreReadOnly
 }
+
+func (rs *RepositoryStore[K, V]) Close() error {
+	return nil
+}
