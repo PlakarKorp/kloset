@@ -20,6 +20,7 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/exclude"
+	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
@@ -454,6 +455,10 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	backupCtx.emitter = emitter
 
+	for _, bi := range backupCtx.indexes {
+		defer bi.Close(snap.Logger())
+	}
+
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
@@ -748,6 +753,24 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
+}
+
+func (bi *BackupIndexes) Close(log *logging.Logger) {
+	if err := bi.erridx.Close(); err != nil {
+		log.Warn("Failed to close index btree: %s", err)
+	}
+
+	if err := bi.xattridx.Close(); err != nil {
+		log.Warn("Failed to close xattr btree: %s", err)
+	}
+
+	if err := bi.ctidx.Close(); err != nil {
+		log.Warn("Failed to close content type btree: %s", err)
+	}
+
+	if err := bi.dirpackidx.Close(); err != nil {
+		log.Warn("Failed to close content dirpack btree: %s", err)
+	}
 }
 
 func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
@@ -1224,6 +1247,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	if err != nil {
 		return nil, nil, err
 	}
+
+	defer func() {
+		if err := backupCtx.fileidx.Close(); err != nil {
+			snap.Logger().Warn("Failed to close fileidx btree: %s", err)
+		}
+	}()
 
 	chunker, err := snap.repository.Chunker(nil)
 	if err != nil {
