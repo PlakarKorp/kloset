@@ -773,43 +773,48 @@ func (bi *BackupIndexes) Close(log *logging.Logger) {
 	}
 }
 
+// XXX: Small layer violation, but this helps us steer away from the caching
+// Manager. Trust the process (TM)
+func (snap *Builder) tmpCacheDir() string {
+	return path.Join(snap.AppContext().CacheDir, caching.CACHE_VERSION, fmt.Sprintf("dbstorer-%x", snap.Header.Identifier))
+}
+
 func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	bi := &BackupIndexes{}
 
-	errstore := caching.DBStore[string, []byte]{
-		Prefix: "__error__",
-		Cache:  snap.scanCache,
-	}
-
-	xattrstore := caching.DBStore[string, []byte]{
-		Prefix: "__xattr__",
-		Cache:  snap.scanCache,
-	}
-
-	ctstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__contenttype__",
-		Cache:  snap.scanCache,
-	}
-
-	dirpackstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__dirpack__",
-		Cache:  snap.scanCache,
-	}
-
-	var err error
-	if bi.erridx, err = btree.New(&errstore, strings.Compare, 50); err != nil {
+	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.xattridx, err = btree.New(&xattrstore, vfs.PathCmp, 50); err != nil {
+	xattrstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "xattr")
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.ctidx, err = btree.New(&ctstore, strings.Compare, 50); err != nil {
+	ctstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "contenttype")
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.dirpackidx, err = btree.New(&dirpackstore, strings.Compare, 50); err != nil {
+	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
+	if err != nil {
+		return nil, err
+	}
+
+	if bi.erridx, err = btree.New(errstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.xattridx, err = btree.New(xattrstore, vfs.PathCmp, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.ctidx, err = btree.New(ctstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.dirpackidx, err = btree.New(dirpackstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
@@ -1238,16 +1243,15 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	filestore := caching.DBStore[string, []byte]{
-		Prefix: "__path__",
-		Cache:  snap.scanCache,
-	}
-
-	backupCtx.fileidx, err = btree.New(&filestore, vfs.PathCmp, 50)
+	filestore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "path")
 	if err != nil {
 		return nil, nil, err
 	}
 
+	backupCtx.fileidx, err = btree.New(filestore, vfs.PathCmp, 50)
+	if err != nil {
+		return nil, nil, err
+	}
 	defer func() {
 		if err := backupCtx.fileidx.Close(); err != nil {
 			snap.Logger().Warn("Failed to close fileidx btree: %s", err)
