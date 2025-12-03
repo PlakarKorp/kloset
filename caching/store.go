@@ -51,7 +51,6 @@ func (ds *DBStore[K, V]) Close() error {
 // SQLiteDBStore implements btree.Storer
 type SQLiteDBStore[K any, V any] struct {
 	dbpath string
-	idx    int
 	db     *sqlite.SQLiteCache
 }
 
@@ -61,8 +60,10 @@ func NewSQLiteDBStore[K, V any](storePath, storeName string) (*SQLiteDBStore[K, 
 		return nil, err
 	}
 
+	// It's safe to rely on the implicit id<=>ROWID alias here, ROWID will only
+	// be reused in case of DELETE which we don't do.
 	create := `CREATE TABLE IF NOT EXISTS dbstore (
-		id INTEGER NOT NULL PRIMARY KEY,
+		id INTEGER PRIMARY KEY,
 		node BLOB NOT NULL
 	);`
 
@@ -98,19 +99,18 @@ func (ds *SQLiteDBStore[K, V]) Update(idx int, node *btree.Node[K, int, V]) erro
 }
 
 func (ds *SQLiteDBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
-	ds.idx++
-	idx := ds.idx
 	bytes, err := msgpack.Marshal(node)
 	if err != nil {
 		return 0, err
 	}
 
-	_, err = ds.db.Exec("INSERT INTO dbstore(id, node) VALUES(?, ?)", idx, bytes)
-	if err != nil {
+	var id int
+	query := "INSERT INTO dbstore(id, node) VALUES(?, ?) RETURNING id"
+	if err := ds.db.QueryRow(query, nil, bytes).Scan(&id); err != nil {
 		return 0, err
 	}
 
-	return ds.idx, nil
+	return id, nil
 }
 
 func (ds *SQLiteDBStore[K, V]) Close() error {
