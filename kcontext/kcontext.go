@@ -42,7 +42,7 @@ type KContext struct {
 	Client string
 
 	CWD            string
-	MaxConcurrency int
+	MaxConcurrency uint
 
 	Identity uuid.UUID
 	Keypair  *keypair.KeyPair

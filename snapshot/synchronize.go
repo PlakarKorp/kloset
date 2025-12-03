@@ -171,7 +171,6 @@ func (src *Snapshot) Synchronize(dst *Builder, commit bool) error {
 	dst.Header.Context = src.Header.Context
 
 	return dst.ingestSync(imp, &BackupOptions{
-		MaxConcurrency:  uint64(src.AppContext().MaxConcurrency),
 		CleanupVFSCache: true,
 	}, commit)
 }

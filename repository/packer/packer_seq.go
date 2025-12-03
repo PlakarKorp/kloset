@@ -32,14 +32,14 @@ type seqPackerManager struct {
 	encodingFunc    func(io.Reader) (io.Reader, error)
 	hashFactory     func() hash.Hash
 	appCtx          *kcontext.KContext
-	nChan           int
+	nChan           uint
 
 	// XXX: Temporary hack callback-based to ease the transition diff.
 	// To be revisited with either an interface or moving this file inside repository/
 	flush func(packfile.Packfile) error
 }
 
-func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), packfileFactory packfile.PackfileCtor, hashFactory func() hash.Hash, flusher func(packfile.Packfile) error) PackerManagerInt {
+func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency uint, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), packfileFactory packfile.PackfileCtor, hashFactory func() hash.Hash, flusher func(packfile.Packfile) error) PackerManagerInt {
 	inflightsMACs := make(map[resources.Type]*sync.Map)
 	for _, Type := range resources.Types() {
 		inflightsMACs[Type] = &sync.Map{}
@@ -194,7 +194,7 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 			mgr.packerChan[mgr.nChan-1] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
 		} else {
 			if hint == -1 {
-				mgr.packerChan[randv2.IntN(mgr.nChan-1)] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
+				mgr.packerChan[randv2.UintN(mgr.nChan-1)] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
 			} else {
 				mgr.packerChan[hint] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
 			}

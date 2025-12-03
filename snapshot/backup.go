@@ -38,10 +38,9 @@ type BackupIndexes struct {
 }
 
 type BackupContext struct {
-	imp            importer.Importer
-	excludes       *exclude.RuleSet
-	maxConcurrency uint64
-	noXattr        bool
+	imp      importer.Importer
+	excludes *exclude.RuleSet
+	noXattr  bool
 
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
@@ -70,7 +69,6 @@ type scanStats struct {
 }
 
 type BackupOptions struct {
-	MaxConcurrency  uint64
 	Name            string
 	Tags            []string
 	Excludes        []string
@@ -255,7 +253,8 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 
 func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	var ckers []*chunkers.Chunker
-	for range backupCtx.maxConcurrency {
+
+	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
 		if err != nil {
 			return err
@@ -832,11 +831,6 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 }
 
 func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
-	maxConcurrency := backupOpts.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
-	}
-
 	typ, err := imp.Type(snap.AppContext())
 	if err != nil {
 		return nil, err
@@ -853,15 +847,14 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	}
 
 	backupCtx := &BackupContext{
-		imp:            imp,
-		maxConcurrency: maxConcurrency,
-		noXattr:        backupOpts.NoXattr,
-		scanCache:      snap.scanCache,
-		vfsEntBatch:    snap.scanCache.NewScanBatch(),
-		vfsCache:       vfsCache,
-		flushEnd:       make(chan bool),
-		flushEnded:     make(chan error),
-		stateId:        snap.Header.Identifier,
+		imp:         imp,
+		noXattr:     backupOpts.NoXattr,
+		scanCache:   snap.scanCache,
+		vfsEntBatch: snap.scanCache.NewScanBatch(),
+		vfsCache:    vfsCache,
+		flushEnd:    make(chan bool),
+		flushEnded:  make(chan error),
+		stateId:     snap.Header.Identifier,
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()

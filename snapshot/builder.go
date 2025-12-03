@@ -34,6 +34,10 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 		identifier = objects.RandomMAC()
 	}
 
+	if repo.AppContext().MaxConcurrency == 0 {
+		panic("MaxConcurrency must be set in the AppContext before calling snapshot.Create")
+	}
+
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
 		return nil, err
@@ -73,6 +77,10 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, er
 		return nil, err
 	}
 
+	if repo.AppContext().MaxConcurrency == 0 {
+		panic("MaxConcurrency must be set in the AppContext before calling snapshot.CreateWithRepositoryWriter")
+	}
+
 	snap := &Builder{
 		scanCache:  scanCache,
 		deltaCache: scanCache,
@@ -107,6 +115,10 @@ func (src *Snapshot) Fork() (*Builder, error) {
 	scanCache, err := src.repository.AppContext().GetCache().Scan(identifier)
 	if err != nil {
 		return nil, err
+	}
+
+	if src.AppContext().MaxConcurrency == 0 {
+		panic("MaxConcurrency must be set in the AppContext before calling snapshot.Fork()")
 	}
 
 	location, err := src.repository.Location()

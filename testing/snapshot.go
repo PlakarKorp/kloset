@@ -148,9 +148,8 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	}
 
 	err = builder.Backup(imp, &snapshot.BackupOptions{
-		Name:           o.name,
-		MaxConcurrency: 1,
-		Excludes:       o.excludes,
+		Name:     o.name,
+		Excludes: o.excludes,
 	})
 	require.NoError(t, err)
 
