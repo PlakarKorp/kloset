@@ -335,8 +335,6 @@ func (r *Repository) Close() error {
 		r.Logger().Trace("repository", "Close(): %s", time.Since(t0))
 	}()
 
-	fmt.Println(r.ioStats.SummaryString())
-
 	return nil
 }
 
@@ -581,7 +579,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		return err
 	}
 
-	span := r.ioStats.ReadSpan()
+	span := r.ioStats.GetReadSpan()
 	nbytes, err := r.store.PutState(r.appContext, mac, rd)
 	span.Add(nbytes)
 	return err
@@ -897,7 +895,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 			}
 
 			if currPackfile != loc.Packfile || nextOffset != loc.Offset {
-				span := r.ioStats.ReadSpan()
+				span := r.ioStats.GetReadSpan()
 				data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 				if err != nil {
 					if !yield(nil, err) {
@@ -947,7 +945,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 		}
 
 		if leftOver {
-			span := r.ioStats.ReadSpan()
+			span := r.ioStats.GetReadSpan()
 			data, err := r.GetPackfileRange(state.Location{Packfile: currPackfile, Offset: offset, Length: size})
 			if err != nil {
 				if !yield(nil, err) {
@@ -992,7 +990,7 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrPackfileNotFound
 	}
 
-	span := r.ioStats.ReadSpan()
+	span := r.ioStats.GetReadSpan()
 	rd, err := r.GetPackfileBlob(loc)
 	if err != nil {
 		return nil, err

@@ -12,6 +12,7 @@ import (
 
 const sampleWindow = 50 * time.Millisecond
 
+// represents I/O statistics collected over a period of time.
 type IOStats struct {
 	Duration   time.Duration
 	TotalBytes int64
@@ -171,6 +172,7 @@ func (t *tracker) Stats() IOStats {
 	return stats
 }
 
+// An IOTracker maintains separate trackers for read and write operations
 type IOTracker struct {
 	Read  *tracker
 	Write *tracker
@@ -188,12 +190,14 @@ func (ioT *IOTracker) Reset() {
 	ioT.Write.Reset()
 }
 
+// Span represents a time span during which I/O operations are tracked
+// this is required to measure active time vs wall-clock time
 type Span struct {
 	t    *tracker
 	last time.Time
 }
 
-func (ioT *IOTracker) WriteSpan() *Span {
+func (ioT *IOTracker) GetWriteSpan() *Span {
 	now := time.Now()
 	return &Span{
 		t:    ioT.Write,
@@ -201,7 +205,7 @@ func (ioT *IOTracker) WriteSpan() *Span {
 	}
 }
 
-func (ioT *IOTracker) ReadSpan() *Span {
+func (ioT *IOTracker) GetReadSpan() *Span {
 	now := time.Now()
 	return &Span{
 		t:    ioT.Read,
