@@ -42,15 +42,15 @@ func (c *ScanCache) GetFile(source int, file string) ([]byte, error) {
 }
 
 func (c *ScanBatch) PutDirectory(source int, directory string, data []byte) error {
-	return c.Put([]byte(fmt.Sprintf("__directory__:%d:%s", source, directory)), data)
+	return c.Put(fmt.Appendf(nil, "__directory__:%d:%s", source, directory), data)
 }
 
 func (c *ScanBatch) PutFile(source int, file string, data []byte) error {
-	return c.Put([]byte(fmt.Sprintf("__file__:%d:%s", source, file)), data)
+	return c.Put(fmt.Appendf(nil, "__file__:%d:%s", source, file), data)
 }
 
 func (c *ScanBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	return c.Put([]byte(fmt.Sprintf("__delta__:%d:%x:%x", blobType, blobCsum, packfile)), data)
+	return c.Put(fmt.Appendf(nil, "__delta__:%d:%x:%x", blobType, blobCsum, packfile), data)
 }
 
 func (c *ScanCache) PutDirectory(source int, directory string, data []byte) error {
@@ -110,7 +110,7 @@ func (c *ScanCache) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (b
 }
 
 func (c *ScanCache) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
-	return c.getObjectsWithMAC(fmt.Sprintf("__deleted__:"))
+	return c.getObjectsWithMAC("__deleted__:")
 }
 
 func (c *ScanCache) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {

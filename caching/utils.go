@@ -14,19 +14,19 @@ type kvcache struct {
 }
 
 func (c *kvcache) put(prefix, key string, data []byte) error {
-	return c.cache.Put([]byte(fmt.Sprintf("%s:%s", prefix, key)), data)
+	return c.cache.Put(fmt.Appendf(nil, "%s:%s", prefix, key), data)
 }
 
 func (c *kvcache) get(prefix, key string) ([]byte, error) {
-	return c.cache.Get([]byte(fmt.Sprintf("%s:%s", prefix, key)))
+	return c.cache.Get(fmt.Appendf(nil, "%s:%s", prefix, key))
 }
 
 func (c *kvcache) has(prefix, key string) (bool, error) {
-	return c.cache.Has([]byte(fmt.Sprintf("%s:%s", prefix, key)))
+	return c.cache.Has(fmt.Appendf(nil, "%s:%s", prefix, key))
 }
 
 func (c *kvcache) delete(prefix, key string) error {
-	return c.cache.Delete([]byte(fmt.Sprintf("%s:%s", prefix, key)))
+	return c.cache.Delete(fmt.Appendf(nil, "%s:%s", prefix, key))
 }
 
 // Iterate over keys sharing `keyPrefix` prefix. Extracts the MAC out of the

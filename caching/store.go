@@ -16,7 +16,7 @@ type DBStore[K any, V any] struct {
 }
 
 func (ds *DBStore[K, V]) Get(idx int) (*btree.Node[K, int, V], error) {
-	bytes, err := ds.Cache.cache.Get([]byte(fmt.Sprintf("%s:%d", ds.Prefix, idx)))
+	bytes, err := ds.Cache.cache.Get(fmt.Appendf(nil, "%s:%d", ds.Prefix, idx))
 	if err != nil {
 		return nil, err
 	}
@@ -30,7 +30,7 @@ func (ds *DBStore[K, V]) Update(idx int, node *btree.Node[K, int, V]) error {
 	if err != nil {
 		return err
 	}
-	return ds.Cache.cache.Put([]byte(fmt.Sprintf("%s:%d", ds.Prefix, idx)), bytes)
+	return ds.Cache.cache.Put(fmt.Appendf(nil, "%s:%d", ds.Prefix, idx), bytes)
 }
 
 func (ds *DBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
@@ -40,7 +40,7 @@ func (ds *DBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	return idx, ds.Cache.cache.Put([]byte(fmt.Sprintf("%s:%d", ds.Prefix, idx)), bytes)
+	return idx, ds.Cache.cache.Put(fmt.Appendf(nil, "%s:%d", ds.Prefix, idx), bytes)
 }
 
 func (ds *DBStore[K, V]) Close() error {

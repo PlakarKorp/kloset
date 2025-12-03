@@ -58,7 +58,7 @@ func (c *MaintenanceCache) GetPackfiles(snapshotID objects.MAC) iter.Seq[objects
 }
 
 func (c *MaintenanceCache) DeleletePackfiles(snapshotID objects.MAC) error {
-	for key, _ := range c.cache.Scan(nil, false) {
+	for key := range c.cache.Scan(nil, false) {
 		hex_mac := string(key[bytes.LastIndexByte(key, byte(':'))+1:])
 		mac, err := hex.DecodeString(hex_mac)
 		if err != nil {
