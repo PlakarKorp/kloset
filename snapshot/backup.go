@@ -449,15 +449,15 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	backupCtx, err := snap.prepareBackup(imp, options)
+	for _, bi := range backupCtx.indexes {
+		defer bi.Close(snap.Logger())
+	}
+
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 	backupCtx.emitter = emitter
-
-	for _, bi := range backupCtx.indexes {
-		defer bi.Close(snap.Logger())
-	}
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
@@ -756,20 +756,30 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 }
 
 func (bi *BackupIndexes) Close(log *logging.Logger) {
-	if err := bi.erridx.Close(); err != nil {
-		log.Warn("Failed to close index btree: %s", err)
+	// We need to protect those behind nil checks because we might be cleaning
+	// up a half initialized backupIndex.
+	if bi.erridx != nil {
+		if err := bi.erridx.Close(); err != nil {
+			log.Warn("Failed to close index btree: %s", err)
+		}
 	}
 
-	if err := bi.xattridx.Close(); err != nil {
-		log.Warn("Failed to close xattr btree: %s", err)
+	if bi.xattridx != nil {
+		if err := bi.xattridx.Close(); err != nil {
+			log.Warn("Failed to close xattr btree: %s", err)
+		}
 	}
 
-	if err := bi.ctidx.Close(); err != nil {
-		log.Warn("Failed to close content type btree: %s", err)
+	if bi.ctidx != nil {
+		if err := bi.ctidx.Close(); err != nil {
+			log.Warn("Failed to close content type btree: %s", err)
+		}
 	}
 
-	if err := bi.dirpackidx.Close(); err != nil {
-		log.Warn("Failed to close content dirpack btree: %s", err)
+	if bi.dirpackidx != nil {
+		if err := bi.dirpackidx.Close(); err != nil {
+			log.Warn("Failed to close content dirpack btree: %s", err)
+		}
 	}
 }
 
