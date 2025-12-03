@@ -350,8 +350,6 @@ func (r *Repository) Close() error {
 		r.Logger().Trace("repository", "Close(): %s", time.Since(t0))
 	}()
 
-	fmt.Println(r.ioStats.SummaryString())
-
 	return nil
 }
 
@@ -596,7 +594,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		return err
 	}
 
-	span := r.ioStats.ReadSpan()
+	span := r.ioStats.GetReadSpan()
 	nbytes, err := r.store.PutState(r.appContext, mac, rd)
 	if nbytes > 0 {
 		span.Add(nbytes)
@@ -749,7 +747,7 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	lengthDelta := uint32(uint64(overhead) - offsetDelta)
 
 	realLen := length + uint32(offsetDelta) + lengthDelta
-	span := r.ioStats.ReadSpan()
+	span := r.ioStats.GetReadSpan()
 	rd, err := r.store.GetPackfileBlob(r.appContext, loc.Packfile, offset+uint64(storage.STORAGE_HEADER_SIZE)-offsetDelta, realLen)
 	if err != nil {
 		return nil, err
