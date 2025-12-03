@@ -21,11 +21,24 @@ type SQLiteCache struct {
 }
 
 func New(dir, name string, deletedOnClose, compressed bool) (*SQLiteCache, error) {
-	os.MkdirAll(dir, 0700)
 
-	db, err := sql.Open("sqlite3", path.Join(dir, name))
-	if err != nil {
-		return nil, err
+	var db *sql.DB
+	var err error
+	if name == ":memory:" {
+		deletedOnClose = false
+		db, err = sql.Open("sqlite3", name)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return nil, err
+		}
+
+		db, err = sql.Open("sqlite3", path.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	pragmas := []string{
@@ -60,7 +73,7 @@ func (s *SQLiteCache) Encode(raw []byte) []byte {
 	return snappy.Encode(nil, raw)
 }
 
-func (s *SQLiteCache) decodePayload(stored []byte) ([]byte, error) {
+func (s *SQLiteCache) Decode(stored []byte) ([]byte, error) {
 	if len(stored) == 0 || s.compressed == false {
 		return stored, nil
 	}
