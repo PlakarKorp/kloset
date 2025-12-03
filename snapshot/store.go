@@ -57,6 +57,11 @@ func (s *SnapshotStore[K, V]) Put(node *btree.Node[K, objects.MAC, V]) (objects.
 	return mac, s.snapBuilder.repository.PutBlobIfNotExists(s.blobtype, mac, bytes)
 }
 
+func (s *SnapshotStore[K, V]) Close() error {
+	// We do not own the snapshot so it's not our responsability to close it.
+	return nil
+}
+
 // persistIndex saves a btree[K, P, V] index to the snapshot.  The
 // pointer type P is converted to a MAC.
 func persistIndex[K any, P comparable, VA, VB any](snap *Builder, tree *btree.BTree[K, P, VA], rootres, noderes resources.Type, conv func(VA) (VB, error)) (mac objects.MAC, err error) {

@@ -20,6 +20,7 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/exclude"
+	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
@@ -448,6 +449,10 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	backupCtx, err := snap.prepareBackup(imp, options)
+	for _, bi := range backupCtx.indexes {
+		defer bi.Close(snap.Logger())
+	}
+
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
@@ -750,43 +755,76 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 	return nil
 }
 
+func (bi *BackupIndexes) Close(log *logging.Logger) {
+	// We need to protect those behind nil checks because we might be cleaning
+	// up a half initialized backupIndex.
+	if bi.erridx != nil {
+		if err := bi.erridx.Close(); err != nil {
+			log.Warn("Failed to close index btree: %s", err)
+		}
+	}
+
+	if bi.xattridx != nil {
+		if err := bi.xattridx.Close(); err != nil {
+			log.Warn("Failed to close xattr btree: %s", err)
+		}
+	}
+
+	if bi.ctidx != nil {
+		if err := bi.ctidx.Close(); err != nil {
+			log.Warn("Failed to close content type btree: %s", err)
+		}
+	}
+
+	if bi.dirpackidx != nil {
+		if err := bi.dirpackidx.Close(); err != nil {
+			log.Warn("Failed to close content dirpack btree: %s", err)
+		}
+	}
+}
+
+// XXX: Small layer violation, but this helps us steer away from the caching
+// Manager. Trust the process (TM)
+func (snap *Builder) tmpCacheDir() string {
+	return path.Join(snap.AppContext().CacheDir, caching.CACHE_VERSION, fmt.Sprintf("dbstorer-%x", snap.Header.Identifier))
+}
+
 func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	bi := &BackupIndexes{}
 
-	errstore := caching.DBStore[string, []byte]{
-		Prefix: "__error__",
-		Cache:  snap.scanCache,
-	}
-
-	xattrstore := caching.DBStore[string, []byte]{
-		Prefix: "__xattr__",
-		Cache:  snap.scanCache,
-	}
-
-	ctstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__contenttype__",
-		Cache:  snap.scanCache,
-	}
-
-	dirpackstore := caching.DBStore[string, objects.MAC]{
-		Prefix: "__dirpack__",
-		Cache:  snap.scanCache,
-	}
-
-	var err error
-	if bi.erridx, err = btree.New(&errstore, strings.Compare, 50); err != nil {
+	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.xattridx, err = btree.New(&xattrstore, vfs.PathCmp, 50); err != nil {
+	xattrstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "xattr")
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.ctidx, err = btree.New(&ctstore, strings.Compare, 50); err != nil {
+	ctstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "contenttype")
+	if err != nil {
 		return nil, err
 	}
 
-	if bi.dirpackidx, err = btree.New(&dirpackstore, strings.Compare, 50); err != nil {
+	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
+	if err != nil {
+		return nil, err
+	}
+
+	if bi.erridx, err = btree.New(errstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.xattridx, err = btree.New(xattrstore, vfs.PathCmp, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.ctidx, err = btree.New(ctstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.dirpackidx, err = btree.New(dirpackstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
@@ -1215,15 +1253,20 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	filestore := caching.DBStore[string, []byte]{
-		Prefix: "__path__",
-		Cache:  snap.scanCache,
-	}
-
-	backupCtx.fileidx, err = btree.New(&filestore, vfs.PathCmp, 50)
+	filestore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "path")
 	if err != nil {
 		return nil, nil, err
 	}
+
+	backupCtx.fileidx, err = btree.New(filestore, vfs.PathCmp, 50)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer func() {
+		if err := backupCtx.fileidx.Close(); err != nil {
+			snap.Logger().Warn("Failed to close fileidx btree: %s", err)
+		}
+	}()
 
 	chunker, err := snap.repository.Chunker(nil)
 	if err != nil {
