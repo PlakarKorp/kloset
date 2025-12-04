@@ -72,7 +72,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		})
 
 		// Determine destination path by stripping the prefix.
-		dest := path.Join(target, strings.TrimPrefix(entrypath, opts.Strip))
+		rel := strings.TrimPrefix(entrypath, opts.Strip)
+		rel = strings.TrimPrefix(rel, "/")
+		dest := path.Join(target, rel)
 
 		// Directory processing.
 		if e.IsDir() {
