@@ -41,6 +41,9 @@ func New(dir, name string, deletedOnClose, compressed bool) (*SQLiteCache, error
 		}
 	}
 
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+
 	pragmas := []string{
 		"PRAGMA journal_mode = WAL;", // one-writer WAL, good for cache
 		"PRAGMA synchronous = OFF;",  // speed; scanlog is scratch
