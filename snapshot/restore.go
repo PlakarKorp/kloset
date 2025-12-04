@@ -16,6 +16,12 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+type hardlinkRecord struct {
+	dest string
+	done chan struct{}
+	err  error
+}
+
 type RestoreOptions struct {
 	MaxConcurrency  uint64
 	Strip           string
@@ -24,7 +30,7 @@ type RestoreOptions struct {
 }
 
 type restoreContext struct {
-	hardlinks      map[string]string
+	hardlinks      map[string]*hardlinkRecord
 	hardlinksMutex sync.Mutex
 	pathname       string
 	vfs            *vfs.Filesystem
@@ -146,23 +152,69 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			"snapshot_id": snap.Header.Identifier,
 			"path":        entrypath,
 		})
+
 		wg.Go(func() error {
-			if e.Stat().Nlink() > 1 {
+
+			stat := e.Stat()
+			nlink := stat.Nlink()
+
+			var hardlinkKey string
+			var rec *hardlinkRecord
+			var isLeader bool
+			var leaderErr error
+			var leaderDest string
+
+			if nlink > 1 {
+				hardlinkKey = fmt.Sprintf("%d:%d", stat.Dev(), stat.Ino())
+
 				restoreContext.hardlinksMutex.Lock()
-				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
-				v, ok := restoreContext.hardlinks[key]
-				if ok {
-					if err := exp.CreateLink(snap.AppContext(), v, dest, exporter.HARDLINK); err != nil {
+				rec, ok := restoreContext.hardlinks[hardlinkKey]
+				if !ok {
+					rec = &hardlinkRecord{done: make(chan struct{})}
+					restoreContext.hardlinks[hardlinkKey] = rec
+					isLeader = true
+				}
+				restoreContext.hardlinksMutex.Unlock()
+
+				if !isLeader {
+					<-rec.done
+
+					if rec.err != nil {
+						if err2 := restoreContext.reportFailure(snap, rec.err); err2 != nil {
+							return err2
+						}
+						return nil
+					}
+
+					if err := exp.CreateLink(snap.AppContext(), rec.dest, dest, exporter.HARDLINK); err != nil {
 						emitter.Emit("snapshot.restore.file.error", map[string]any{
 							"snapshot_id": snap.Header.Identifier,
 							"path":        entrypath,
 							"error":       err.Error(),
 						})
-						restoreContext.reportFailure(snap, err)
+						if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+							return err2
+						}
+					} else {
+						emitter.Emit("snapshot.restore.file.ok", map[string]any{
+							"snapshot_id": snap.Header.Identifier,
+							"path":        entrypath,
+							"size":        e.Size(),
+						})
 					}
-					restoreContext.hardlinksMutex.Unlock()
 					return nil
 				}
+			}
+
+			if isLeader {
+				defer func() {
+					restoreContext.hardlinksMutex.Lock()
+					defer restoreContext.hardlinksMutex.Unlock()
+
+					rec.dest = leaderDest
+					rec.err = leaderErr
+					close(rec.done)
+				}()
 			}
 
 			rd, err := e.Open(restoreContext.vfs)
@@ -172,7 +224,12 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					"path":        entrypath,
 					"error":       err.Error(),
 				})
-				restoreContext.reportFailure(snap, err)
+				if isLeader {
+					leaderErr = err
+				}
+				if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+					return err2
+				}
 				return nil
 			}
 			defer rd.Close()
@@ -185,14 +242,13 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					"path":        entrypath,
 					"error":       err.Error(),
 				})
-				restoreContext.reportFailure(snap, err)
-			}
-
-			// Restore the file content.
-			if e.Stat().Nlink() > 1 {
-				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
-				restoreContext.hardlinks[key] = dest
-				defer restoreContext.hardlinksMutex.Unlock()
+				if isLeader {
+					leaderErr = err
+				}
+				if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+					return err2
+				}
+				return nil
 			}
 
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
@@ -202,26 +258,43 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					"path":        entrypath,
 					"error":       err.Error(),
 				})
-				restoreContext.reportFailure(snap, err)
-			} else {
-				if !opts.SkipPermissions {
-					if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
-						err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
-						emitter.Emit("snapshot.restore.file.error", map[string]any{
-							"snapshot_id": snap.Header.Identifier,
-							"path":        entrypath,
-							"error":       err.Error(),
-						})
-						restoreContext.reportFailure(snap, err)
-						return nil
-					}
+				if isLeader {
+					leaderErr = err
 				}
-				emitter.Emit("snapshot.restore.file.ok", map[string]any{
-					"snapshot_id": snap.Header.Identifier,
-					"path":        entrypath,
-					"size":        e.Size(),
-				})
+				if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+					return err2
+				}
+				return nil
 			}
+
+			if !opts.SkipPermissions {
+				if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
+					err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
+					emitter.Emit("snapshot.restore.file.error", map[string]any{
+						"snapshot_id": snap.Header.Identifier,
+						"path":        entrypath,
+						"error":       err.Error(),
+					})
+					if isLeader {
+						leaderErr = err
+					}
+					if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+						return err2
+					}
+					return nil
+				}
+			}
+
+			if isLeader {
+				leaderDest = dest
+				// leaderErr stays nil
+			}
+
+			emitter.Emit("snapshot.restore.file.ok", map[string]any{
+				"snapshot_id": snap.Header.Identifier,
+				"path":        entrypath,
+				"size":        e.Size(),
+			})
 			return nil
 		})
 		return nil
@@ -248,7 +321,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	restoreContext := &restoreContext{
-		hardlinks:      make(map[string]string),
+		hardlinks:      make(map[string]*hardlinkRecord),
 		hardlinksMutex: sync.Mutex{},
 		vfs:            fs,
 		pathname:       pathname,
