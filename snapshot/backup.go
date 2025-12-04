@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"iter"
 	"math"
 	"mime"
 	"os"
@@ -25,6 +24,7 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
+	"github.com/PlakarKorp/kloset/snapshot/scanlog"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/gabriel-vasile/mimetype"
 	"golang.org/x/sync/errgroup"
@@ -46,7 +46,7 @@ type BackupContext struct {
 	scanCache *caching.ScanCache
 	vfsCache  *caching.VFSCache
 
-	vfsEntBatch *caching.ScanBatch
+	vfsEntBatch *scanlog.ScanBatch
 	vfsEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
@@ -61,6 +61,8 @@ type BackupContext struct {
 	indexes []*BackupIndexes // Aligned with the number of importers.
 
 	emitter *events.Emitter
+
+	scanLog *scanlog.ScanLog
 }
 
 type scanStats struct {
@@ -97,11 +99,11 @@ func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 	defer bc.vfsEntLock.Unlock()
 
 	if entry.FileInfo.IsDir() {
-		if err := bc.vfsEntBatch.PutDirectory(0, path, bytes); err != nil {
+		if err := bc.vfsEntBatch.PutDirectory(path, bytes); err != nil {
 			return err
 		}
 	} else {
-		if err := bc.vfsEntBatch.PutFile(0, path, bytes); err != nil {
+		if err := bc.vfsEntBatch.PutFile(path, bytes); err != nil {
 			return err
 		}
 	}
@@ -111,24 +113,10 @@ func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 			return err
 		}
 
-		bc.vfsEntBatch = bc.scanCache.NewScanBatch()
+		bc.vfsEntBatch = bc.scanLog.NewBatch()
 	}
 
 	return nil
-}
-
-func (bc *BackupContext) recordEntry(entry *vfs.Entry) error {
-	path := entry.Path()
-
-	bytes, err := entry.ToBytes()
-	if err != nil {
-		return err
-	}
-
-	if entry.FileInfo.IsDir() {
-		return bc.scanCache.PutDirectory(0, path, bytes)
-	}
-	return bc.scanCache.PutFile(0, path, bytes)
 }
 
 func (bc *BackupContext) recordError(path string, err error) error {
@@ -458,6 +446,8 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 		return err
 	}
 	backupCtx.emitter = emitter
+
+	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
@@ -852,16 +842,22 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		return nil, err
 	}
 
+	scanLog, err := scanlog.New(snap.tmpCacheDir())
+	if err != nil {
+		return nil, err
+	}
+
 	backupCtx := &BackupContext{
 		imp:            imp,
 		maxConcurrency: maxConcurrency,
 		noXattr:        backupOpts.NoXattr,
 		scanCache:      snap.scanCache,
-		vfsEntBatch:    snap.scanCache.NewScanBatch(),
+		vfsEntBatch:    scanLog.NewBatch(),
 		vfsCache:       vfsCache,
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan error),
 		stateId:        snap.Header.Identifier,
+		scanLog:        scanLog,
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()
@@ -1068,21 +1064,6 @@ type chunkifyResult struct {
 	err error
 }
 
-func directChildIter(backupCtx *BackupContext, key, prefix string) iter.Seq2[string, []byte] {
-	it := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:%s", key, "0", prefix), false)
-
-	return func(yield func(string, []byte) bool) {
-		for path, buf := range it {
-			if path == "" || strings.Contains(path, "/") {
-				continue
-			}
-			if !yield(path, buf) {
-				break
-			}
-		}
-	}
-}
-
 func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
 	// bytes is a slice that will be reused in the next iteration,
 	// swapping below our feet, so make a copy out of it
@@ -1125,41 +1106,28 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, prefix string) error {
-	file := directChildIter(backupCtx, "__file__", prefix)
-	dir := directChildIter(backupCtx, "__directory__", prefix)
+func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
+	if parent != "/" {
+		parent = strings.TrimRight(parent, "/")
+	}
 
-	fileNext, fileStop := iter.Pull2(file)
-	defer fileStop()
-
-	dirNext, dirStop := iter.Pull2(dir)
-	defer dirStop()
-
-	filePath, fileBytes, hasFile := fileNext()
-	dirPath, dirBytes, hasDir := dirNext()
-
-	for hasFile || hasDir {
-		switch {
-		case !hasDir, hasFile && hasDir && strings.Compare(filePath, dirPath) <= 0:
-			abspath := prefix + filePath
-			err := backupCtx.processFile(dirEntry, fileBytes, abspath)
+	for e := range backupCtx.scanLog.ListDirectPathnames(parent, false) {
+		switch e.Kind {
+		case scanlog.KindFile:
+			err := backupCtx.processFile(dirEntry, e.Payload, e.Path)
 			if err != nil {
 				return err
 			}
-
-			if err := writeFrame(builder, w, TypeVFSFile, fileBytes); err != nil {
+			if err := writeFrame(builder, w, TypeVFSFile, e.Payload); err != nil {
 				return err
 			}
-			filePath, fileBytes, hasFile = fileNext()
-
-		default:
-			abspath := prefix + dirPath
-			val, found, err := backupCtx.fileidx.Find(abspath)
+		case scanlog.KindDirectory:
+			val, found, err := backupCtx.fileidx.Find(e.Path)
 			if err != nil {
 				return err
 			}
 			if !found {
-				return fmt.Errorf("missing summary for directory %q", abspath)
+				return fmt.Errorf("missing summary for directory %q", e.Path)
 			}
 
 			childDirEntry, err := vfs.EntryFromBytes(val)
@@ -1171,13 +1139,15 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 			dirEntry.Summary.Directory.Directories++
 			dirEntry.Summary.UpdateBelow(childDirEntry.Summary)
 
-			if err := writeFrame(builder, w, TypeVFSDirectory, dirBytes); err != nil {
+			if err := writeFrame(builder, w, TypeVFSDirectory, val); err != nil {
 				return err
 			}
-			dirPath, dirBytes, hasDir = dirNext()
-		}
-	}
 
+		default:
+			return fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+		}
+
+	}
 	return nil
 }
 
@@ -1208,48 +1178,53 @@ func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) er
 }
 
 func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname string) error {
-	parentDir := path.Dir(pathname)
-
-	item, err := backupCtx.scanCache.GetDirectory(0, parentDir)
+	item, err := backupCtx.scanLog.GetDirectory(pathname)
 	if err != nil {
 		return err
 	}
-	if item != nil {
+
+	parent := path.Dir(pathname)
+
+	if item == nil {
+		dirEntry := vfs.NewEntry(parent, &importer.ScanRecord{
+			Pathname: pathname,
+			FileInfo: objects.FileInfo{
+				Lname:    path.Base(pathname),
+				Lmode:    os.ModeDir | 0750,
+				LmodTime: time.Unix(0, 0).UTC(),
+			},
+		})
+
+		serialized, err := dirEntry.ToBytes()
+		if err != nil {
+			return err
+		}
+
+		if err := backupCtx.scanLog.PutDirectory(pathname, serialized); err != nil {
+			return err
+		}
+	}
+
+	if parent == pathname {
+		// reached root
 		return nil
 	}
-
-	dirEntry := vfs.NewEntry(path.Dir(parentDir), &importer.ScanRecord{
-		Pathname: parentDir,
-		FileInfo: objects.FileInfo{
-			Lname:    path.Base(parentDir),
-			Lmode:    os.ModeDir | 0750,
-			LmodTime: time.Unix(0, 0).UTC(),
-		},
-	})
-
-	if err := backupCtx.recordEntry(dirEntry); err != nil {
-		return err
-	}
-	if parentDir == pathname {
-		return nil
-	}
-
-	return snap.relinkNodesRecursive(backupCtx, parentDir)
+	return snap.relinkNodesRecursive(backupCtx, parent)
 }
 
 func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
-	filesiter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__file__", "0"), true)
-	for filePath := range filesiter {
-		if err := snap.relinkNodesRecursive(backupCtx, filePath); err != nil {
-			return err
-		}
+	var missingMap = make(map[string]struct{})
+
+	for e := range backupCtx.scanLog.ListPathnames("/", true) {
+		missingMap[path.Dir(e.Path)] = struct{}{}
+		delete(missingMap, e.Path)
 	}
 
-	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
-	for dirPath := range diriter {
-		if err := snap.relinkNodesRecursive(backupCtx, dirPath); err != nil {
+	for missingDir := range missingMap {
+		if err := snap.relinkNodesRecursive(backupCtx, missingDir); err != nil {
 			return err
 		}
+		delete(missingMap, missingDir)
 	}
 
 	return snap.relinkNodesRecursive(backupCtx, "/")
@@ -1284,8 +1259,19 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 	var rootSummary *vfs.Summary
 
-	diriter := backupCtx.scanCache.EnumerateKeysWithPrefix(fmt.Sprintf("%s:%s:", "__directory__", "0"), true)
-	for dirPath, bytes := range diriter {
+	dirPaths := make([]string, 0)
+	for e := range backupCtx.scanLog.ListDirectories("/", true) {
+		dirPaths = append(dirPaths, e.Path)
+	}
+
+	for _, pathname := range dirPaths {
+		dirPath := pathname
+
+		dirBytes, err := backupCtx.scanLog.GetDirectory(dirPath)
+		if err != nil {
+			return nil, nil, err
+		}
+
 		if err := snap.AppContext().Err(); err != nil {
 			return nil, nil, err
 		}
@@ -1298,7 +1284,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			resCh <- chunkifyResult{mac: mac, err: err}
 		}()
 
-		dirEntry, err := vfs.EntryFromBytes(bytes)
+		dirEntry, err := vfs.EntryFromBytes(dirBytes)
 		if err != nil {
 			return nil, nil, err
 		}
