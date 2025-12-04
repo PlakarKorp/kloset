@@ -560,7 +560,10 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize delta entry %w", err)
 			}
 
-			ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf)
+			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
+				return err
+			}
+
 		case ET_DELETED:
 			if length != DeletedEntrySerializedSize {
 				return fmt.Errorf("failed to read deleted entry wrong length got(%d)/expected(%d)", length, DeletedEntrySerializedSize)
@@ -575,7 +578,9 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize deleted entry %w", err)
 			}
 
-			ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf)
+			if err := ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf); err != nil {
+				return err
+			}
 		case ET_PACKFILE:
 			if length != PackfileEntrySerializedSize {
 				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d)", length, PackfileEntrySerializedSize)
@@ -590,7 +595,9 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			ls.cache.PutPackfile(pe.Packfile, pe_buf)
+			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+				return err
+			}
 
 		case ET_CONFIGURATION:
 			ce_buf := make([]byte, length)
@@ -644,7 +651,9 @@ func (ls *LocalState) mergeFromCache(from caching.StateCache) error {
 			return fmt.Errorf("failed to deserialize delta entry %w", err)
 		}
 
-		ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, entry)
+		if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, entry); err != nil {
+			return err
+		}
 	}
 
 	for _, deleted_buf := range from.GetDeleteds() {
@@ -653,7 +662,9 @@ func (ls *LocalState) mergeFromCache(from caching.StateCache) error {
 			return fmt.Errorf("failed to deserialize deleted entry %w", err)
 		}
 
-		ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf)
+		if err := ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf); err != nil {
+			return err
+		}
 	}
 
 	for _, pe_buf := range from.GetPackfiles() {
@@ -662,7 +673,9 @@ func (ls *LocalState) mergeFromCache(from caching.StateCache) error {
 			return fmt.Errorf("failed to deserialize packfile entry %w", err)
 		}
 
-		ls.cache.PutPackfile(pe.Packfile, pe_buf)
+		if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			return err
+		}
 	}
 
 	for ce_buf := range from.GetConfigurations() {
