@@ -128,7 +128,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 						"path":        entrypath,
 						"error":       err.Error(),
 					})
-					restoreContext.reportFailure(snap, err)
+					if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+						return err2
+					}
 					return nil
 				}
 				if !opts.SkipPermissions {
@@ -138,7 +140,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 							"path":        entrypath,
 							"error":       err.Error(),
 						})
-						restoreContext.reportFailure(snap, err)
+						if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
+							return err2
+						}
 						return nil
 					}
 				}
