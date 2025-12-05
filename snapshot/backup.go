@@ -50,6 +50,7 @@ type BackupContext struct {
 	vfsEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
+	metaidx *btree.BTree[string, int, []byte]
 
 	stateId objects.MAC
 
@@ -453,6 +454,18 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	if !options.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState(backupCtx)
+	}
+
+	/* meta store */
+	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
+	if err != nil {
+		return err
+	}
+	defer metastore.Close()
+
+	backupCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
+	if err != nil {
+		return err
 	}
 
 	/* importer */
@@ -875,6 +888,10 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 }
 
 func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
+	if backupCtx.vfsCache == nil {
+		return nil, nil
+	}
+
 	if record.IsXattr {
 		return nil, nil
 	}
@@ -961,11 +978,17 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 	}
 
 	var fileEntryMAC objects.MAC
+	var serializedCachedPath []byte
+	var err error
 
 	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
 		fileEntryMAC = cachedPath.MAC
 		if fileEntry.Object == (objects.MAC{}) && cachedPath.ObjectMAC != (objects.MAC{}) {
 			fileEntry.Object = cachedPath.ObjectMAC
+		}
+		serializedCachedPath, err = cachedPath.Serialize()
+		if err != nil {
+			return err
 		}
 	} else {
 		serialized, err := fileEntry.ToBytes()
@@ -987,17 +1010,23 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 			ContentType: meta.ContentType,
 		}
 
-		serializedCachedPath, err := cp.Serialize()
+		serializedCachedPath, err = cp.Serialize()
 		if err != nil {
 			return err
 		}
 
-		if err := vfsCache.PutCachedPath(record.Pathname, serializedCachedPath); err != nil {
-			return err
+		if vfsCache != nil {
+			if err := vfsCache.PutCachedPath(record.Pathname, serializedCachedPath); err != nil {
+				snap.Logger().Warn("VFS CACHE: failed to store cached path for %q: %v", record.Pathname, err)
+			}
 		}
 
 		// keep cachedPath var up to date for later logic (e.g., content-type index fallback)
 		cachedPath = cp
+	}
+
+	if err := backupCtx.metaidx.Insert(record.Pathname, serializedCachedPath); err != nil && err != btree.ErrExists {
+		return err
 	}
 
 	parts := strings.SplitN(meta.ContentType, ";", 2)
@@ -1074,13 +1103,12 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 		return err
 	}
 
-	data, err := backupCtx.vfsCache.GetCachedPath(path)
+	data, found, err := backupCtx.metaidx.Find(path)
 	if err != nil {
 		return err
 	}
-
-	if data == nil {
-		return fmt.Errorf("path %q not found in the cache", path)
+	if !found {
+		return fmt.Errorf("path %q not found in the meta index", path)
 	}
 
 	cachedPath, err := objects.NewCachedPathFromBytes(data)
