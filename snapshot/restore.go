@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/objects"
@@ -40,6 +41,34 @@ type restoreContext struct {
 	force  bool
 
 	emitter *events.Emitter
+
+	activeWorkers atomic.Uint64
+	openCount     atomic.Uint64
+	openTimeNS    atomic.Uint64
+
+	storeCount  atomic.Uint64
+	storeTimeNS atomic.Uint64
+	storeBytes  atomic.Uint64
+}
+
+func (ctx *restoreContext) workerStart() {
+	ctx.activeWorkers.Add(1)
+}
+
+func (ctx *restoreContext) workerDone() {
+	// subtract 1 using 2's complement
+	ctx.activeWorkers.Add(^uint64(0))
+}
+
+func (ctx *restoreContext) addOpenSample(d time.Duration) {
+	ctx.openCount.Add(1)
+	ctx.openTimeNS.Add(uint64(d))
+}
+
+func (ctx *restoreContext) addStoreSample(d time.Duration, nbytes uint64) {
+	ctx.storeCount.Add(1)
+	ctx.storeTimeNS.Add(uint64(d))
+	ctx.storeBytes.Add(nbytes)
 }
 
 type dirRec struct {
@@ -160,6 +189,8 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 		})
 
 		wg.Go(func() error {
+			restoreContext.workerStart()
+			defer restoreContext.workerDone()
 
 			stat := e.Stat()
 			nlink := stat.Nlink()
@@ -223,7 +254,11 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				}()
 			}
 
+			openStart := time.Now()
 			rd, err := e.Open(restoreContext.vfs)
+			openDur := time.Since(openStart)
+			restoreContext.addOpenSample(openDur)
+
 			if err != nil {
 				emitter.Emit("snapshot.restore.file.error", map[string]any{
 					"snapshot_id": snap.Header.Identifier,
@@ -240,24 +275,10 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			}
 			defer rd.Close()
 
-			// Ensure the parent directory exists.
-			if err := exp.CreateDirectory(snap.AppContext(), path.Dir(dest)); err != nil {
-				err := fmt.Errorf("failed to create directory %q: %w", dest, err)
-				emitter.Emit("snapshot.restore.file.error", map[string]any{
-					"snapshot_id": snap.Header.Identifier,
-					"path":        entrypath,
-					"error":       err.Error(),
-				})
-				if isLeader {
-					leaderErr = err
-				}
-				if err2 := restoreContext.reportFailure(snap, err); err2 != nil {
-					return err2
-				}
-				return nil
-			}
-
+			storeStart := time.Now()
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
+				storeDur := time.Since(storeStart)
+				restoreContext.addStoreSample(storeDur, 0)
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
 				emitter.Emit("snapshot.restore.file.error", map[string]any{
 					"snapshot_id": snap.Header.Identifier,
@@ -272,7 +293,10 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				}
 				return nil
 			}
+			storeDur := time.Since(storeStart)
+			restoreContext.addStoreSample(storeDur, uint64(e.Size()))
 
+			opts.SkipPermissions = true
 			if !opts.SkipPermissions {
 				if err := exp.SetPermissions(snap.AppContext(), dest, e.Stat()); err != nil {
 					err := fmt.Errorf("failed to set permissions on file %q: %w", entrypath, err)
@@ -336,6 +360,49 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		emitter:        emitter,
 	}
 
+	start := time.Now()
+
+	tickerDone := make(chan struct{})
+	go func() {
+		t := time.NewTicker(time.Second)
+		defer t.Stop()
+
+		for {
+			select {
+			case <-t.C:
+				active := restoreContext.activeWorkers.Load()
+				openCount := restoreContext.openCount.Load()
+				openTime := restoreContext.openTimeNS.Load()
+				storeCount := restoreContext.storeCount.Load()
+				storeTime := restoreContext.storeTimeNS.Load()
+				storeBytes := restoreContext.storeBytes.Load()
+				elapsed := time.Since(start).Seconds()
+
+				var avgOpenMS, avgStoreMS float64
+				if openCount > 0 {
+					avgOpenMS = float64(openTime) / float64(openCount) / 1e6
+				}
+				if storeCount > 0 {
+					avgStoreMS = float64(storeTime) / float64(storeCount) / 1e6
+				}
+
+				var mbPerSec float64
+				if elapsed > 0 && storeBytes > 0 {
+					mbPerSec = float64(storeBytes) / (1024 * 1024) / elapsed
+				}
+
+				fmt.Println("----- Restore Stats -----")
+				fmt.Printf("Active: %d/%d  Open_avg_ms: %.2f  Store_avg_ms: %.2f  MB/s: %.2f\n",
+					active, maxConcurrency, avgOpenMS, avgStoreMS, mbPerSec)
+				fmt.Println("-------------------------")
+
+			case <-tickerDone:
+				return
+			}
+		}
+	}()
+	defer close(tickerDone)
+
 	base = path.Clean(base)
 	if base != "/" && !strings.HasSuffix(base, "/") {
 		base = base + "/"
@@ -343,6 +410,10 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 
 	wg := errgroup.Group{}
 	wg.SetLimit(int(maxConcurrency))
+
+	if err := exp.CreateDirectory(snap.AppContext(), base); err != nil {
+		return fmt.Errorf("failed to create base directory %q: %w", base, err)
+	}
 
 	if err := fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
 		wg.Wait()
