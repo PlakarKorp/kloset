@@ -457,7 +457,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	/* meta store */
-	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.AppContext().CacheDir, "metaidx")
+	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
 	if err != nil {
 		return err
 	}
@@ -854,7 +854,6 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	if err != nil {
 		return nil, err
 	}
-	//_ = vfsCache
 
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
