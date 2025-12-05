@@ -3,6 +3,7 @@ package snapshot
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"sort"
 	"strings"
@@ -262,6 +263,12 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	base = path.Clean(base)
 	if base != "/" && !strings.HasSuffix(base, "/") {
 		base = base + "/"
+	}
+
+	if err := exp.CreateDirectory(snap.AppContext(), base); err != nil {
+		if !os.IsExist(err) {
+			return fmt.Errorf("failed to create base directory %q: %w", base, err)
+		}
 	}
 
 	wg := errgroup.Group{}
