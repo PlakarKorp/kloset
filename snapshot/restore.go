@@ -1,9 +1,9 @@
 package snapshot
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
 	"sort"
 	"strings"
@@ -229,7 +229,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		"snapshot": snap.Header.Identifier,
 	})
 
-	fs, err := snap.Filesystem()
+	pvfs, err := snap.Filesystem()
 	if err != nil {
 		return err
 	}
@@ -242,7 +242,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	restoreContext := &restoreContext{
 		hardlinks:      make(map[string]string),
 		hardlinksMutex: sync.Mutex{},
-		vfs:            fs,
+		vfs:            pvfs,
 		pathname:       pathname,
 		directories:    make([]dirRec, 0, 256),
 		force:          opts.ForceCompletion,
@@ -255,7 +255,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	if err := exp.CreateDirectory(snap.AppContext(), base); err != nil {
-		if !os.IsExist(err) {
+		if !errors.Is(err, fs.ErrExist) {
 			return fmt.Errorf("failed to create base directory %q: %w", base, err)
 		}
 	}
@@ -263,7 +263,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	wg := errgroup.Group{}
 	wg.SetLimit(int(maxConcurrency))
 
-	if err := fs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
+	if err := pvfs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
 		wg.Wait()
 		return err
 	}
