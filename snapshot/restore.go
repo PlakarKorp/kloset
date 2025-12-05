@@ -180,17 +180,6 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			}
 			defer rd.Close()
 
-			// Ensure the parent directory exists.
-			if err := exp.CreateDirectory(snap.AppContext(), path.Dir(dest)); err != nil {
-				err := fmt.Errorf("failed to create directory %q: %w", dest, err)
-				emitter.Emit("snapshot.restore.file.error", map[string]any{
-					"snapshot_id": snap.Header.Identifier,
-					"path":        entrypath,
-					"error":       err.Error(),
-				})
-				restoreContext.reportFailure(snap, err)
-			}
-
 			// Restore the file content.
 			if e.Stat().Nlink() > 1 {
 				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
