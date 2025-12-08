@@ -23,8 +23,14 @@ type RestoreOptions struct {
 	ForceCompletion bool
 }
 
+type hardlinkRecord struct {
+	dest string
+	done chan struct{}
+	err  error
+}
+
 type restoreContext struct {
-	hardlinks      map[string]string
+	hardlinks      map[string]*hardlinkRecord
 	hardlinksMutex sync.Mutex
 	pathname       string
 	vfs            *vfs.Filesystem
@@ -149,22 +155,64 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			"path":        entrypath,
 		})
 		wg.Go(func() error {
-			if e.Stat().Nlink() > 1 {
+			stat := e.Stat()
+			nlink := stat.Nlink()
+
+			var hardlinkKey string
+			var rec *hardlinkRecord
+			var isLeader bool
+			var leaderErr error
+			var leaderDest string
+
+			// Hardlink coordination: exactly one leader writes the file, others wait and link.
+			if nlink > 1 {
+				hardlinkKey = fmt.Sprintf("%d:%d", stat.Dev(), stat.Ino())
+
 				restoreContext.hardlinksMutex.Lock()
-				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
-				v, ok := restoreContext.hardlinks[key]
-				if ok {
-					if err := exp.CreateLink(snap.AppContext(), v, dest, exporter.HARDLINK); err != nil {
+				rec, ok := restoreContext.hardlinks[hardlinkKey]
+				if !ok {
+					rec = &hardlinkRecord{done: make(chan struct{})}
+					restoreContext.hardlinks[hardlinkKey] = rec
+					isLeader = true
+				}
+				restoreContext.hardlinksMutex.Unlock()
+
+				// Follower: wait for leader to finish, then create hardlink or propagate error.
+				if !isLeader {
+					<-rec.done
+
+					if rec.err != nil {
+						restoreContext.reportFailure(snap, rec.err)
+						return nil
+					}
+
+					if err := exp.CreateLink(snap.AppContext(), rec.dest, dest, exporter.HARDLINK); err != nil {
 						emitter.Emit("snapshot.restore.file.error", map[string]any{
 							"snapshot_id": snap.Header.Identifier,
 							"path":        entrypath,
 							"error":       err.Error(),
 						})
 						restoreContext.reportFailure(snap, err)
+					} else {
+						emitter.Emit("snapshot.restore.file.ok", map[string]any{
+							"snapshot_id": snap.Header.Identifier,
+							"path":        entrypath,
+							"size":        e.Size(),
+						})
 					}
-					restoreContext.hardlinksMutex.Unlock()
 					return nil
 				}
+			}
+
+			// Leader: publish result to followers when done.
+			if isLeader {
+				defer func() {
+					restoreContext.hardlinksMutex.Lock()
+					rec.dest = leaderDest
+					rec.err = leaderErr
+					close(rec.done)
+					restoreContext.hardlinksMutex.Unlock()
+				}()
 			}
 
 			rd, err := e.Open(restoreContext.vfs)
@@ -174,17 +222,13 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					"path":        entrypath,
 					"error":       err.Error(),
 				})
+				if isLeader {
+					leaderErr = err
+				}
 				restoreContext.reportFailure(snap, err)
 				return nil
 			}
 			defer rd.Close()
-
-			// Restore the file content.
-			if e.Stat().Nlink() > 1 {
-				key := fmt.Sprintf("%d:%d", e.Stat().Dev(), e.Stat().Ino())
-				restoreContext.hardlinks[key] = dest
-				defer restoreContext.hardlinksMutex.Unlock()
-			}
 
 			if err := exp.StoreFile(snap.AppContext(), dest, rd, e.Size()); err != nil {
 				err := fmt.Errorf("failed to write file %q at %q: %w", entrypath, dest, err)
@@ -193,6 +237,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					"path":        entrypath,
 					"error":       err.Error(),
 				})
+				if isLeader {
+					leaderErr = err
+				}
 				restoreContext.reportFailure(snap, err)
 			} else {
 				if !opts.SkipPermissions {
@@ -203,9 +250,15 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 							"path":        entrypath,
 							"error":       err.Error(),
 						})
+						if isLeader {
+							leaderErr = err
+						}
 						restoreContext.reportFailure(snap, err)
 						return nil
 					}
+				}
+				if isLeader {
+					leaderDest = dest
 				}
 				emitter.Emit("snapshot.restore.file.ok", map[string]any{
 					"snapshot_id": snap.Header.Identifier,
@@ -234,7 +287,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	restoreContext := &restoreContext{
-		hardlinks:      make(map[string]string),
+		hardlinks:      make(map[string]*hardlinkRecord),
 		hardlinksMutex: sync.Mutex{},
 		vfs:            pvfs,
 		pathname:       pathname,
