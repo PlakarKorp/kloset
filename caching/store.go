@@ -55,7 +55,10 @@ type SQLiteDBStore[K any, V any] struct {
 }
 
 func NewSQLiteDBStore[K, V any](storePath, storeName string) (*SQLiteDBStore[K, V], error) {
-	db, err := sqlite.New(storePath, storeName, true, false)
+	db, err := sqlite.New(storePath, storeName, &sqlite.Options{
+		DeleteOnClose: true,
+		Compressed:    false,
+	})
 	if err != nil {
 		return nil, err
 	}
