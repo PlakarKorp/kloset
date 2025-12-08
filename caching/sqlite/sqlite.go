@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -14,18 +15,34 @@ import (
 type SQLiteCache struct {
 	*sql.DB
 
-	dir           string
-	name          string
-	deleteOnClose bool
-	compressed    bool
+	dir  string
+	name string
+	opts *Options
 }
 
-func New(dir, name string, deletedOnClose, compressed bool) (*SQLiteCache, error) {
+type Options struct {
+	DeleteOnClose bool
+	Compressed    bool
+	ReadOnly      bool
+}
+
+func makeDefaultOptions() *Options {
+	return &Options{
+		DeleteOnClose: false,
+		Compressed:    false,
+		ReadOnly:      false,
+	}
+}
+
+func New(dir, name string, opts *Options) (*SQLiteCache, error) {
+	if opts == nil {
+		opts = makeDefaultOptions()
+	}
 
 	var db *sql.DB
 	var err error
 	if name == ":memory:" {
-		deletedOnClose = false
+		opts.DeleteOnClose = false
 		db, err = sql.Open("sqlite3", name)
 		if err != nil {
 			return nil, err
@@ -35,7 +52,23 @@ func New(dir, name string, deletedOnClose, compressed bool) (*SQLiteCache, error
 			return nil, err
 		}
 
-		db, err = sql.Open("sqlite3", path.Join(dir, name))
+		dbpath := path.Join(dir, name)
+
+		// If ro and the file does not exist, we need to open the db rw close it
+		// and reopen it.
+		if opts.ReadOnly {
+			if _, err := os.Stat(dbpath); errors.Is(err, os.ErrNotExist) {
+				tmpDb, err := sql.Open("sqlite3", "file:"+dbpath)
+				if err != nil {
+					return nil, err
+				}
+				tmpDb.Close()
+			}
+
+			dbpath += "?mode=ro"
+		}
+
+		db, err = sql.Open("sqlite3", "file:"+dbpath)
 		if err != nil {
 			return nil, err
 		}
@@ -61,23 +94,22 @@ func New(dir, name string, deletedOnClose, compressed bool) (*SQLiteCache, error
 	}
 
 	return &SQLiteCache{
-		DB:            db,
-		dir:           dir,
-		name:          name,
-		deleteOnClose: deletedOnClose,
-		compressed:    compressed,
+		DB:   db,
+		dir:  dir,
+		name: name,
+		opts: opts,
 	}, err
 }
 
 func (s *SQLiteCache) Encode(raw []byte) []byte {
-	if len(raw) == 0 || s.compressed == false {
+	if len(raw) == 0 || s.opts.Compressed == false {
 		return raw
 	}
 	return snappy.Encode(nil, raw)
 }
 
 func (s *SQLiteCache) Decode(stored []byte) ([]byte, error) {
-	if len(stored) == 0 || s.compressed == false {
+	if len(stored) == 0 || s.opts.Compressed == false {
 		return stored, nil
 	}
 
@@ -87,7 +119,7 @@ func (s *SQLiteCache) Decode(stored []byte) ([]byte, error) {
 func (s *SQLiteCache) Close() error {
 	err := s.DB.Close()
 
-	if s.deleteOnClose {
+	if s.opts.DeleteOnClose {
 		os.RemoveAll(s.dir)
 	}
 

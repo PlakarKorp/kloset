@@ -32,7 +32,11 @@ type ScanLog struct {
 }
 
 func New(path string) (*ScanLog, error) {
-	db, err := sqlite.New(path, "scanlog", true, true)
+	db, err := sqlite.New(path, "scanlog", &sqlite.Options{
+		DeleteOnClose: true,
+		Compressed:    true,
+	})
+
 	if err != nil {
 		return nil, err
 	}
