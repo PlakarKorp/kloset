@@ -197,7 +197,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	wg := errgroup.Group{}
-	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
+	wg.SetLimit(int(snap.AppContext().MaxConcurrency) * 2)
 
 	t0 := time.Now()
 
