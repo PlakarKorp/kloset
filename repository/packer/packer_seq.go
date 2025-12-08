@@ -47,8 +47,6 @@ func NewSeqPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.C
 
 	// VFS entries dedicated channel
 	nChan := ctx.MaxConcurrency + 1
-	fmt.Println("number of concurrent packers:", nChan)
-
 	ret := &seqPackerManager{
 		inflightMACs:    inflightsMACs,
 		packerChan:      make([]chan PackerMsg, nChan),

@@ -242,7 +242,6 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 
 func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	var ckers []*chunkers.Chunker
-	fmt.Println("number of concurrent workers:", snap.AppContext().MaxConcurrency)
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
 		if err != nil {
