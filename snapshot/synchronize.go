@@ -6,6 +6,8 @@ import (
 	"io"
 	"time"
 
+	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
@@ -188,17 +190,34 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commi
 	defer emitter.Emit("snapshot.backup.done", map[string]any{})
 
 	backupCtx, err := snap.prepareBackup(imp, options)
+	for _, bi := range backupCtx.indexes {
+		defer bi.Close(snap.Logger())
+	}
+
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-
 	backupCtx.emitter = emitter
+
+	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState(backupCtx)
+	}
+
+	/* meta store */
+	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
+	if err != nil {
+		return err
+	}
+	defer metastore.Close()
+
+	backupCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
+	if err != nil {
+		return err
 	}
 
 	/* importer */
