@@ -30,8 +30,7 @@ func TestRestore(t *testing.T) {
 	defer exporterInstance.Close(ctx)
 
 	opts := &snapshot.RestoreOptions{
-		MaxConcurrency: 1,
-		Strip:          snap.Header.GetSource(0).Importer.Directory,
+		Strip: snap.Header.GetSource(0).Importer.Directory,
 	}
 
 	// search for the correct filepath as the path was mkdir temp we cannot hardcode it

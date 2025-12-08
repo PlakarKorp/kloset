@@ -18,7 +18,6 @@ import (
 )
 
 type RestoreOptions struct {
-	MaxConcurrency  uint64
 	Strip           string
 	SkipPermissions bool
 	ForceCompletion bool
@@ -234,11 +233,6 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		return err
 	}
 
-	maxConcurrency := opts.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
-	}
-
 	restoreContext := &restoreContext{
 		hardlinks:      make(map[string]string),
 		hardlinksMutex: sync.Mutex{},
@@ -261,7 +255,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	wg := errgroup.Group{}
-	wg.SetLimit(int(maxConcurrency))
+	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
 
 	if err := pvfs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
 		wg.Wait()

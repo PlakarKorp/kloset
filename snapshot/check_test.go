@@ -24,8 +24,6 @@ func TestCheck(t *testing.T) {
 	}
 	require.NotEmpty(t, filepath)
 
-	err = snap.Check(filepath, &snapshot.CheckOptions{
-		MaxConcurrency: 1,
-	})
+	err = snap.Check(filepath, &snapshot.CheckOptions{})
 	require.NoError(t, err)
 }
