@@ -14,8 +14,7 @@ import (
 )
 
 type CheckOptions struct {
-	MaxConcurrency uint64
-	FastCheck      bool
+	FastCheck bool
 }
 
 type checkContext struct {
@@ -279,13 +278,8 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 		return err
 	}
 
-	maxConcurrency := opts.MaxConcurrency
-	if maxConcurrency == 0 {
-		maxConcurrency = uint64(snap.AppContext().MaxConcurrency)
-	}
-
 	wg := new(errgroup.Group)
-	wg.SetLimit(int(maxConcurrency))
+	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
 
 	var failed bool
 	err = fs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {

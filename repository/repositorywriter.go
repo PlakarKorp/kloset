@@ -53,13 +53,13 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 		rw.PackerManager, _ = packer.NewPlatarPackerManager(rw.AppContext(), &rw.configuration, rw.encode, rw.GetMACHasher, rw.PutPtarPackfile)
 	default:
 		if packfileTmpDir == "" {
-			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, packfile.NewPackfileInMemory, rw.GetMACHasher, rw.PutPackfile)
+			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), &rw.configuration, rw.encode, packfile.NewPackfileInMemory, rw.GetMACHasher, rw.PutPackfile)
 		} else {
 			ondiskPackfileCtor := func(hf packfile.HashFactory) (packfile.Packfile, error) {
 				return packfile.NewPackfileOnDisk(packfileTmpDir, hf)
 			}
 
-			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), r.AppContext().MaxConcurrency, &rw.configuration, rw.encode, ondiskPackfileCtor, rw.GetMACHasher, rw.PutPackfile)
+			rw.PackerManager = packer.NewSeqPackerManager(rw.AppContext(), &rw.configuration, rw.encode, ondiskPackfileCtor, rw.GetMACHasher, rw.PutPackfile)
 		}
 	}
 

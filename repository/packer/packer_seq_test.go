@@ -27,7 +27,7 @@ func TestNewPackerManager(t *testing.T) {
 	hashFactory := func() hash.Hash { return sha256.New() }
 	flusher := func(pf packfile.Packfile) error { return nil }
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 	require.NotNil(t, mgr)
 }
 
@@ -39,7 +39,7 @@ func TestPackerManager_InsertIfNotPresent(t *testing.T) {
 	hashFactory := func() hash.Hash { return sha256.New() }
 	flusher := func(pf packfile.Packfile) error { return nil }
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	t.Run("InsertNewMAC", func(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
@@ -83,7 +83,7 @@ func TestPackerManager_Exists(t *testing.T) {
 	hashFactory := func() hash.Hash { return sha256.New() }
 	flusher := func(pf packfile.Packfile) error { return nil }
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	t.Run("NonExistentMAC", func(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
@@ -119,7 +119,7 @@ func _TestPackerManager_Put(t *testing.T) {
 		return nil
 	}
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	t.Run("PutSingleBlob", func(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
@@ -154,7 +154,7 @@ func _TestPackerManager_RunAndWait(t *testing.T) {
 		return nil
 	}
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	t.Run("RunAndWaitWithData", func(t *testing.T) {
 		// Start the manager
@@ -197,7 +197,7 @@ func _TestPackerManager_AddPadding(t *testing.T) {
 		return nil
 	}
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	// Start the manager
 	go func() {
@@ -258,7 +258,7 @@ func _TestPackerManager_Concurrency(t *testing.T) {
 		return nil
 	}
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	t.Run("ConcurrentPuts", func(t *testing.T) {
 		// Start the manager in a goroutine
@@ -324,7 +324,7 @@ func _TestPackerManager_ErrorHandling(t *testing.T) {
 		return io.ErrUnexpectedEOF
 	}
 
-	mgr := packer.NewSeqPackerManager(ctx, 2, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
+	mgr := packer.NewSeqPackerManager(ctx, storageConf, encodingFunc, packfileFactory, hashFactory, flusher)
 
 	t.Run("FlusherError", func(t *testing.T) {
 		// Start the manager

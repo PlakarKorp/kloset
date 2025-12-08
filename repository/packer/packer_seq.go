@@ -39,14 +39,16 @@ type seqPackerManager struct {
 	flush func(packfile.Packfile) error
 }
 
-func NewSeqPackerManager(ctx *kcontext.KContext, maxConcurrency int, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), packfileFactory packfile.PackfileCtor, hashFactory func() hash.Hash, flusher func(packfile.Packfile) error) PackerManagerInt {
+func NewSeqPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.Configuration, encodingFunc func(io.Reader) (io.Reader, error), packfileFactory packfile.PackfileCtor, hashFactory func() hash.Hash, flusher func(packfile.Packfile) error) PackerManagerInt {
 	inflightsMACs := make(map[resources.Type]*sync.Map)
 	for _, Type := range resources.Types() {
 		inflightsMACs[Type] = &sync.Map{}
 	}
 
 	// VFS entries dedicated channel
-	nChan := maxConcurrency + 1
+	nChan := ctx.MaxConcurrency + 1
+	fmt.Println("number of concurrent packers:", nChan)
+
 	ret := &seqPackerManager{
 		inflightMACs:    inflightsMACs,
 		packerChan:      make([]chan PackerMsg, nChan),
