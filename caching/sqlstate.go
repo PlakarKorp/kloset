@@ -47,46 +47,48 @@ func NewSQLState(repoId uuid.UUID, ro bool) (*SQLState, error) {
 		return nil, err
 	}
 
-	for _, typ := range []string{"states", "packfiles"} {
-		create := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+	if !ro {
+		for _, typ := range []string{"states", "packfiles"} {
+			create := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			mac TEXT NOT NULL PRIMARY KEY,
 			payload BLOB NOT NULL
 		);`, typ)
 
-		if _, err := db.Exec(create); err != nil {
-			return nil, err
+			if _, err := db.Exec(create); err != nil {
+				return nil, err
+			}
 		}
-	}
 
-	create := `CREATE TABLE IF NOT EXISTS deltas (
+		create := `CREATE TABLE IF NOT EXISTS deltas (
 			mac TEXT NOT NULL,
 			type INTEGER NOT NULL,
 			packfile TEXT NOT NULL,
 			payload BLOB NOT NULL,
 			UNIQUE(mac, type, packfile)
 		);`
-	if _, err := db.Exec(create); err != nil {
-		return nil, err
-	}
+		if _, err := db.Exec(create); err != nil {
+			return nil, err
+		}
 
-	create = `CREATE TABLE IF NOT EXISTS deleteds (
+		create = `CREATE TABLE IF NOT EXISTS deleteds (
 			mac TEXT NOT NULL,
 			type INTEGER NOT NULL,
 			payload BLOB NOT NULL,
 			UNIQUE(mac, type)
 		);`
 
-	if _, err := db.Exec(create); err != nil {
-		return nil, err
-	}
+		if _, err := db.Exec(create); err != nil {
+			return nil, err
+		}
 
-	create = `CREATE TABLE IF NOT EXISTS configurations (
+		create = `CREATE TABLE IF NOT EXISTS configurations (
 		key TEXT NOT NULL PRIMARY KEY,
 		data BLOB NOT NULL
 	);`
 
-	if _, err := db.Exec(create); err != nil {
-		return nil, err
+		if _, err := db.Exec(create); err != nil {
+			return nil, err
+		}
 	}
 
 	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
