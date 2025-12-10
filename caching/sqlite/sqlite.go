@@ -62,6 +62,18 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 				if err != nil {
 					return nil, err
 				}
+
+				// A bit ugly but we gotta exec at least something so that the
+				// file is created on disk.
+				pragmas := []string{
+					"PRAGMA journal_mode = WAL;", // one-writer WAL, good for cache
+				}
+
+				for _, p := range pragmas {
+					if _, err := tmpDb.Exec(p); err != nil {
+						return nil, fmt.Errorf("pragma %q failed: %w", p, err)
+					}
+				}
 				tmpDb.Close()
 			}
 
