@@ -190,6 +190,11 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		return nil, err
 	}
 
+	cacheInstance, err := caching.NewSQLState(configInstance.RepositoryID, true)
+	if err != nil {
+		return nil, err
+	}
+
 	r := &Repository{
 		store:            store,
 		configuration:    *configInstance,
@@ -197,6 +202,7 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		secret:           secret,
 		storageSize:      -1,
 		storageSizeDirty: true,
+		state:            state.NewLocalState(cacheInstance),
 	}
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
 		hasher := r.GetMACHasher()
@@ -209,7 +215,6 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 
 func (r *Repository) RebuildState() error {
 	cacheInstance, err := caching.NewSQLState(r.Configuration().RepositoryID, false)
-
 	if err != nil {
 		return err
 	}
