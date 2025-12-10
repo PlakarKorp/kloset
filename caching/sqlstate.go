@@ -35,11 +35,12 @@ type sqlStateBatch struct {
 	deltas []sDelta
 }
 
-func NewSQLState(repoId uuid.UUID) (*SQLState, error) {
+func NewSQLState(repoId uuid.UUID, ro bool) (*SQLState, error) {
 	// XXX: where ?!
 	db, err := sqlite.New(fmt.Sprintf("/tmp/repostate/%s", repoId), "state.db", &sqlite.Options{
 		DeleteOnClose: false,
 		Compressed:    true,
+		ReadOnly:      ro,
 	})
 	if err != nil {
 		return nil, err
