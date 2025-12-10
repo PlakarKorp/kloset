@@ -41,6 +41,7 @@ func NewSQLState(repoId uuid.UUID, ro bool) (*SQLState, error) {
 		DeleteOnClose: false,
 		Compressed:    true,
 		ReadOnly:      ro,
+		Shared:        true,
 	})
 	if err != nil {
 		return nil, err
