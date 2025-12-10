@@ -208,7 +208,8 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 }
 
 func (r *Repository) RebuildState() error {
-	cacheInstance, err := r.AppContext().GetCache().Repository(r.Configuration().RepositoryID)
+	cacheInstance, err := caching.NewSQLState(r.Configuration().RepositoryID, false)
+
 	if err != nil {
 		return err
 	}
