@@ -436,8 +436,10 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 
 	backupCtx, err := snap.prepareBackup(imp, options)
-	for _, bi := range backupCtx.indexes {
-		defer bi.Close(snap.Logger())
+	if backupCtx != nil {
+		for _, bi := range backupCtx.indexes {
+			defer bi.Close(snap.Logger())
+		}
 	}
 
 	if err != nil {
