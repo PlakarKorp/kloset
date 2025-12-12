@@ -60,7 +60,6 @@ type Manager struct {
 	repositoryCache      map[uuid.UUID]*_RepositoryCache
 	repositoryCacheMutex sync.Mutex
 
-	vfsCache      map[string]*VFSCache
 	vfsCacheMutex sync.Mutex
 
 	maintenanceCache      map[uuid.UUID]*MaintenanceCache
@@ -72,7 +71,6 @@ func NewManager(cons Constructor) *Manager {
 		cons: cons,
 
 		repositoryCache:  make(map[uuid.UUID]*_RepositoryCache),
-		vfsCache:         make(map[string]*VFSCache),
 		maintenanceCache: make(map[uuid.UUID]*MaintenanceCache),
 	}
 }
@@ -90,10 +88,6 @@ func (m *Manager) Close() error {
 		cache.Close()
 	}
 
-	for _, cache := range m.vfsCache {
-		cache.Close()
-	}
-
 	for _, cache := range m.maintenanceCache {
 		cache.Close()
 	}
@@ -101,33 +95,6 @@ func (m *Manager) Close() error {
 	// we may rework the interface later to allow for error handling
 	// at this point closing is best effort
 	return nil
-}
-
-func (m *Manager) VFS(repositoryID uuid.UUID, scheme string, origin string, deleteOnClose bool) (*VFSCache, error) {
-	if m.closed.Load() {
-		return nil, ErrClosed
-	}
-
-	m.vfsCacheMutex.Lock()
-	defer m.vfsCacheMutex.Unlock()
-
-	key := fmt.Sprintf("%s://%s", scheme, origin)
-
-	if cache, ok := m.vfsCache[key]; ok {
-		return cache, nil
-	}
-
-	var opt Option
-	if deleteOnClose {
-		opt = DeleteOnClose
-	}
-
-	if cache, err := newVFSCache(m.cons, repositoryID, scheme, origin, opt); err != nil {
-		return nil, err
-	} else {
-		m.vfsCache[key] = cache
-		return cache, nil
-	}
 }
 
 func (m *Manager) Repository(repositoryID uuid.UUID) (*_RepositoryCache, error) {
