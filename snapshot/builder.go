@@ -15,6 +15,7 @@ import (
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot/header"
+	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
 )
 
@@ -24,6 +25,7 @@ type Builder struct {
 	//This is protecting the above two pointers, not their underlying objects
 	scanCache  *caching.ScanCache
 	deltaCache *caching.ScanCache
+	vfsCache   *vfs.Filesystem
 
 	Header *header.Header
 }
@@ -64,6 +66,10 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 	return snap, nil
+}
+
+func (snap *Builder) WithVFSCache(vfsCache *vfs.Filesystem) {
+	snap.vfsCache = vfsCache
 }
 
 func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, error) {
