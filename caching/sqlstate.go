@@ -446,7 +446,7 @@ func (c *SQLState) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.
 
 func (c *SQLState) DelDeleted(blobType resources.Type, blobCsum objects.MAC) error {
 	blobMACHex := hex.EncodeToString(blobCsum[:])
-	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ? AND packfile = ?;", blobMACHex, blobType)
+	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ?;", blobMACHex, blobType)
 	return err
 }
 
