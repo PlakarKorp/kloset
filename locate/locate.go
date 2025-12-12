@@ -33,6 +33,8 @@ type ItemFilters struct {
 	Perimeter   string
 	Job         string
 	Tags        []string
+	Types       []string
+	Origins     []string
 	Roots       []string
 }
 
@@ -42,6 +44,30 @@ func (it *ItemFilters) HasTag(tag string) bool {
 	}
 	for _, t := range it.Tags {
 		if t == tag {
+			return true
+		}
+	}
+	return false
+}
+
+func (it ItemFilters) HasType(typ string) bool {
+	if typ == "" {
+		return true
+	}
+	for _, t := range it.Types {
+		if t == typ {
+			return true
+		}
+	}
+	return false
+}
+
+func (it ItemFilters) HasOrigin(origin string) bool {
+	if origin == "" {
+		return true
+	}
+	for _, t := range it.Origins {
+		if t == origin {
 			return true
 		}
 	}
@@ -87,9 +113,11 @@ type LocateFilters struct {
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	IgnoreTags  []string `json:"ignore_tags,omitempty" yaml:"ignore_tags,omitempty"`
 
-	Latest bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
-	IDs    []string `json:"ids,omitempty" yaml:"ids,omitempty"`
-	Roots  []string `json:"roots,omitempty" yaml:"roots,omitempty"`
+	Latest  bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
+	IDs     []string `json:"ids,omitempty" yaml:"ids,omitempty"`
+	Types   []string `json:"types,omitempty" yaml:"types,omitempty"`
+	Origins []string `json:"origins,omitempty" yaml:"origins,omitempty"`
+	Roots   []string `json:"roots,omitempty" yaml:"roots,omitempty"`
 }
 
 type LocatePeriods struct {
@@ -237,6 +265,16 @@ func (lo *LocateOptions) Matches(it Item) bool {
 	}
 	for _, tag := range lo.Filters.Tags {
 		if !it.Filters.HasTag(tag) {
+			return false
+		}
+	}
+	for _, typ := range lo.Filters.Types {
+		if !it.Filters.HasType(typ) {
+			return false
+		}
+	}
+	for _, origin := range lo.Filters.Origins {
+		if !it.Filters.HasOrigin(origin) {
 			return false
 		}
 	}

@@ -91,8 +91,12 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 			hexID := hex.EncodeToString(id[:])
 
 			roots := []string{}
+			types := []string{}
+			origins := []string{}
 			for _, src := range h.Sources {
 				roots = append(roots, src.Importer.Directory)
+				types = append(types, src.Importer.Type)
+				origins = append(origins, src.Importer.Origin)
 			}
 
 			it := Item{
@@ -106,8 +110,10 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 					Job:         h.Job,
 					// adjust to however tags are exposed on your header:
 					// Tags: h.Tags, or h.GetTags()
-					Tags:  h.Tags,
-					Roots: roots,
+					Tags:    h.Tags,
+					Types:   types,
+					Origins: origins,
+					Roots:   roots,
 				},
 			}
 
