@@ -163,7 +163,7 @@ func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.T
 func (r *RepositoryWriter) PutBlobWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repositorywriter", "PutBlob(%s, %x): %s", Type, mac, time.Since(t0))
+		r.Logger().Trace("repositorywriter", "PutBlobWithHint(%d, %s, %x): %s", hint, Type, mac, time.Since(t0))
 	}()
 
 	if ok, err := r.PackerManager.InsertIfNotPresent(Type, mac); err != nil {
