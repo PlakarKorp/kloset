@@ -247,6 +247,7 @@ func (e *Emitter) BackupResult(target string, size uint64, errors uint64, durati
 func (e *Emitter) RestoreResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
 	e.emit("snapshot.restore.result", Quiet, map[string]any{
 		"target":   target,
+<<<<<<< HEAD
 		"size":     size,
 		"errors":   errors,
 		"duration": duration,
@@ -258,6 +259,8 @@ func (e *Emitter) RestoreResult(target string, size uint64, errors uint64, durat
 func (e *Emitter) CheckResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
 	e.emit("snapshot.check.result", Quiet, map[string]any{
 		"target":   target,
+=======
+>>>>>>> 16c52b2c (change event and align restore with backup)
 		"size":     size,
 		"errors":   errors,
 		"duration": duration,

@@ -758,6 +758,7 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		return err
 	}
 
+<<<<<<< HEAD
 	if bc.StateRefresher != nil {
 		if err := bc.StateRefresher(); err != nil {
 			snap.Logger().Warn("Failed to reload state %s", err)
@@ -765,6 +766,8 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		}
 	}
 
+=======
+>>>>>>> 16c52b2c (change event and align restore with backup)
 	bc.emitter.BackupResult(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
