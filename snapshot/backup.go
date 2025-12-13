@@ -163,7 +163,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		record := record.Error
 		backupCtx.recordError(record.Pathname, record.Err)
 
-		backupCtx.emitter.Emit("snapshot.backup.path.error", map[string]any{
+		backupCtx.emitter.Warn("snapshot.backup.path.error", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
 			"path":        record.Pathname,
 			"error":       record.Err.Error(),
@@ -185,7 +185,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		// XXX: Remove this when we introduce the Location object.
 		repoLocation, err := snap.repository.Location()
 		if err != nil {
-			backupCtx.emitter.Emit("snapshot.backup.file.error", map[string]any{
+			backupCtx.emitter.Warn("snapshot.backup.file.error", map[string]any{
 				"snapshot_id": snap.Header.Identifier[:],
 				"path":        record.Pathname,
 				"error":       err.Error(),
@@ -216,7 +216,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		})
 
 		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
-			backupCtx.emitter.Emit("snapshot.backup.file.error", map[string]any{
+			backupCtx.emitter.Warn("snapshot.backup.file.error", map[string]any{
 				"snapshot_id": snap.Header.Identifier[:],
 				"path":        record.Pathname,
 				"error":       err.Error(),
@@ -753,6 +753,13 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 	if err == nil {
 		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
+
+	bc.emitter.Quiet("snapshot.commit", map[string]any{
+		"snapshot_id": snap.Header.Identifier,
+		"total_size":  snap.Header.GetSource(0).Summary.Directory.Size + snap.Header.GetSource(0).Summary.Below.Size,
+		"duration":    snap.Header.Duration,
+		"wbytes":      uint64(snap.repository.WBytes()),
+	})
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil

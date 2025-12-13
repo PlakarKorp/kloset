@@ -36,6 +36,7 @@ const (
 	Info  = "info"
 	Warn  = "warn"
 	Error = "error"
+	Quiet = "quiet"
 )
 
 type Event struct {
@@ -69,11 +70,15 @@ func (e *Emitter) emit(typ, level string, kv map[string]any) {
 }
 
 func (e *Emitter) Emit(typ string, kv map[string]any) {
-	e.emit(typ, "", kv)
+	e.emit(typ, Info, kv)
 }
 
 func (e *Emitter) Info(typ string, kv map[string]any) {
 	e.emit(typ, Info, kv)
+}
+
+func (e *Emitter) Quiet(typ string, kv map[string]any) {
+	e.emit(typ, Quiet, kv)
 }
 
 func (e *Emitter) Warn(typ string, kv map[string]any) {
