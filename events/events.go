@@ -230,3 +230,15 @@ func (e *Emitter) ChunkError(chunk objects.MAC, err error) {
 		"error": err,
 	})
 }
+
+/////
+
+func (e *Emitter) Commit(size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
+	e.emit("snapshot.commit", Quiet, map[string]any{
+		"size":     size,
+		"errors":   errors,
+		"duration": duration,
+		"rbytes":   rBytes,
+		"wbytes":   wBytes,
+	})
+}

@@ -728,12 +728,17 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
 
-	bc.emitter.Quiet("snapshot.commit", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"total_size":  snap.Header.GetSource(0).Summary.Directory.Size + snap.Header.GetSource(0).Summary.Below.Size,
-		"duration":    snap.Header.Duration,
-		"wbytes":      uint64(snap.repository.WBytes()),
-	})
+	totalSize := uint64(0)
+	totalErrors := uint64(0)
+	for _, source := range snap.Header.Sources {
+		totalSize += source.Summary.Directory.Size + source.Summary.Below.Size
+		totalErrors += source.Summary.Directory.Errors + source.Summary.Below.Errors
+	}
+
+	rBytes := snap.repository.RBytes()
+	wBytes := snap.repository.WBytes()
+
+	bc.emitter.Commit(totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
