@@ -233,8 +233,20 @@ func (e *Emitter) ChunkError(chunk objects.MAC, err error) {
 
 /////
 
-func (e *Emitter) Commit(size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
-	e.emit("snapshot.commit", Quiet, map[string]any{
+func (e *Emitter) BackupResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
+	e.emit("snapshot.backup.result", Quiet, map[string]any{
+		"target":   target,
+		"size":     size,
+		"errors":   errors,
+		"duration": duration,
+		"rbytes":   rBytes,
+		"wbytes":   wBytes,
+	})
+}
+
+func (e *Emitter) RestoreResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
+	e.emit("snapshot.restore.result", Quiet, map[string]any{
+		"target":   target,
 		"size":     size,
 		"errors":   errors,
 		"duration": duration,

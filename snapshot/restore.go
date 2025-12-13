@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/objects"
@@ -30,6 +31,7 @@ type restoreContext struct {
 	vfs            *vfs.Filesystem
 	directories    []dirRec
 
+	size   atomic.Uint64
 	errors atomic.Uint64
 	force  bool
 
@@ -156,6 +158,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 					}
 				}
 				emitter.FileOk(entrypath)
+				restoreContext.size.Add(uint64(e.Size()))
 			}
 			return nil
 		})
@@ -196,6 +199,8 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	wg := errgroup.Group{}
 	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
 
+	t0 := time.Now()
+
 	if err := pvfs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
 		wg.Wait()
 		return err
@@ -212,22 +217,29 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		for _, d := range restoreContext.directories {
 			if err := exp.SetPermissions(snap.AppContext(), d.path, d.info); err != nil {
 				err := fmt.Errorf("failed to set permissions on directory %q: %w", d.path, err)
-				emitter.Warn("snapshot.restore.directory.error", map[string]any{
-					"snapshot": snap.Header.Identifier,
-					"path":     d.path,
-					"error":    err.Error(),
-				})
+				emitter.DirectoryError(d.path, err)
 			}
 		}
 	}
 
+	err = nil
 	if n := restoreContext.errors.Load(); n > 0 {
 		errors := "errors"
 		if n == 1 {
 			errors = "error"
 		}
-		return fmt.Errorf("restoration completed with %v %s", n, errors)
+		err = fmt.Errorf("restoration completed with %v %s", n, errors)
 	}
 
-	return nil
+	rBytes := snap.repository.RBytes()
+	wBytes := snap.repository.WBytes()
+
+	target, err := exp.Root(snap.AppContext())
+	if err != nil {
+		return err
+	}
+
+	emitter.RestoreResult(target, restoreContext.size.Load(), restoreContext.errors.Load(), time.Since(t0), rBytes, wBytes)
+
+	return err
 }
