@@ -2,6 +2,9 @@ package events
 
 import (
 	"time"
+
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/google/uuid"
 )
 
 type EventsBUS struct {
@@ -21,8 +24,18 @@ func (eb *EventsBUS) Close() {
 	}
 }
 
-func (eb *EventsBUS) Emitter() *Emitter {
-	return &Emitter{bus: eb}
+func (eb *EventsBUS) NewDummyEmitter() *Emitter {
+	return newDummyEmitter()
+}
+
+func (eb *EventsBUS) NewRepositoryEmitter(repository uuid.UUID, workflow string) *Emitter {
+	job := uuid.Must(uuid.NewRandom())
+	return newEmitter(eb, repository, objects.NilMac, job, workflow)
+}
+
+func (eb *EventsBUS) NewSnapshotEmitter(repository uuid.UUID, snapshot objects.MAC, workflow string) *Emitter {
+	job := uuid.Must(uuid.NewRandom())
+	return newEmitter(eb, repository, snapshot, job, workflow)
 }
 
 func (eb *EventsBUS) Listen() <-chan *Event {
@@ -40,23 +53,36 @@ const (
 )
 
 type Event struct {
-	Version   int            `msgpack:"version"`
-	Timestamp time.Time      `msgpack:"timestamp"`
-	Level     string         `msgpack:"level"`
-	Type      string         `msgpack:"type"`
-	Data      map[string]any `msgpack:"kv,omitempty"`
+	Version    int            `msgpack:"version"`
+	Timestamp  time.Time      `msgpack:"timestamp"`
+	Repository uuid.UUID      `msgpack:"repository"`
+	Snapshot   objects.MAC    `msgpack:"snapshot"`
+	Level      string         `msgpack:"level"`
+	Job        uuid.UUID      `msgpack:"job"`
+	Type       string         `msgpack:"type"`
+	Data       map[string]any `msgpack:"kv,omitempty"`
 }
 
 type Emitter struct {
-	bus *EventsBUS
+	bus        *EventsBUS
+	repository uuid.UUID
+	snapshot   objects.MAC
+	job        uuid.UUID
+	workflow   string
 }
 
-func NewDummyEmitter() *Emitter {
+func (e *Emitter) Close() {
+	e.emit("workflow.end", Info, map[string]any{
+		"workflow": e.workflow,
+	})
+}
+
+func newDummyEmitter() *Emitter {
 	return &Emitter{bus: nil}
 }
 
-func NewEmitter(eb *EventsBUS) *Emitter {
-	return &Emitter{bus: eb}
+func newEmitter(eb *EventsBUS, repository uuid.UUID, snapshot objects.MAC, job uuid.UUID, workflow string) *Emitter {
+	return &Emitter{bus: eb, repository: repository, snapshot: snapshot, job: job, workflow: workflow}
 }
 
 func (e *Emitter) emit(typ, level string, kv map[string]any) {
@@ -65,12 +91,8 @@ func (e *Emitter) emit(typ, level string, kv map[string]any) {
 	}
 	e.bus.c <- &Event{
 		Version: 1, Timestamp: time.Now().UTC(),
-		Level: level, Type: typ, Data: kv,
+		Level: level, Type: typ, Repository: e.repository, Snapshot: e.snapshot, Job: e.job, Data: kv,
 	}
-}
-
-func (e *Emitter) Emit(typ string, kv map[string]any) {
-	e.emit(typ, Info, kv)
 }
 
 func (e *Emitter) Info(typ string, kv map[string]any) {
@@ -87,4 +109,124 @@ func (e *Emitter) Warn(typ string, kv map[string]any) {
 
 func (e *Emitter) Error(typ string, kv map[string]any) {
 	e.emit(typ, Error, kv)
+}
+
+/////
+
+func (e *Emitter) Path(path string) {
+	e.emit("path", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) Directory(path string) {
+	e.emit("directory", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) File(path string) {
+	e.emit("file", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) Symlink(path string) {
+	e.emit("symlink", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) Object(object objects.MAC) {
+	e.emit("object", Info, map[string]any{
+		"mac": object,
+	})
+}
+
+func (e *Emitter) Chunk(chunk objects.MAC) {
+	e.emit("chunk", Info, map[string]any{
+		"mac": chunk,
+	})
+}
+
+/////
+
+func (e *Emitter) PathOk(path string) {
+	e.emit("path.ok", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) DirectoryOk(path string) {
+	e.emit("directory.ok", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) FileOk(path string) {
+	e.emit("file.ok", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) SymlinkOk(path string) {
+	e.emit("symlink.ok", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) ObjectOk(object objects.MAC) {
+	e.emit("object.ok", Info, map[string]any{
+		"mac": object,
+	})
+}
+
+func (e *Emitter) ChunkOk(chunk objects.MAC) {
+	e.emit("chunk.ok", Info, map[string]any{
+		"mac": chunk,
+	})
+}
+
+/////
+
+func (e *Emitter) PathError(path string, err error) {
+	e.emit("path.error", Error, map[string]any{
+		"path":  path,
+		"error": err,
+	})
+}
+
+func (e *Emitter) DirectoryError(path string, err error) {
+	e.emit("directory.error", Error, map[string]any{
+		"path":  path,
+		"error": err,
+	})
+}
+
+func (e *Emitter) FileError(path string, err error) {
+	e.emit("file.error", Error, map[string]any{
+		"path":  path,
+		"error": err,
+	})
+}
+
+func (e *Emitter) SymlinkError(path string, err error) {
+	e.emit("symlink.error", Error, map[string]any{
+		"path":  path,
+		"error": err,
+	})
+}
+
+func (e *Emitter) ObjectError(object objects.MAC, err error) {
+	e.emit("object.error", Error, map[string]any{
+		"mac":   object,
+		"error": err,
+	})
+}
+
+func (e *Emitter) ChunkError(chunk objects.MAC, err error) {
+	e.emit("chunk.error", Error, map[string]any{
+		"mac":   chunk,
+		"error": err,
+	})
 }

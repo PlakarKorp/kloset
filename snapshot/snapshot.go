@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -29,6 +30,10 @@ type Snapshot struct {
 	filesystem *vfs.Filesystem
 
 	Header *header.Header
+}
+
+func (snap *Snapshot) Emitter(workflow string) *events.Emitter {
+	return snap.AppContext().Events().NewSnapshotEmitter(snap.repository.Configuration().RepositoryID, snap.Header.Identifier, workflow)
 }
 
 func LogicalSize(repo *repository.Repository) (int, int64, error) {

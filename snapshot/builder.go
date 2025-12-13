@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -28,6 +29,10 @@ type Builder struct {
 	vfsCache   *vfs.Filesystem
 
 	Header *header.Header
+}
+
+func (snap *Builder) Emitter(workflow string) *events.Emitter {
+	return snap.AppContext().Events().NewSnapshotEmitter(snap.repository.Configuration().RepositoryID, snap.Header.Identifier, workflow)
 }
 
 func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC) (*Builder, error) {

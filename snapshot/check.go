@@ -50,37 +50,22 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 	}
 
 	emitter := checkCtx.emitter
-	emitter.Emit("snapshot.check.chunk", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"content_mac": chunk.ContentMAC,
-	})
+	emitter.Chunk(chunk.ContentMAC)
 
 	if fast {
 		if !snap.repository.BlobExists(resources.RT_CHUNK, chunk.ContentMAC) {
-			emitter.Warn("snapshot.check.chunk.missing", map[string]any{
-				"snapshot_id": snap.Header.Identifier,
-				"content_mac": chunk.ContentMAC,
-				"error":       ErrChunkMissing.Error(),
-			})
+			emitter.ChunkError(chunk.ContentMAC, ErrChunkMissing)
 			snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkMissing.Error()))
 			return ErrChunkMissing
 		}
-
-		emitter.Emit("snapshot.check.chunk.ok", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"content_mac": chunk.ContentMAC,
-		})
+		emitter.ChunkOk(chunk.ContentMAC)
 		snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(""))
 		return nil
 	}
 
 	data, err := snap.repository.GetBlobBytes(resources.RT_CHUNK, chunk.ContentMAC)
 	if err != nil {
-		emitter.Warn("snapshot.check.chunk.missing", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"content_mac": chunk.ContentMAC,
-			"error":       ErrChunkMissing.Error(),
-		})
+		emitter.ChunkError(chunk.ContentMAC, ErrChunkMissing)
 		snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkMissing.Error()))
 		return ErrChunkMissing
 	}
@@ -92,19 +77,12 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 
 	mac := snap.repository.ComputeMAC(data)
 	if !bytes.Equal(mac[:], chunk.ContentMAC[:]) {
-		emitter.Warn("snapshot.check.chunk.corrupted", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"content_mac": chunk.ContentMAC,
-			"error":       ErrChunkCorrupted.Error(),
-		})
+		emitter.ChunkError(chunk.ContentMAC, ErrChunkCorrupted)
 		snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkCorrupted.Error()))
 		return ErrChunkCorrupted
 	}
 
-	emitter.Emit("snapshot.check.chunk.ok", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"content_mac": chunk.ContentMAC,
-	})
+	emitter.ChunkOk(chunk.ContentMAC)
 	snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(""))
 	return nil
 }
@@ -139,10 +117,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 	}
 
 	hasher := snap.repository.GetMACHasher()
-	emmiter.Emit("snapshot.check.object", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"content_mac": object.ContentMAC,
-	})
+	emmiter.Object(object.ContentMAC)
 
 	var failed bool
 	for i := range object.Chunks {
@@ -152,31 +127,19 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 	}
 
 	if failed {
-		emmiter.Warn("snapshot.check.object.corrupted", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"content_mac": object.ContentMAC,
-			"error":       ErrObjectCorrupted.Error(),
-		})
+		emmiter.ObjectError(object.ContentMAC, ErrObjectCorrupted)
 		snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectCorrupted.Error()))
 		return ErrObjectCorrupted
 	}
 
 	if !fast {
 		if !bytes.Equal(hasher.Sum(nil), object.ContentMAC[:]) {
-			emmiter.Warn("snapshot.check.object.corrupted", map[string]any{
-				"snapshot_id": snap.Header.Identifier,
-				"content_mac": object.ContentMAC,
-				"error":       ErrObjectCorrupted.Error(),
-			})
+			emmiter.ObjectError(object.ContentMAC, ErrObjectCorrupted)
 			snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectCorrupted.Error()))
 			return ErrObjectCorrupted
 		}
 	}
-
-	emmiter.Emit("snapshot.check.object.ok", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"content_mac": object.ContentMAC,
-	})
+	emmiter.ObjectOk(object.ContentMAC)
 	snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(""))
 	return nil
 }
@@ -195,20 +158,11 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 	}
 
 	emitter := checkCtx.emitter
-	emitter.Emit("snapshot.check.path", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"path":        entrypath,
-	})
+	emitter.Path(entrypath)
 
 	if e.Stat().Mode().IsDir() {
-		emitter.Emit("snapshot.check.directory", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"path":        entrypath,
-		})
-		emitter.Emit("snapshot.check.directory.ok", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"path":        entrypath,
-		})
+		emitter.Directory(entrypath)
+		emitter.DirectoryOk(entrypath)
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	}
@@ -218,27 +172,16 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 		return nil
 	}
 
-	emitter.Emit("snapshot.check.file", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-		"path":        entrypath,
-	})
+	emitter.File(entrypath)
 
 	wg.Go(func() error {
 		err := checkObject(snap, e, opts.FastCheck, checkCtx)
 		if err != nil {
-			emitter.Warn("snapshot.check.file.corrupted", map[string]any{
-				"snapshot_id": snap.Header.Identifier,
-				"path":        entrypath,
-				"error":       err.Error(),
-			})
+			emitter.FileError(entrypath, err)
 			snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(err.Error()))
 			return err
 		}
-
-		emitter.Emit("snapshot.check.file.ok", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"path":        entrypath,
-		})
+		emitter.FileOk(entrypath)
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	})
@@ -246,13 +189,8 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 }
 
 func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
-	emitter := snap.AppContext().Events().Emitter()
-	emitter.Emit("snapshot.check.start", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-	})
-	defer emitter.Emit("snapshot.check.done", map[string]any{
-		"snapshot_id": snap.Header.Identifier,
-	})
+	emitter := snap.Emitter("check")
+	defer emitter.Close()
 
 	checkCtx := &checkContext{
 		emitter: emitter,
