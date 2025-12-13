@@ -753,7 +753,12 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 	rBytes := snap.repository.RBytes()
 	wBytes := snap.repository.WBytes()
 
-	bc.emitter.Commit(totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
+	target, err := snap.repository.Location()
+	if err != nil {
+		return err
+	}
+
+	bc.emitter.BackupResult(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
