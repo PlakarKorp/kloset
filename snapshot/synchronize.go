@@ -185,9 +185,8 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commi
 	}
 	defer snap.Unlock(done)
 
-	emitter := snap.AppContext().Events().Emitter()
-	emitter.Emit("snapshot.backup.start", map[string]any{})
-	defer emitter.Emit("snapshot.backup.done", map[string]any{})
+	emitter := snap.Emitter("sync")
+	defer emitter.Close()
 
 	backupCtx, err := snap.prepareBackup(imp, options)
 	for _, bi := range backupCtx.indexes {
