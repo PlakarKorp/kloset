@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"sync/atomic"
+	"time"
 
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/objects"
@@ -19,6 +21,8 @@ type CheckOptions struct {
 
 type checkContext struct {
 	emitter *events.Emitter
+	size    atomic.Uint64
+	errors  atomic.Uint64
 }
 
 var (
@@ -107,11 +111,7 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 
 	object, err := snap.LookupObject(fileEntry.Object)
 	if err != nil {
-		emmiter.Warn("snapshot.check.object.missing", map[string]any{
-			"snapshot_id": snap.Header.Identifier,
-			"object_mac":  fileEntry.Object,
-			"error":       err.Error(),
-		})
+		emmiter.ObjectError(fileEntry.Object, err)
 		snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectMissing.Error()))
 		return ErrObjectMissing
 	}
@@ -178,10 +178,12 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 		err := checkObject(snap, e, opts.FastCheck, checkCtx)
 		if err != nil {
 			emitter.FileError(entrypath, err)
+			checkCtx.errors.Add(1)
 			snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(err.Error()))
 			return err
 		}
 		emitter.FileOk(entrypath)
+		checkCtx.size.Add(uint64(e.Stat().Size()))
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	})
@@ -191,6 +193,13 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	emitter := snap.Emitter("check")
 	defer emitter.Close()
+
+	target, err := snap.repository.Location()
+	if err != nil {
+		return err
+	}
+
+	rBytesSaved, wBytesSaved := snap.repository.RBytes(), snap.repository.WBytes()
 
 	checkCtx := &checkContext{
 		emitter: emitter,
@@ -219,14 +228,12 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	wg := new(errgroup.Group)
 	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
 
+	t0 := time.Now()
+
 	var failed bool
 	err = fs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
-			emitter.Warn("snapshot.check.path.error", map[string]any{
-				"snapshot_id": snap.Header.Identifier,
-				"path":        entrypath,
-				"error":       err.Error(),
-			})
+			emitter.PathError(entrypath, err)
 			return err
 		}
 
@@ -243,21 +250,31 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 
 		return nil
 	})
+
+	rBytes := snap.repository.RBytes() - rBytesSaved
+	wBytes := snap.repository.WBytes() - wBytesSaved
+
 	if err != nil {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
 		wg.Wait()
+
+		emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 		return err
 	}
 	if err := wg.Wait(); err != nil {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
+		emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 		return err
 	}
 	if failed {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root,
 			[]byte(ErrRootCorrupted.Error()))
+		emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 		return ErrRootCorrupted
 	}
 
 	snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(""))
+	emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
+
 	return nil
 }
