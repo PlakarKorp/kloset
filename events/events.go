@@ -4,6 +4,36 @@ import (
 	"time"
 )
 
+/*
+	file.ok, directory.ok
+	path.ok					snapshot	[]byte
+						path		string
+
+	file.error,  (directory.error?)
+	path.error				snapshot	[]byte
+						path		string
+						error		string
+
+	importer.start		snapshot	[]byte
+
+	importer.done		snapshot	[]byte
+						nfiles		uint64
+						ndirs		uint64
+						size		uint64
+
+	backup.start,
+	backup.done			snapshot	[]byte
+
+	sync.start,
+	sync.done			snapshot	[]byte
+
+
+TODO:
+	readd ...
+	add repository id to all events (if possible)
+	add a job id
+*/
+
 type EventsBUS struct {
 	c      chan *Event
 	buffer int

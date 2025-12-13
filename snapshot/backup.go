@@ -163,10 +163,10 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		record := record.Error
 		backupCtx.recordError(record.Pathname, record.Err)
 
-		backupCtx.emitter.Emit("snapshot.backup.path.error", map[string]any{
-			"snapshot_id": snap.Header.Identifier[:],
-			"path":        record.Pathname,
-			"error":       record.Err.Error(),
+		backupCtx.emitter.Emit("path.error", map[string]any{
+			"snapshot": snap.Header.Identifier[:],
+			"path":     record.Pathname,
+			"error":    record.Err.Error(),
 		})
 
 	case record.Record != nil:
@@ -177,7 +177,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 			return
 		}
 
-		backupCtx.emitter.Emit("snapshot.backup.path", map[string]any{
+		backupCtx.emitter.Emit("path.ok", map[string]any{
 			"snapshot_id": snap.Header.Identifier[:],
 			"path":        record.Pathname,
 		})
@@ -185,10 +185,10 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		// XXX: Remove this when we introduce the Location object.
 		repoLocation, err := snap.repository.Location()
 		if err != nil {
-			backupCtx.emitter.Emit("snapshot.backup.file.error", map[string]any{
-				"snapshot_id": snap.Header.Identifier[:],
-				"path":        record.Pathname,
-				"error":       err.Error(),
+			backupCtx.emitter.Emit("path.error", map[string]any{
+				"snapshot": snap.Header.Identifier[:],
+				"path":     record.Pathname,
+				"error":    err.Error(),
 			})
 			backupCtx.recordError(record.Pathname, err)
 			return
@@ -210,22 +210,17 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 			return
 		}
 
-		backupCtx.emitter.Emit("snapshot.backup.file", map[string]any{
-			"snapshot_id": snap.Header.Identifier[:],
-			"path":        record.Pathname,
-		})
-
 		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
-			backupCtx.emitter.Emit("snapshot.backup.file.error", map[string]any{
-				"snapshot_id": snap.Header.Identifier[:],
-				"path":        record.Pathname,
-				"error":       err.Error(),
+			backupCtx.emitter.Emit("file.error", map[string]any{
+				"snapshot": snap.Header.Identifier[:],
+				"path":     record.Pathname,
+				"error":    err.Error(),
 			})
 			backupCtx.recordError(record.Pathname, err)
 		} else {
-			backupCtx.emitter.Emit("snapshot.backup.file.ok", map[string]any{
-				"snapshot_id": snap.Header.Identifier[:],
-				"path":        record.Pathname,
+			backupCtx.emitter.Emit("file.ok", map[string]any{
+				"snapshot": snap.Header.Identifier[:],
+				"path":     record.Pathname,
 			})
 		}
 
@@ -259,8 +254,8 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
-	backupCtx.emitter.Emit("snapshot.backup.importer.start", map[string]any{
-		"snapshot_id": snap.Header.Identifier[:],
+	backupCtx.emitter.Emit("importer.start", map[string]any{
+		"snapshot": snap.Header.Identifier[:],
 	})
 
 	var stats scanStats
@@ -308,11 +303,11 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 
 	backupCtx.vfsEntBatch = nil
 
-	backupCtx.emitter.Emit("snapshot.backup.importer.done", map[string]any{
-		"snapshot_id": snap.Header.Identifier[:],
-		"nfiles":      stats.nfiles,
-		"ndirs":       stats.ndirs,
-		"size":        stats.size,
+	backupCtx.emitter.Emit("importer.done", map[string]any{
+		"snapshot": snap.Header.Identifier[:],
+		"nfiles":   stats.nfiles,
+		"ndirs":    stats.ndirs,
+		"size":     stats.size,
 	})
 
 	return nil
@@ -391,8 +386,12 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	beginTime := time.Now()
 
 	emitter := snap.AppContext().Events().Emitter()
-	emitter.Emit("snapshot.backup.start", map[string]any{})
-	defer emitter.Emit("snapshot.backup.done", map[string]any{})
+	emitter.Emit("backup.start", map[string]any{
+		"snapshot": snap.Header.Identifier,
+	})
+	defer emitter.Emit("backup.done", map[string]any{
+		"snapshot": snap.Header.Identifier,
+	})
 
 	done, err := snap.Lock()
 	if err != nil {
@@ -1351,9 +1350,9 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		backupCtx.emitter.Emit("snapshot.backup.directory.ok", map[string]any{
-			"snapshot_id": snap.Header.Identifier[:],
-			"path":        dirPath,
+		backupCtx.emitter.Emit("directory.ok", map[string]any{
+			"snapshot": snap.Header.Identifier[:],
+			"path":     dirPath,
 		})
 		if dirPath == "/" {
 			if rootSummary != nil {
