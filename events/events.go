@@ -254,3 +254,14 @@ func (e *Emitter) RestoreResult(target string, size uint64, errors uint64, durat
 		"wbytes":   wBytes,
 	})
 }
+
+func (e *Emitter) CheckResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
+	e.emit("snapshot.check.result", Quiet, map[string]any{
+		"target":   target,
+		"size":     size,
+		"errors":   errors,
+		"duration": duration,
+		"rbytes":   rBytes,
+		"wbytes":   wBytes,
+	})
+}
