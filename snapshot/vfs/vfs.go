@@ -465,6 +465,38 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 	return fsc.patch(entry), nil
 }
 
+func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
+	if fsc.chroot != "" {
+		entrypath = path.Join(fsc.chroot, entrypath)
+	} else if fsc.mount != "" {
+		if !strings.HasPrefix(entrypath, fsc.mount) {
+			return nil, errors.ErrUnsupported
+		}
+		entrypath = strings.TrimPrefix(entrypath, fsc.mount)
+		entrypath = path.Clean(entrypath)
+	} else {
+		entrypath = path.Clean(entrypath)
+	}
+	if !path.IsAbs(entrypath) {
+		return nil, fs.ErrInvalid
+	}
+
+	csum, found, err := fsc.tree.Find(entrypath)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fs.ErrNotExist
+	}
+
+	entry, err := fsc.ResolveEntry(csum)
+	if err != nil {
+		return nil, err
+	}
+
+	return fsc.patch(entry), nil
+}
+
 func (fsc *Filesystem) Children(path string) (iter.Seq2[*Entry, error], error) {
 	fp, err := fsc.GetEntry(path)
 	if err != nil {

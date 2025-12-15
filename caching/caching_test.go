@@ -22,9 +22,6 @@ func TestManagerClose(t *testing.T) {
 	_, err = manager.Repository(repoID)
 	require.Equal(t, caching.ErrClosed, err)
 
-	_, err = manager.VFS(repoID, "test", "origin", false)
-	require.Equal(t, caching.ErrClosed, err)
-
 	_, err = manager.Maintenance(repoID)
 	require.Equal(t, caching.ErrClosed, err)
 }
@@ -45,26 +42,6 @@ func TestManagerRepository(t *testing.T) {
 	repoCache2, err := manager.Repository(repoID)
 	require.NoError(t, err)
 	require.Equal(t, repoCache, repoCache2)
-}
-
-func TestManagerVFS(t *testing.T) {
-	tmpDir := t.TempDir()
-	manager := caching.NewManager(pebble.Constructor(tmpDir))
-	defer manager.Close()
-
-	repoID := uuid.New()
-	scheme := "test"
-	origin := "test-origin"
-
-	// Test getting a new VFS cache
-	vfsCache, err := manager.VFS(repoID, scheme, origin, false)
-	require.NoError(t, err)
-	require.NotNil(t, vfsCache)
-
-	// Test getting the same VFS cache again (should return cached instance)
-	vfsCache2, err := manager.VFS(repoID, scheme, origin, false)
-	require.NoError(t, err)
-	require.Equal(t, vfsCache, vfsCache2)
 }
 
 func TestManagerMaintenance(t *testing.T) {
