@@ -169,11 +169,9 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 			// Leader: publish result to followers when done.
 			if isLeader {
 				defer func() {
-					restoreContext.hardlinksMutex.Lock()
 					rec.dest = leaderDest
 					rec.err = leaderErr
 					close(rec.done)
-					restoreContext.hardlinksMutex.Unlock()
 				}()
 			}
 
