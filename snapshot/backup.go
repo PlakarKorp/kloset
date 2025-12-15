@@ -57,6 +57,7 @@ type BackupContext struct {
 	flushEnd         chan bool
 	flushEnded       chan error
 	flushTerminating atomic.Bool
+	StateRefresher   func() error
 
 	indexes []*BackupIndexes // Aligned with the number of importers.
 
@@ -80,6 +81,7 @@ type BackupOptions struct {
 	NoXattr         bool
 	CleanupVFSCache bool
 	ForcedTimestamp time.Time
+	StateRefresher  func() error
 }
 
 var (
@@ -344,9 +346,17 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 				return
 			}
 
-			if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
-				return
+			// XXX: Pass down the path to the delta state db.
+			if bc.StateRefresher != nil {
+				if err := bc.StateRefresher(); err != nil {
+					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					return
+				}
+			} else {
+				if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
+					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					return
+				}
 			}
 
 			snap.repository.RemoveTransaction(oldStateId)
@@ -748,6 +758,13 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		return err
 	}
 
+	if bc.StateRefresher != nil {
+		if err := bc.StateRefresher(); err != nil {
+			snap.Logger().Warn("Failed to reload state %s", err)
+			return err
+		}
+	}
+
 	bc.emitter.BackupResult(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
@@ -837,15 +854,16 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	}
 
 	backupCtx := &BackupContext{
-		imp:         imp,
-		noXattr:     backupOpts.NoXattr,
-		scanCache:   snap.scanCache,
-		vfsEntBatch: scanLog.NewBatch(),
-		vfsCache:    snap.vfsCache,
-		flushEnd:    make(chan bool),
-		flushEnded:  make(chan error),
-		stateId:     snap.Header.Identifier,
-		scanLog:     scanLog,
+		imp:            imp,
+		noXattr:        backupOpts.NoXattr,
+		scanCache:      snap.scanCache,
+		vfsEntBatch:    scanLog.NewBatch(),
+		vfsCache:       snap.vfsCache,
+		flushEnd:       make(chan bool),
+		flushEnded:     make(chan error),
+		stateId:        snap.Header.Identifier,
+		scanLog:        scanLog,
+		StateRefresher: backupOpts.StateRefresher,
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()

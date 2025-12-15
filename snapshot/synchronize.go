@@ -127,7 +127,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	return results, nil
 }
 
-func (src *Snapshot) Synchronize(dst *Builder, commit bool) error {
+func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRefresher func() error) error {
 	if src.Header.Identity.Identifier != uuid.Nil {
 		data, err := src.repository.GetBlobBytes(resources.RT_SIGNATURE, src.Header.Identifier)
 		if err != nil {
@@ -174,6 +174,8 @@ func (src *Snapshot) Synchronize(dst *Builder, commit bool) error {
 
 	return dst.ingestSync(imp, &BackupOptions{
 		CleanupVFSCache: true,
+		StateRefresher:  stateRefresher,
+		NoCheckpoint:    !checkpoint,
 	}, commit)
 }
 

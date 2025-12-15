@@ -156,11 +156,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 						emitter.FileError(entrypath, err)
 						restoreContext.reportFailure(snap, err)
 					} else {
-						emitter.Emit("snapshot.restore.file.ok", map[string]any{
-							"snapshot_id": snap.Header.Identifier,
-							"path":        entrypath,
-							"size":        e.Size(),
-						})
+						emitter.FileOk(entrypath)
 					}
 					return nil
 				}
