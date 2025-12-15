@@ -255,7 +255,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 	}
 
 	wg := errgroup.Group{}
-	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
+	wg.SetLimit(int(snap.AppContext().MaxConcurrency) * 2)
 
 	if err := pvfs.WalkDir(pathname, snapshotRestorePath(snap, exp, base, opts, restoreContext, &wg)); err != nil {
 		wg.Wait()
