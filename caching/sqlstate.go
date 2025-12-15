@@ -11,7 +11,6 @@ import (
 	"github.com/PlakarKorp/kloset/caching/sqlite"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/google/uuid"
 )
 
 type SQLState struct {
@@ -35,9 +34,8 @@ type sqlStateBatch struct {
 	deltas []sDelta
 }
 
-func NewSQLState(repoId uuid.UUID, ro bool) (*SQLState, error) {
-	// XXX: where ?!
-	db, err := sqlite.New(fmt.Sprintf("/tmp/repostate/%s", repoId), "state.db", &sqlite.Options{
+func NewSQLState(path string, ro bool) (*SQLState, error) {
+	db, err := sqlite.New(path, "state.db", &sqlite.Options{
 		DeleteOnClose: false,
 		Compressed:    true,
 		ReadOnly:      ro,
