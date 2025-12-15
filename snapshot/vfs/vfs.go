@@ -485,35 +485,13 @@ func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-
-	var entry *Entry
 	if !found {
-		// try again, but this time resolving each component
-		// since there might be symlinks.
-		components := strings.Split(entrypath, "/")
-		wip := "/"
-		for _, c := range components {
-			new := path.Join(wip, c)
-			csum, found, err = fsc.tree.Find(new)
-			if err != nil {
-				return nil, err
-			}
-			if !found {
-				return nil, os.ErrNotExist
-			}
-
-			entry, err = fsc.ResolveEntry(csum)
-			if err != nil {
-				return nil, err
-			}
-		}
+		return nil, fs.ErrNotExist
 	}
 
-	if entry == nil {
-		entry, err = fsc.ResolveEntry(csum)
-		if err != nil {
-			return nil, err
-		}
+	entry, err := fsc.ResolveEntry(csum)
+	if err != nil {
+		return nil, err
 	}
 
 	return fsc.patch(entry), nil
