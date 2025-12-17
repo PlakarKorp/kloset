@@ -2,7 +2,6 @@ package vfs
 
 import (
 	"io/fs"
-	"strings"
 )
 
 type WalkDirFunc func(path string, entry *Entry, err error) error
@@ -39,10 +38,6 @@ func (fsc *Filesystem) walkdir(entry *Entry, fn WalkDirFunc) error {
 }
 
 func (fsc *Filesystem) WalkDir(root string, fn WalkDirFunc) error {
-	if !strings.HasPrefix(root, "/") {
-		root = "/" + root
-	}
-
 	entry, err := fsc.GetEntry(root)
 	if err != nil {
 		return err
