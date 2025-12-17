@@ -384,6 +384,10 @@ func (fsc *Filesystem) Pathnames() iter.Seq2[string, error] {
 }
 
 func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
+	if !strings.HasPrefix(entrypath, "/") {
+		entrypath = "/" + entrypath
+	}
+
 	if fsc.chroot != "" {
 		entrypath = path.Join(fsc.chroot, entrypath)
 	} else if fsc.mount != "" {
@@ -466,6 +470,10 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 }
 
 func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
+	if !strings.HasPrefix(entrypath, "/") {
+		entrypath = "/" + entrypath
+	}
+
 	if fsc.chroot != "" {
 		entrypath = path.Join(fsc.chroot, entrypath)
 	} else if fsc.mount != "" {
