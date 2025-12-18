@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
-	"github.com/PlakarKorp/kloset/config"
 	"github.com/PlakarKorp/kloset/encryption/keypair"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/logging"
@@ -19,7 +18,6 @@ type KContext struct {
 
 	cache  *caching.Manager `msgpack:"-"`
 	logger *logging.Logger  `msgpack:"-"`
-	Config *config.Config   `msgpack:"-"`
 
 	Context context.Context         `msgpack:"-"`
 	Cancel  context.CancelCauseFunc `msgpack:"-"`
