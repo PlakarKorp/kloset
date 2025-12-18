@@ -195,6 +195,9 @@ func (fsc *Filesystem) patch(entry *Entry) *Entry {
 
 	if fsc.chroot != "" {
 		newpath = strings.TrimPrefix(entry.Path(), fsc.chroot)
+		if newpath == "" {
+			newpath = "/"
+		}
 	}
 	if fsc.mount != "" {
 		newpath = path.Join(fsc.mount, entry.Path())
