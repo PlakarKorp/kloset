@@ -11,6 +11,7 @@ import (
 	"iter"
 	"math/big"
 	"math/bits"
+	"path"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -198,6 +199,14 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		storageSize:      -1,
 		storageSizeDirty: true,
 	}
+
+	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), true)
+	if err != nil {
+		return nil, err
+	}
+
+	r.state = state.NewLocalState(cacheInstance)
+
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
 		hasher := r.GetMACHasher()
 		hasher.Reset()
@@ -207,8 +216,14 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 	return r, nil
 }
 
+// XXX: Small layer violation, but this helps us steer away from the caching
+// Manager. Trust the process (TM)
+func (r *Repository) stateCacheDir() string {
+	return path.Join(r.AppContext().CacheDir, caching.CACHE_VERSION, "store", r.Configuration().RepositoryID.String())
+}
+
 func (r *Repository) RebuildState() error {
-	cacheInstance, err := r.AppContext().GetCache().Repository(r.Configuration().RepositoryID)
+	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), false)
 	if err != nil {
 		return err
 	}

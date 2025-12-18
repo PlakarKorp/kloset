@@ -24,6 +24,7 @@ type Options struct {
 	DeleteOnClose bool
 	Compressed    bool
 	ReadOnly      bool
+	Shared        bool
 }
 
 func makeDefaultOptions() *Options {
@@ -62,6 +63,18 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 				if err != nil {
 					return nil, err
 				}
+
+				// A bit ugly but we gotta exec at least something so that the
+				// file is created on disk.
+				pragmas := []string{
+					"PRAGMA journal_mode = WAL;", // one-writer WAL, good for cache
+				}
+
+				for _, p := range pragmas {
+					if _, err := tmpDb.Exec(p); err != nil {
+						return nil, fmt.Errorf("pragma %q failed: %w", p, err)
+					}
+				}
 				tmpDb.Close()
 			}
 
@@ -82,9 +95,12 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 		"PRAGMA synchronous = OFF;",  // speed; scanlog is scratch
 		"PRAGMA temp_store = MEMORY;",
 		"PRAGMA mmap_size = 0;",
-		"PRAGMA cache_size = -20000;",      // ~20MB
-		"PRAGMA locking_mode = EXCLUSIVE;", // single-process owner
+		"PRAGMA cache_size = -20000;", // ~20MB
 		"PRAGMA busy_timeout = 5000;",
+	}
+
+	if !opts.Shared {
+		pragmas = append(pragmas, "PRAGMA locking_mode = EXCLUSIVE;")
 	}
 
 	for _, p := range pragmas {
