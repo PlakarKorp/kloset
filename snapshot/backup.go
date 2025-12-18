@@ -769,13 +769,6 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
 
-	if bc.StateRefresher != nil {
-		if err := bc.StateRefresher(); err != nil {
-			snap.Logger().Warn("Failed to reload state %s", err)
-			return err
-		}
-	}
-
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
 }
