@@ -713,7 +713,7 @@ func (ls *LocalState) DelDelta(Type resources.Type, blobMAC, packfileMAC objects
 	return ls.cache.DelDelta(Type, blobMAC, packfileMAC)
 }
 
-func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool {
+func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) (objects.MAC, bool) {
 	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
 		de, err := DeltaEntryFromBytes(buf)
 
@@ -728,11 +728,11 @@ func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool 
 
 		deleted, _ := ls.HasDeletedResource(resources.RT_PACKFILE, de.Location.Packfile)
 		if ok && !deleted {
-			return true
+			return de.Location.Packfile, true
 		}
 	}
 
-	return false
+	return objects.NilMac, false
 }
 
 func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC) (Location, bool, error) {

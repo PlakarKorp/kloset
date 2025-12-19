@@ -1031,7 +1031,8 @@ func (r *Repository) BlobExists(Type resources.Type, mac objects.MAC) bool {
 		r.Logger().Trace("repository", "BlobExists(%s, %x): %s", Type, mac, time.Since(t0))
 	}()
 
-	return r.state.BlobExists(Type, mac)
+	_, exists := r.state.BlobExists(Type, mac)
+	return exists
 }
 
 // Removes the provided blob from our state, making it unreachable

@@ -908,12 +908,16 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 	}
 	record.FileInfo = entry.FileInfo
 
+	// resolve MAC for object and mark Packfile
+
 	if record.FileInfo.Mode()&os.ModeSymlink != 0 {
 		return &objects.CachedPath{
 			MAC:      entry.MAC,
 			FileInfo: entry.FileInfo,
 		}, nil
 	}
+
+	// resolve MAC for chunks and mark Packfile
 
 	return &objects.CachedPath{
 		MAC:         entry.MAC,

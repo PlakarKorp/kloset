@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"fmt"
 	"io"
 	"sync"
 	"time"
@@ -23,6 +24,9 @@ type RepositoryWriter struct {
 
 	PackerManager  packer.PackerManagerInt
 	currentStateID objects.MAC
+
+	touchedPackfilesMtx sync.Mutex
+	touchedPackfiles    map[objects.MAC]struct{}
 }
 
 type RepositoryType int
@@ -43,8 +47,9 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	rw := RepositoryWriter{
 		Repository: r,
 
-		deltaState:     make(map[objects.MAC]*state.LocalState),
-		currentStateID: id,
+		deltaState:       make(map[objects.MAC]*state.LocalState),
+		currentStateID:   id,
+		touchedPackfiles: make(map[objects.MAC]struct{}),
 	}
 	rw.deltaState[rw.currentStateID] = r.state.Derive(cache)
 
@@ -96,6 +101,12 @@ func (r *RepositoryWriter) CommitTransaction(oldStateID objects.MAC) error {
 		r.Logger().Trace("repository", "CommitTransaction(): %s", time.Since(t0))
 	}()
 
+	r.touchedPackfilesMtx.Lock()
+	for pfileMAC := range r.touchedPackfiles {
+		fmt.Printf("Touched packfile: %x\n", pfileMAC)
+	}
+	r.touchedPackfilesMtx.Unlock()
+
 	err := r.internalCommit(r.deltaState[oldStateID], oldStateID)
 	r.transactionMtx.Lock()
 	r.deltaState = nil
@@ -143,14 +154,26 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 
 	r.transactionMtx.RLock()
 	for _, ds := range r.deltaState {
-		if ds.BlobExists(Type, mac) {
+		packfileMAC, exists := ds.BlobExists(Type, mac)
+		if exists {
 			r.transactionMtx.RUnlock()
+
+			r.touchedPackfilesMtx.Lock()
+			r.touchedPackfiles[packfileMAC] = struct{}{}
+			r.touchedPackfilesMtx.Unlock()
+
 			return true
 		}
 	}
 	r.transactionMtx.RUnlock()
 
-	return r.state.BlobExists(Type, mac)
+	packfileMAC, exists := r.state.BlobExists(Type, mac)
+	if exists {
+		r.touchedPackfilesMtx.Lock()
+		r.touchedPackfiles[packfileMAC] = struct{}{}
+		r.touchedPackfilesMtx.Unlock()
+	}
+	return exists
 }
 
 func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
@@ -228,6 +251,10 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		return err
 	}
 
+	r.touchedPackfilesMtx.Lock()
+	r.touchedPackfiles[mac] = struct{}{}
+	r.touchedPackfilesMtx.Unlock()
+
 	nbytes, err := r.store.PutPackfile(r.appContext, mac, rd)
 	r.wBytes.Add(nbytes)
 	if err != nil {
@@ -278,6 +305,10 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 	if err != nil {
 		return err
 	}
+
+	r.touchedPackfilesMtx.Lock()
+	r.touchedPackfiles[mac] = struct{}{}
+	r.touchedPackfilesMtx.Unlock()
 
 	nbytes, err := r.store.PutPackfile(r.appContext, mac, rd)
 	r.wBytes.Add(nbytes)
