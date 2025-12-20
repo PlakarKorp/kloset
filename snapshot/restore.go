@@ -188,6 +188,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				if isLeader {
 					leaderErr = err
 				}
+
 				restoreContext.reportFailure(snap, err)
 			} else {
 				if !opts.SkipPermissions {
