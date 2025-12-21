@@ -207,11 +207,6 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				if isLeader {
 					leaderDest = dest
 				}
-<<<<<<< HEAD
-=======
-				emitter.FileOk(entrypath)
-				restoreContext.size.Add(uint64(e.Size()))
->>>>>>> 16c52b2c (change event and align restore with backup)
 			}
 			return nil
 		})
