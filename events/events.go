@@ -58,6 +58,7 @@ type Event struct {
 	Repository uuid.UUID      `msgpack:"repository"`
 	Snapshot   objects.MAC    `msgpack:"snapshot"`
 	Level      string         `msgpack:"level"`
+	Workflow   string         `msgpack:"workflow"`
 	Job        uuid.UUID      `msgpack:"job"`
 	Type       string         `msgpack:"type"`
 	Data       map[string]any `msgpack:"kv,omitempty"`
@@ -95,7 +96,7 @@ func (e *Emitter) emit(typ, level string, kv map[string]any) {
 	}
 	e.bus.c <- &Event{
 		Version: 1, Timestamp: time.Now().UTC(),
-		Level: level, Type: typ, Repository: e.repository, Snapshot: e.snapshot, Job: e.job, Data: kv,
+		Level: level, Type: typ, Repository: e.repository, Snapshot: e.snapshot, Workflow: e.workflow, Job: e.job, Data: kv,
 	}
 }
 
@@ -237,30 +238,8 @@ func (e *Emitter) ChunkError(chunk objects.MAC, err error) {
 
 /////
 
-func (e *Emitter) BackupResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
-	e.emit("snapshot.backup.result", Quiet, map[string]any{
-		"target":   target,
-		"size":     size,
-		"errors":   errors,
-		"duration": duration,
-		"rbytes":   rBytes,
-		"wbytes":   wBytes,
-	})
-}
-
-func (e *Emitter) RestoreResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
-	e.emit("snapshot.restore.result", Quiet, map[string]any{
-		"target":   target,
-		"size":     size,
-		"errors":   errors,
-		"duration": duration,
-		"rbytes":   rBytes,
-		"wbytes":   wBytes,
-	})
-}
-
-func (e *Emitter) CheckResult(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
-	e.emit("snapshot.check.result", Quiet, map[string]any{
+func (e *Emitter) Result(target string, size uint64, errors uint64, duration time.Duration, rBytes int64, wBytes int64) {
+	e.emit("result", Quiet, map[string]any{
 		"target":   target,
 		"size":     size,
 		"errors":   errors,

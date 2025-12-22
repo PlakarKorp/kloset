@@ -194,6 +194,8 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	emitter := snap.Emitter("check")
 	defer emitter.Close()
 
+	t0 := time.Now()
+
 	target, err := snap.repository.Location()
 	if err != nil {
 		return err
@@ -217,6 +219,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 		if len(vfsStatus) != 0 {
 			return fmt.Errorf("%s", string(vfsStatus))
 		}
+		emitter.Result(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytesSaved, wBytesSaved)
 		return nil
 	}
 
@@ -227,8 +230,6 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 
 	wg := new(errgroup.Group)
 	wg.SetLimit(int(snap.AppContext().MaxConcurrency))
-
-	t0 := time.Now()
 
 	var failed bool
 	err = fs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
@@ -258,23 +259,23 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
 		wg.Wait()
 
-		emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
+		emitter.Result(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 		return err
 	}
 	if err := wg.Wait(); err != nil {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(err.Error()))
-		emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
+		emitter.Result(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 		return err
 	}
 	if failed {
 		snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root,
 			[]byte(ErrRootCorrupted.Error()))
-		emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
+		emitter.Result(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 		return ErrRootCorrupted
 	}
 
 	snap.checkCache.PutVFSStatus(snap.Header.GetSource(0).VFS.Root, []byte(""))
-	emitter.CheckResult(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
+	emitter.Result(target, checkCtx.size.Load(), checkCtx.errors.Load(), time.Since(t0), rBytes, wBytes)
 
 	return nil
 }

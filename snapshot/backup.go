@@ -760,7 +760,7 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		return err
 	}
 
-	bc.emitter.BackupResult(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
+	bc.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
