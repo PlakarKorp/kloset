@@ -49,9 +49,6 @@ type KContext struct {
 
 	Identity uuid.UUID
 	Keypair  *keypair.KeyPair
-
-	//storeIOTracker      *iostat.IOTracker
-	//repositoryIOTracker *iostat.IOTracker
 }
 
 func NewKContext() *KContext {
