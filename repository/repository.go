@@ -754,6 +754,8 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 		return nil, err
 	}
 
+	r.rBytes.Add(int64(len(data)))
+
 	// discard the first offsetDelta bytes and last lengthDelta bytes
 	return data[offsetDelta : length+uint32(offsetDelta)], nil
 }
@@ -913,8 +915,6 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 					}
 				}
 
-				r.rBytes.Add(int64(size))
-
 				currentOffset := 0
 				for _, l := range currChks {
 					chunkData := data[currentOffset : currentOffset+int(l.Length)]
@@ -962,8 +962,6 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 					return
 				}
 			}
-
-			r.rBytes.Add(int64(size))
 
 			currentOffset := 0
 			for _, l := range currChks {
