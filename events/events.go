@@ -82,7 +82,11 @@ func newDummyEmitter() *Emitter {
 }
 
 func newEmitter(eb *EventsBUS, repository uuid.UUID, snapshot objects.MAC, job uuid.UUID, workflow string) *Emitter {
-	return &Emitter{bus: eb, repository: repository, snapshot: snapshot, job: job, workflow: workflow}
+	e := &Emitter{bus: eb, repository: repository, snapshot: snapshot, job: job, workflow: workflow}
+	e.emit("workflow.start", Info, map[string]any{
+		"workflow": e.workflow,
+	})
+	return e
 }
 
 func (e *Emitter) emit(typ, level string, kv map[string]any) {
