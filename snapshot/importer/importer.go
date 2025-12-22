@@ -77,6 +77,7 @@ type Options struct {
 	Architecture    string
 	CWD             string
 	MaxConcurrency  int
+	Excludes        []string
 
 	Stdin  io.Reader `msgpack:"-"`
 	Stdout io.Writer `msgpack:"-"`
