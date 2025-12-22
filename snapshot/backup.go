@@ -239,7 +239,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
-	backupCtx.emitter.Info("importer.start", map[string]any{})
+	backupCtx.emitter.Info("snapshot.import.start", map[string]any{})
 
 	var stats scanStats
 	for i, cker := range ckers {
@@ -286,7 +286,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 
 	backupCtx.vfsEntBatch = nil
 
-	backupCtx.emitter.Info("importer.done", map[string]any{
+	backupCtx.emitter.Info("snapshot.import.done", map[string]any{
 		"nfiles": stats.nfiles,
 		"ndirs":  stats.ndirs,
 		"size":   stats.size,
@@ -691,6 +691,8 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 }
 
 func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
+	bc.emitter.Info("snapshot.commit.start", map[string]any{})
+	defer bc.emitter.Info("snapshot.commit.end", map[string]any{})
 	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
 	// Maybe this could be stopped earlier.
 
@@ -1053,9 +1055,6 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 }
 
 func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
-	if err := snap.relinkNodes(backupCtx); err != nil {
-		return nil, nil, nil, err
-	}
 
 	vfsHeader, summary, err := snap.persistVFS(backupCtx)
 	if err != nil {
@@ -1254,6 +1253,13 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
+	backupCtx.emitter.Info("snapshot.vfs.start", map[string]any{})
+	defer backupCtx.emitter.Info("snapshot.vfs.end", map[string]any{})
+
+	if err := snap.relinkNodes(backupCtx); err != nil {
+		return nil, nil, err
+	}
+
 	errcsum, err := persistMACIndex(snap, backupCtx.indexes[0].erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
 	if err != nil {
@@ -1400,6 +1406,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 }
 
 func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
+	backupCtx.emitter.Info("snapshot.index.start", map[string]any{})
+	defer backupCtx.emitter.Info("snapshot.index.end", map[string]any{})
 	ctmac, err := persistIndex(snap, backupCtx.indexes[0].ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
