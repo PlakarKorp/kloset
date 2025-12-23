@@ -95,7 +95,7 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 			types := []string{}
 			origins := []string{}
 			sequences := []uuid.UUID{}
-			parents := []objects.MAC{}
+			parents := []string{}
 			for _, src := range h.Sources {
 				roots = append(roots, src.Importer.Directory)
 				types = append(types, src.Importer.Type)
