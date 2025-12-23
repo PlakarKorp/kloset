@@ -22,6 +22,7 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/encryption"
+	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -216,6 +217,10 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 	})
 
 	return r, nil
+}
+
+func (r *Repository) Emitter(workflow string) *events.Emitter {
+	return r.AppContext().Events().NewRepositoryEmitter(r.Configuration().RepositoryID, workflow)
 }
 
 // XXX: Small layer violation, but this helps us steer away from the caching

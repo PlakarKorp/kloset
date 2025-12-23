@@ -286,7 +286,7 @@ func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname strin
 		return err
 	}
 
-	emitter.RestoreResult(target, restoreContext.size.Load(), restoreContext.errors.Load(), time.Since(t0), rBytes, wBytes)
+	emitter.Result(target, restoreContext.size.Load(), restoreContext.errors.Load(), time.Since(t0), rBytes, wBytes)
 
 	return err
 }
