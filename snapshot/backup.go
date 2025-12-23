@@ -30,7 +30,7 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type BackupIndexes struct {
+type BuilderIndexes struct {
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
@@ -59,7 +59,7 @@ type BuilderContext struct {
 	flushTerminating atomic.Bool
 	StateRefresher   func() error
 
-	indexes []*BackupIndexes // Aligned with the number of importers.
+	indexes []*BuilderIndexes // Aligned with the number of importers.
 
 	emitter *events.Emitter
 
@@ -766,7 +766,7 @@ func (snap *Builder) Commit(bc *BuilderContext, commit bool) error {
 	return nil
 }
 
-func (bi *BackupIndexes) Close(log *logging.Logger) {
+func (bi *BuilderIndexes) Close(log *logging.Logger) {
 	// We need to protect those behind nil checks because we might be cleaning
 	// up a half initialized backupIndex.
 	if bi.erridx != nil {
@@ -800,8 +800,8 @@ func (snap *Builder) tmpCacheDir() string {
 	return path.Join(snap.AppContext().CacheDir, caching.CACHE_VERSION, fmt.Sprintf("dbstorer-%x", snap.Header.Identifier))
 }
 
-func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
-	bi := &BackupIndexes{}
+func (snap *Builder) makeBuilderIndexes() (*BuilderIndexes, error) {
+	bi := &BuilderIndexes{}
 
 	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
 	if err != nil {
@@ -866,7 +866,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
 
-	if bi, err := snap.makeBackupIndexes(); err != nil {
+	if bi, err := snap.makeBuilderIndexes(); err != nil {
 		return nil, err
 	} else {
 		backupCtx.indexes = append(backupCtx.indexes, bi)
