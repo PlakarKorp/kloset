@@ -20,6 +20,18 @@ import (
 	"github.com/google/uuid"
 )
 
+type BuilderOptions struct {
+	Name            string
+	Tags            []string
+	Excludes        []string
+	NoCheckpoint    bool
+	NoCommit        bool
+	NoXattr         bool
+	CleanupVFSCache bool
+	ForcedTimestamp time.Time
+	StateRefresher  func() error
+}
+
 type Builder struct {
 	repository *repository.RepositoryWriter
 

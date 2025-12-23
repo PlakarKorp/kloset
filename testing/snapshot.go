@@ -147,7 +147,7 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 		imp.(*MockImporter).SetFiles(files)
 	}
 
-	err = builder.Backup(imp, &snapshot.BackupOptions{
+	err = builder.Backup(imp, &snapshot.BuilderOptions{
 		Name:     o.name,
 		Excludes: o.excludes,
 	})

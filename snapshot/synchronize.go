@@ -172,14 +172,14 @@ func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRef
 	dst.Header.Tags = src.Header.Tags
 	dst.Header.Context = src.Header.Context
 
-	return dst.ingestSync(imp, &BackupOptions{
+	return dst.ingestSync(imp, &BuilderOptions{
 		CleanupVFSCache: true,
 		StateRefresher:  stateRefresher,
 		NoCheckpoint:    !checkpoint,
 	}, commit)
 }
 
-func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commit bool) error {
+func (snap *Builder) ingestSync(imp *syncImporter, options *BuilderOptions, commit bool) error {
 	done, err := snap.Lock()
 	if err != nil {
 		snap.repository.PackerManager.Wait()

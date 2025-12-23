@@ -72,18 +72,6 @@ type scanStats struct {
 	size   uint64
 }
 
-type BackupOptions struct {
-	Name            string
-	Tags            []string
-	Excludes        []string
-	NoCheckpoint    bool
-	NoCommit        bool
-	NoXattr         bool
-	CleanupVFSCache bool
-	ForcedTimestamp time.Time
-	StateRefresher  func() error
-}
-
 var (
 	ErrOutOfRange = errors.New("out of range")
 )
@@ -372,7 +360,7 @@ func (snap *Builder) flushDeltaState(bc *BuilderContext) {
 	}
 }
 
-func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error {
+func (snap *Builder) Backup(imp importer.Importer, options *BuilderOptions) error {
 	beginTime := time.Now()
 
 	emitter := snap.Emitter("backup")
@@ -842,7 +830,7 @@ func (snap *Builder) makeBuilderIndexes() (*BuilderIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BuilderContext, error) {
+func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOptions) (*BuilderContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
