@@ -100,7 +100,8 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 				roots = append(roots, src.Importer.Directory)
 				types = append(types, src.Importer.Type)
 				origins = append(origins, src.Importer.Origin)
-
+				sequences = append(sequences, h.Sequence)
+				parents = append(parents, hex.EncodeToString(h.Parent[:]))
 			}
 
 			it := Item{
