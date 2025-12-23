@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/google/uuid"
 )
 
 type SortOrder int
@@ -36,6 +37,8 @@ type ItemFilters struct {
 	Types       []string
 	Origins     []string
 	Roots       []string
+	Sequences   []uuid.UUID
+	Parents     []objects.MAC
 }
 
 func (it *ItemFilters) HasTag(tag string) bool {
@@ -86,6 +89,30 @@ func (it ItemFilters) HasRoot(root string) bool {
 	return false
 }
 
+func (it ItemFilters) HasSequence(seq uuid.UUID) bool {
+	if seq == uuid.Nil {
+		return true
+	}
+	for _, t := range it.Sequences {
+		if t == seq {
+			return true
+		}
+	}
+	return false
+}
+
+func (it ItemFilters) HasParent(parent objects.MAC) bool {
+	if parent == objects.NilMac {
+		return true
+	}
+	for _, t := range it.Parents {
+		if t == parent {
+			return true
+		}
+	}
+	return false
+}
+
 type Item struct {
 	ItemID    objects.MAC
 	Timestamp time.Time
@@ -113,11 +140,13 @@ type LocateFilters struct {
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	IgnoreTags  []string `json:"ignore_tags,omitempty" yaml:"ignore_tags,omitempty"`
 
-	Latest  bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
-	IDs     []string `json:"ids,omitempty" yaml:"ids,omitempty"`
-	Types   []string `json:"types,omitempty" yaml:"types,omitempty"`
-	Origins []string `json:"origins,omitempty" yaml:"origins,omitempty"`
-	Roots   []string `json:"roots,omitempty" yaml:"roots,omitempty"`
+	Latest    bool          `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
+	IDs       []string      `json:"ids,omitempty" yaml:"ids,omitempty"`
+	Types     []string      `json:"types,omitempty" yaml:"types,omitempty"`
+	Origins   []string      `json:"origins,omitempty" yaml:"origins,omitempty"`
+	Roots     []string      `json:"roots,omitempty" yaml:"roots,omitempty"`
+	Sequences []uuid.UUID   `json:"sequences,omitempty" yaml:"sequences,omitempty"`
+	Parents   []objects.MAC `json:"parents,omitempty" yaml:"parents,omitempty"`
 }
 
 type LocatePeriods struct {
@@ -280,6 +309,16 @@ func (lo *LocateOptions) Matches(it Item) bool {
 	}
 	for _, root := range lo.Filters.Roots {
 		if !it.Filters.HasRoot(root) {
+			return false
+		}
+	}
+	for _, seq := range lo.Filters.Sequences {
+		if !it.Filters.HasSequence(seq) {
+			return false
+		}
+	}
+	for _, parent := range lo.Filters.Parents {
+		if !it.Filters.HasParent(parent) {
 			return false
 		}
 	}
