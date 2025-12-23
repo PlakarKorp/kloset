@@ -3,6 +3,8 @@ package locate
 import (
 	"flag"
 	"strings"
+
+	"github.com/google/uuid"
 )
 
 func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
@@ -37,6 +39,32 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 					po.Filters.IgnoreTags = append(po.Filters.IgnoreTags, t[1:])
 				} else {
 					po.Filters.Tags = append(po.Filters.Tags, t)
+				}
+			}
+			return nil
+		})
+
+	flags.Func("parent", "filter by parent (repeat).",
+		func(v string) error {
+			for _, t := range strings.Split(v, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					po.Filters.Roots = append(po.Filters.Roots, t)
+				}
+			}
+			return nil
+		})
+
+	flags.Func("seq", "filter by sequence (repeat).",
+		func(v string) error {
+			for _, t := range strings.Split(v, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					seq, err := uuid.Parse(t)
+					if err != nil {
+						return err
+					}
+					po.Filters.Sequences = append(po.Filters.Sequences, seq)
 				}
 			}
 			return nil

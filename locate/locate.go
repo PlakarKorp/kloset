@@ -38,7 +38,7 @@ type ItemFilters struct {
 	Origins     []string
 	Roots       []string
 	Sequences   []uuid.UUID
-	Parents     []objects.MAC
+	Parents     []string
 }
 
 func (it *ItemFilters) HasTag(tag string) bool {
@@ -101,12 +101,12 @@ func (it ItemFilters) HasSequence(seq uuid.UUID) bool {
 	return false
 }
 
-func (it ItemFilters) HasParent(parent objects.MAC) bool {
-	if parent == objects.NilMac {
+func (it ItemFilters) HasParent(parent string) bool {
+	if parent == "" {
 		return true
 	}
 	for _, t := range it.Parents {
-		if t == parent {
+		if strings.HasPrefix(t, parent) {
 			return true
 		}
 	}
@@ -140,13 +140,13 @@ type LocateFilters struct {
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	IgnoreTags  []string `json:"ignore_tags,omitempty" yaml:"ignore_tags,omitempty"`
 
-	Latest    bool          `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
-	IDs       []string      `json:"ids,omitempty" yaml:"ids,omitempty"`
-	Types     []string      `json:"types,omitempty" yaml:"types,omitempty"`
-	Origins   []string      `json:"origins,omitempty" yaml:"origins,omitempty"`
-	Roots     []string      `json:"roots,omitempty" yaml:"roots,omitempty"`
-	Sequences []uuid.UUID   `json:"sequences,omitempty" yaml:"sequences,omitempty"`
-	Parents   []objects.MAC `json:"parents,omitempty" yaml:"parents,omitempty"`
+	Latest    bool        `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
+	IDs       []string    `json:"ids,omitempty" yaml:"ids,omitempty"`
+	Types     []string    `json:"types,omitempty" yaml:"types,omitempty"`
+	Origins   []string    `json:"origins,omitempty" yaml:"origins,omitempty"`
+	Roots     []string    `json:"roots,omitempty" yaml:"roots,omitempty"`
+	Sequences []uuid.UUID `json:"sequences,omitempty" yaml:"sequences,omitempty"`
+	Parents   []string    `json:"parents,omitempty" yaml:"parents,omitempty"`
 }
 
 type LocatePeriods struct {
