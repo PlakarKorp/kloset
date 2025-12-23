@@ -248,3 +248,15 @@ func (e *Emitter) Result(target string, size uint64, errors uint64, duration tim
 		"wbytes":   wBytes,
 	})
 }
+
+/////
+
+func (e *Emitter) FilesystemSummary(fileCount uint64, dirCount uint64, symlinkCount uint64, xattrCount uint64, totalSize uint64) {
+	e.emit("fs.summary", Info, map[string]any{
+		"files":       fileCount,
+		"directories": dirCount,
+		"symlinks":    symlinkCount,
+		"xattrs":      xattrCount,
+		"size":        totalSize,
+	})
+}
