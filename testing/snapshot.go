@@ -132,7 +132,10 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	}
 
 	// create a snapshot
-	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac)
+	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+		Name:     o.name,
+		Excludes: o.excludes,
+	})
 	require.NoError(t, err)
 	require.NotNil(t, builder)
 
@@ -147,10 +150,7 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 		imp.(*MockImporter).SetFiles(files)
 	}
 
-	err = builder.Backup(imp, &snapshot.BuilderOptions{
-		Name:     o.name,
-		Excludes: o.excludes,
-	})
+	err = builder.Backup(imp)
 	require.NoError(t, err)
 
 	err = builder.Repository().RebuildState()

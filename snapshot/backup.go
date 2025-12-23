@@ -360,18 +360,11 @@ func (snap *Builder) flushDeltaState(bc *BuilderContext) {
 	}
 }
 
-func (snap *Builder) Backup(imp importer.Importer, options *BuilderOptions) error {
+func (snap *Builder) Backup(imp importer.Importer) error {
 	beginTime := time.Now()
 
 	emitter := snap.Emitter("backup")
 	defer emitter.Close()
-
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-	defer snap.Unlock(done)
 
 	origin, err := imp.Origin(snap.AppContext())
 	if err != nil {
@@ -391,23 +384,17 @@ func (snap *Builder) Backup(imp importer.Importer, options *BuilderOptions) erro
 		return err
 	}
 
-	if !options.ForcedTimestamp.IsZero() {
-		if options.ForcedTimestamp.Before(time.Now()) {
-			snap.Header.Timestamp = options.ForcedTimestamp.UTC()
-		}
-	}
-
 	snap.Header.GetSource(0).Importer.Origin = origin
 	snap.Header.GetSource(0).Importer.Type = typ
-	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
+	snap.Header.Tags = append(snap.Header.Tags, snap.builderOptions.Tags...)
 
-	if options.Name == "" {
+	if snap.builderOptions.Name == "" {
 		snap.Header.Name = root + " @ " + snap.Header.GetSource(0).Importer.Origin
 	} else {
-		snap.Header.Name = options.Name
+		snap.Header.Name = snap.builderOptions.Name
 	}
 
-	backupCtx, err := snap.prepareBackup(imp, options)
+	backupCtx, err := snap.prepareBackup(imp)
 	if backupCtx != nil {
 		for _, bi := range backupCtx.indexes {
 			defer bi.Close(snap.Logger())
@@ -423,7 +410,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BuilderOptions) erro
 	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
-	if !options.NoCheckpoint {
+	if !snap.builderOptions.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState(backupCtx)
 	}
@@ -459,7 +446,7 @@ func (snap *Builder) Backup(imp importer.Importer, options *BuilderOptions) erro
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
 
-	return snap.Commit(backupCtx, !options.NoCommit)
+	return snap.Commit(backupCtx)
 }
 
 func entropy(data []byte) (float64, [256]float64) {
@@ -678,7 +665,9 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	return object, objectMAC, totalDataSize, nil
 }
 
-func (snap *Builder) Commit(bc *BuilderContext, commit bool) error {
+func (snap *Builder) Commit(bc *BuilderContext) error {
+	commit := !snap.builderOptions.NoCommit
+
 	bc.emitter.Info("snapshot.commit.start", map[string]any{})
 	defer bc.emitter.Info("snapshot.commit.end", map[string]any{})
 	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
@@ -830,7 +819,7 @@ func (snap *Builder) makeBuilderIndexes() (*BuilderIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOptions) (*BuilderContext, error) {
+func (snap *Builder) prepareBackup(imp importer.Importer) (*BuilderContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
@@ -838,7 +827,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOpt
 
 	backupCtx := &BuilderContext{
 		imp:            imp,
-		noXattr:        backupOpts.NoXattr,
+		noXattr:        snap.builderOptions.NoXattr,
 		scanCache:      snap.scanCache,
 		vfsEntBatch:    scanLog.NewBatch(),
 		vfsCache:       snap.vfsCache,
@@ -846,11 +835,11 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOpt
 		flushEnded:     make(chan error),
 		stateId:        snap.Header.Identifier,
 		scanLog:        scanLog,
-		StateRefresher: backupOpts.StateRefresher,
+		StateRefresher: snap.builderOptions.StateRefresher,
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()
-	if err := backupCtx.excludes.AddRulesFromArray(backupOpts.Excludes); err != nil {
+	if err := backupCtx.excludes.AddRulesFromArray(snap.builderOptions.Excludes); err != nil {
 		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
 

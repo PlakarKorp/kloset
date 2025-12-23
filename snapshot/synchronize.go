@@ -127,7 +127,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	return results, nil
 }
 
-func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRefresher func() error) error {
+func (src *Snapshot) Synchronize(dst *Builder) error {
 	if src.Header.Identity.Identifier != uuid.Nil {
 		data, err := src.repository.GetBlobBytes(resources.RT_SIGNATURE, src.Header.Identifier)
 		if err != nil {
@@ -172,14 +172,10 @@ func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRef
 	dst.Header.Tags = src.Header.Tags
 	dst.Header.Context = src.Header.Context
 
-	return dst.ingestSync(imp, &BuilderOptions{
-		CleanupVFSCache: true,
-		StateRefresher:  stateRefresher,
-		NoCheckpoint:    !checkpoint,
-	}, commit)
+	return dst.ingestSync(imp)
 }
 
-func (snap *Builder) ingestSync(imp *syncImporter, options *BuilderOptions, commit bool) error {
+func (snap *Builder) ingestSync(imp *syncImporter) error {
 	done, err := snap.Lock()
 	if err != nil {
 		snap.repository.PackerManager.Wait()
@@ -190,7 +186,7 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BuilderOptions, comm
 	emitter := snap.Emitter("sync")
 	defer emitter.Close()
 
-	backupCtx, err := snap.prepareBackup(imp, options)
+	backupCtx, err := snap.prepareBackup(imp)
 	for _, bi := range backupCtx.indexes {
 		defer bi.Close(snap.Logger())
 	}
@@ -204,7 +200,7 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BuilderOptions, comm
 	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
-	if !options.NoCheckpoint {
+	if !snap.builderOptions.NoCheckpoint {
 		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState(backupCtx)
 	}
@@ -250,5 +246,5 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BuilderOptions, comm
 		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
-	return snap.Commit(backupCtx, commit)
+	return snap.Commit(backupCtx)
 }

@@ -35,19 +35,23 @@ type BuilderOptions struct {
 type Builder struct {
 	repository *repository.RepositoryWriter
 
+	builderOptions *BuilderOptions
+
 	//This is protecting the above two pointers, not their underlying objects
 	scanCache  *caching.ScanCache
 	deltaCache *caching.ScanCache
 	vfsCache   *vfs.Filesystem
 
 	Header *header.Header
+
+	done chan bool
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
 	return snap.AppContext().Events().NewSnapshotEmitter(snap.repository.Configuration().RepositoryID, snap.Header.Identifier, workflow)
 }
 
-func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC) (*Builder, error) {
+func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC, builderOpts *BuilderOptions) (*Builder, error) {
 	identifier := snapId
 	if identifier == objects.NilMac {
 		identifier = objects.RandomMAC()
@@ -59,6 +63,8 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	}
 
 	snap := &Builder{
+		builderOptions: builderOpts,
+
 		scanCache:  scanCache,
 		deltaCache: scanCache,
 
@@ -82,6 +88,11 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
+
+	if err := snap.setup(); err != nil {
+		return nil, err
+	}
+
 	return snap, nil
 }
 
@@ -89,7 +100,7 @@ func (snap *Builder) WithVFSCache(vfsCache *vfs.Filesystem) {
 	snap.vfsCache = vfsCache
 }
 
-func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, error) {
+func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOpts *BuilderOptions) (*Builder, error) {
 	identifier := objects.RandomMAC()
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
@@ -97,6 +108,8 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, er
 	}
 
 	snap := &Builder{
+		builderOptions: builderOpts,
+
 		scanCache:  scanCache,
 		deltaCache: scanCache,
 
@@ -121,10 +134,15 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter) (*Builder, er
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
+
+	if err := snap.setup(); err != nil {
+		return nil, err
+	}
+
 	return snap, nil
 }
 
-func (src *Snapshot) Fork() (*Builder, error) {
+func (src *Snapshot) Fork(builderOpts *BuilderOptions) (*Builder, error) {
 
 	identifier := objects.RandomMAC()
 	scanCache, err := src.repository.AppContext().GetCache().Scan(identifier)
@@ -145,6 +163,8 @@ func (src *Snapshot) Fork() (*Builder, error) {
 	}
 
 	snap := &Builder{
+		builderOptions: builderOpts,
+
 		scanCache:  scanCache,
 		deltaCache: scanCache,
 
@@ -188,7 +208,28 @@ func (src *Snapshot) Fork() (*Builder, error) {
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
+
+	if err := snap.setup(); err != nil {
+		return nil, err
+	}
+
 	return snap, nil
+}
+
+func (snap *Builder) setup() error {
+	if !snap.builderOptions.ForcedTimestamp.IsZero() {
+		if snap.builderOptions.ForcedTimestamp.Before(time.Now()) {
+			snap.Header.Timestamp = snap.builderOptions.ForcedTimestamp.UTC()
+		}
+	}
+
+	done, err := snap.Lock()
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+	snap.done = done
+	return nil
 }
 
 func (snap *Builder) Repository() *repository.Repository {
@@ -201,6 +242,8 @@ func (snap *Builder) Close() error {
 	if snap.scanCache != nil {
 		return snap.scanCache.Close()
 	}
+
+	snap.Unlock(snap.done)
 
 	return nil
 }
