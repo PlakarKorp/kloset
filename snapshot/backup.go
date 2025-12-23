@@ -37,7 +37,7 @@ type BackupIndexes struct {
 	dirpackidx *btree.BTree[string, int, objects.MAC]
 }
 
-type BackupContext struct {
+type BuilderContext struct {
 	imp      importer.Importer
 	excludes *exclude.RuleSet
 	noXattr  bool
@@ -88,7 +88,7 @@ var (
 	ErrOutOfRange = errors.New("out of range")
 )
 
-func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
+func (bc *BuilderContext) batchRecordEntry(entry *vfs.Entry) error {
 	path := entry.Path()
 
 	bytes, err := entry.ToBytes()
@@ -120,7 +120,7 @@ func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 	return nil
 }
 
-func (bc *BackupContext) recordError(path string, err error) error {
+func (bc *BuilderContext) recordError(path string, err error) error {
 	entry := vfs.NewErrorItem(path, err.Error())
 	serialized, e := entry.ToBytes()
 	if e != nil {
@@ -130,7 +130,7 @@ func (bc *BackupContext) recordError(path string, err error) error {
 	return bc.indexes[0].erridx.Insert(path, serialized)
 }
 
-func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
+func (bc *BuilderContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
@@ -140,7 +140,7 @@ func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC obje
 	return bc.indexes[0].xattridx.Insert(xattr.ToPath(), serialized)
 }
 
-func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *importer.ScanResult) bool {
+func (snapshot *Builder) skipExcludedPathname(backupCtx *BuilderContext, record *importer.ScanResult) bool {
 	var pathname string
 	var isDir bool
 	switch {
@@ -159,7 +159,7 @@ func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *
 	return backupCtx.excludes.IsExcluded(pathname, isDir)
 }
 
-func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
+func (snap *Builder) processRecord(idx int, backupCtx *BuilderContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
 	switch {
 	case record.Error != nil:
 		record := record.Error
@@ -220,7 +220,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	}
 }
 
-func (snap *Builder) importerJob(backupCtx *BackupContext) error {
+func (snap *Builder) importerJob(backupCtx *BuilderContext) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -295,7 +295,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	return nil
 }
 
-func (snap *Builder) flushDeltaState(bc *BackupContext) {
+func (snap *Builder) flushDeltaState(bc *BuilderContext) {
 	for {
 		select {
 		case <-snap.repository.AppContext().Done():
@@ -690,13 +690,13 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	return object, objectMAC, totalDataSize, nil
 }
 
-func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
+func (snap *Builder) Commit(bc *BuilderContext, commit bool) error {
 	bc.emitter.Info("snapshot.commit.start", map[string]any{})
 	defer bc.emitter.Info("snapshot.commit.end", map[string]any{})
 	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
 	// Maybe this could be stopped earlier.
 
-	// If we end up in here without a BackupContext we come from Sync and we
+	// If we end up in here without a BuilderContext we come from Sync and we
 	// can't rely on the flusher
 	if bc != nil && bc.flushTick != nil {
 		bc.flushTerminating.Store(true)
@@ -842,13 +842,13 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
+func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BuilderContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
 	}
 
-	backupCtx := &BackupContext{
+	backupCtx := &BuilderContext{
 		imp:            imp,
 		noXattr:        backupOpts.NoXattr,
 		scanCache:      snap.scanCache,
@@ -875,7 +875,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
+func (snap *Builder) checkVFSCache(backupCtx *BuilderContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
 	if backupCtx.vfsCache == nil {
 		return nil, nil
 	}
@@ -966,7 +966,7 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}, nil
 }
 
-func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
+func (snap *Builder) writeFileEntry(idx int, backupCtx *BuilderContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
 	if meta.ContentType == "" {
 		return fmt.Errorf("content type cannot be empty!")
 	}
@@ -1036,7 +1036,7 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 	return backupCtx.batchRecordEntry(fileEntry)
 }
 
-func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+func (snap *Builder) processFileRecord(idx int, backupCtx *BuilderContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
 	cachedPath, err := snap.checkVFSCache(backupCtx, record)
 	if err != nil {
 		snap.Logger().Warn("VFS CACHE: %v", err)
@@ -1054,7 +1054,7 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 	return snap.writeFileEntry(idx, backupCtx, meta, cachedPath, record)
 }
 
-func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
+func (snap *Builder) persistTrees(backupCtx *BuilderContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
 
 	vfsHeader, summary, err := snap.persistVFS(backupCtx)
 	if err != nil {
@@ -1087,7 +1087,7 @@ type chunkifyResult struct {
 	err error
 }
 
-func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
+func (backupCtx *BuilderContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
 	// bytes is a slice that will be reused in the next iteration,
 	// swapping below our feet, so make a copy out of it
 	dupBytes := make([]byte, len(bytes))
@@ -1128,7 +1128,7 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
+func (backupCtx *BuilderContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
 	if parent != "/" {
 		parent = strings.TrimRight(parent, "/")
 	}
@@ -1199,7 +1199,7 @@ func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) er
 
 }
 
-func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname string) error {
+func (snap *Builder) relinkNodesRecursive(backupCtx *BuilderContext, pathname string) error {
 	item, err := backupCtx.scanLog.GetDirectory(pathname)
 	if err != nil {
 		return err
@@ -1234,7 +1234,7 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 	return snap.relinkNodesRecursive(backupCtx, parent)
 }
 
-func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
+func (snap *Builder) relinkNodes(backupCtx *BuilderContext) error {
 	var missingMap = make(map[string]struct{})
 
 	for e := range backupCtx.scanLog.ListPathnames("/", true) {
@@ -1252,7 +1252,7 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 	return snap.relinkNodesRecursive(backupCtx, "/")
 }
 
-func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
+func (snap *Builder) persistVFS(backupCtx *BuilderContext) (*header.VFS, *vfs.Summary, error) {
 	backupCtx.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer backupCtx.emitter.Info("snapshot.vfs.end", map[string]any{})
 
@@ -1405,7 +1405,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	return vfsHeader, rootSummary, nil
 }
 
-func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
+func (snap *Builder) persistIndexes(backupCtx *BuilderContext) ([]header.Index, error) {
 	backupCtx.emitter.Info("snapshot.index.start", map[string]any{})
 	defer backupCtx.emitter.Info("snapshot.index.end", map[string]any{})
 	ctmac, err := persistIndex(snap, backupCtx.indexes[0].ctidx,

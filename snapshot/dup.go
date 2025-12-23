@@ -5,7 +5,7 @@ func (snap *Snapshot) Dup() (*Snapshot, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := newSnapshot.Commit(&BackupContext{}, true); err != nil {
+	if err := newSnapshot.Commit(&BuilderContext{}, true); err != nil {
 		return nil, err
 	}
 
