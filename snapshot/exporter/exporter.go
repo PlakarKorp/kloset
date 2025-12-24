@@ -13,9 +13,6 @@ import (
 
 type Options struct {
 	MaxConcurrency uint64
-
-	Stdout io.Writer
-	Stderr io.Writer
 }
 
 type LinkType int
@@ -74,8 +71,6 @@ func NewExporter(ctx *kcontext.KContext, config map[string]string) (Exporter, er
 
 	opts := &Options{
 		MaxConcurrency: uint64(ctx.MaxConcurrency),
-		Stdout:         ctx.Stdout,
-		Stderr:         ctx.Stderr,
 	}
 
 	return backend(ctx, opts, proto, config)
