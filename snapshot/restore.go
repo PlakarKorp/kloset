@@ -126,6 +126,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 
 			var hardlinkKey string
 			var rec *hardlinkRecord
+			var ok bool
 			var isLeader bool
 			var leaderErr error
 			var leaderDest string
@@ -135,7 +136,7 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 				hardlinkKey = fmt.Sprintf("%d:%d", stat.Dev(), stat.Ino())
 
 				restoreContext.hardlinksMutex.Lock()
-				rec, ok := restoreContext.hardlinks[hardlinkKey]
+				rec, ok = restoreContext.hardlinks[hardlinkKey]
 				if !ok {
 					rec = &hardlinkRecord{done: make(chan struct{})}
 					restoreContext.hardlinks[hardlinkKey] = rec
@@ -216,6 +217,13 @@ func snapshotRestorePath(snap *Snapshot, exp exporter.Exporter, target string, o
 func (snap *Snapshot) Restore(exp exporter.Exporter, base string, pathname string, opts *RestoreOptions) error {
 	emitter := snap.Emitter("restore")
 	defer emitter.Close()
+
+	fileCount := snap.Header.GetSource(0).Summary.Directory.Files + snap.Header.GetSource(0).Summary.Below.Files
+	dirCount := snap.Header.GetSource(0).Summary.Directory.Directories + snap.Header.GetSource(0).Summary.Below.Directories - uint64(len(strings.Split(pathname, "/"))-2)
+	symlinkCount := snap.Header.GetSource(0).Summary.Directory.Symlinks + snap.Header.GetSource(0).Summary.Below.Symlinks
+	totalSize := snap.Header.GetSource(0).Summary.Directory.Size + snap.Header.GetSource(0).Summary.Below.Size
+
+	emitter.FilesystemSummary(fileCount, dirCount, symlinkCount, 0, totalSize)
 
 	pvfs, err := snap.Filesystem()
 	if err != nil {

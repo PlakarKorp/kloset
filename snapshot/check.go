@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"os"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -23,6 +25,13 @@ type checkContext struct {
 	emitter *events.Emitter
 	size    atomic.Uint64
 	errors  atomic.Uint64
+
+	skippedFiles    atomic.Uint64
+	skippedDirs     atomic.Uint64
+	skippedSymlinks atomic.Uint64
+	skippedXattrs   atomic.Uint64
+
+	skippedSize atomic.Uint64
 }
 
 var (
@@ -143,31 +152,52 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 	snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(""))
 	return nil
 }
-
 func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Entry, wg *errgroup.Group, checkCtx *checkContext) error {
 	entryMAC := e.MAC
 	entryStatus, err := snap.checkCache.GetVFSEntryStatus(entryMAC)
 	if err != nil {
 		return err
 	}
+
+	emitter := checkCtx.emitter
+	mode := e.Stat().Mode()
+
 	if entryStatus != nil {
 		if len(entryStatus) != 0 {
 			return fmt.Errorf("%s", string(entryStatus))
 		}
+
+		mode := e.Stat().Mode()
+		switch {
+		case mode.IsDir():
+			checkCtx.skippedDirs.Add(1)
+		case mode&os.ModeSymlink != 0:
+			checkCtx.skippedSymlinks.Add(1)
+		case mode.IsRegular():
+			checkCtx.skippedFiles.Add(1)
+			checkCtx.skippedSize.Add(uint64(e.Stat().Size()))
+		default:
+		}
 		return nil
 	}
 
-	emitter := checkCtx.emitter
 	emitter.Path(entrypath)
 
-	if e.Stat().Mode().IsDir() {
+	if mode.IsDir() {
 		emitter.Directory(entrypath)
 		emitter.DirectoryOk(entrypath)
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	}
 
-	if !e.Stat().Mode().IsRegular() {
+	if mode&os.ModeSymlink != 0 {
+		emitter.Symlink(entrypath)
+		emitter.SymlinkOk(entrypath)
+		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
+		return nil
+	}
+
+	if !mode.IsRegular() {
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	}
@@ -182,11 +212,13 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 			snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(err.Error()))
 			return err
 		}
+
 		emitter.FileOk(entrypath)
 		checkCtx.size.Add(uint64(e.Stat().Size()))
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	})
+
 	return nil
 }
 
@@ -223,6 +255,13 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 		return nil
 	}
 
+	fileCount := snap.Header.GetSource(0).Summary.Directory.Files + snap.Header.GetSource(0).Summary.Below.Files
+	dirCount := snap.Header.GetSource(0).Summary.Directory.Directories + snap.Header.GetSource(0).Summary.Below.Directories - uint64(len(strings.Split(pathname, "/"))-2)
+	symlinkCount := snap.Header.GetSource(0).Summary.Directory.Symlinks + snap.Header.GetSource(0).Summary.Below.Symlinks
+	totalSize := snap.Header.GetSource(0).Summary.Directory.Size + snap.Header.GetSource(0).Summary.Below.Size
+
+	emitter.FilesystemSummary(fileCount, dirCount, symlinkCount, 0, totalSize)
+
 	fs, err := snap.Filesystem()
 	if err != nil {
 		return err
@@ -248,6 +287,48 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 			// findings.
 			failed = true
 		}
+
+		adjFiles := fileCount
+		adjDirs := dirCount
+		adjSyms := symlinkCount
+		adjXattrs := uint64(0)
+		adjSize := totalSize
+
+		sf := checkCtx.skippedFiles.Load()
+		sd := checkCtx.skippedDirs.Load()
+		ss := checkCtx.skippedSymlinks.Load()
+		sx := checkCtx.skippedXattrs.Load()
+		sbytes := checkCtx.skippedSize.Load()
+
+		// clamp to avoid underflow
+		if sf <= adjFiles {
+			adjFiles -= sf
+		} else {
+			adjFiles = 0
+		}
+		if sd <= adjDirs {
+			adjDirs -= sd
+		} else {
+			adjDirs = 0
+		}
+		if ss <= adjSyms {
+			adjSyms -= ss
+		} else {
+			adjSyms = 0
+		}
+		if sx <= adjXattrs {
+			adjXattrs -= sx
+		} else {
+			adjXattrs = 0
+		}
+		if sbytes <= adjSize {
+			adjSize -= sbytes
+		} else {
+			adjSize = 0
+		}
+
+		// Re-emit summary with adjusted totals
+		emitter.FilesystemSummary(adjFiles, adjDirs, adjSyms, adjXattrs, adjSize)
 
 		return nil
 	})
