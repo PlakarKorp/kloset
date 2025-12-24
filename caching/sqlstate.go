@@ -114,7 +114,7 @@ func (c *sqlStateBatch) Commit() error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT INTO deltas (mac, type, packfile, payload) VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO deltas (mac, type, packfile, payload) VALUES (?, ?, ?, ?);`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -272,7 +272,7 @@ func (c *SQLState) PutDelta(blobType resources.Type, blobCsum, packfile objects.
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 	packMACHex := hex.EncodeToString(packfile[:])
 
-	_, err := c.db.Exec("INSERT INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?)", blobMACHex, blobType, packMACHex, data)
+	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?);", blobMACHex, blobType, packMACHex, data)
 
 	return err
 }
