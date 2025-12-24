@@ -2,8 +2,6 @@ package kcontext
 
 import (
 	"context"
-	"io"
-	"os"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -23,10 +21,6 @@ type KContext struct {
 
 	Context context.Context         `msgpack:"-"`
 	Cancel  context.CancelCauseFunc `msgpack:"-"`
-
-	Stdin  io.Reader `msgpack:"-"`
-	Stdout io.Writer `msgpack:"-"`
-	Stderr io.Writer `msgpack:"-"`
 
 	Quiet  bool
 	Silent bool
@@ -56,9 +50,6 @@ func NewKContext() *KContext {
 
 	return &KContext{
 		events:  events.NewEventsBUS(0),
-		Stdin:   os.Stdin,
-		Stdout:  os.Stdout,
-		Stderr:  os.Stderr,
 		Context: ctx,
 		Cancel:  cancel,
 	}
