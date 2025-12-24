@@ -354,7 +354,7 @@ func (c *SQLState) DelDelta(blobType resources.Type, blobCsum, packfileMAC objec
 func (c *SQLState) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 
-	_, err := c.db.Exec("INSERT INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
+	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
 	return err
 }
 
