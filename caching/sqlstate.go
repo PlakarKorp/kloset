@@ -114,7 +114,7 @@ func (c *sqlStateBatch) Commit() error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT INTO deltas (mac, type, packfile, payload) VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO deltas (mac, type, packfile, payload) VALUES (?, ?, ?, ?);`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -272,7 +272,7 @@ func (c *SQLState) PutDelta(blobType resources.Type, blobCsum, packfile objects.
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 	packMACHex := hex.EncodeToString(packfile[:])
 
-	_, err := c.db.Exec("INSERT INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?)", blobMACHex, blobType, packMACHex, data)
+	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?);", blobMACHex, blobType, packMACHex, data)
 
 	return err
 }
@@ -354,7 +354,7 @@ func (c *SQLState) DelDelta(blobType resources.Type, blobCsum, packfileMAC objec
 func (c *SQLState) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 
-	_, err := c.db.Exec("INSERT INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
+	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
 	return err
 }
 
@@ -452,7 +452,7 @@ func (c *SQLState) DelDeleted(blobType resources.Type, blobCsum objects.MAC) err
 func (c *SQLState) PutPackfile(packfile objects.MAC, data []byte) error {
 	packMACHex := hex.EncodeToString(packfile[:])
 
-	_, err := c.db.Exec("INSERT INTO packfiles(mac, payload) VALUES(?,  ?)", packMACHex, data)
+	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, payload) VALUES(?,  ?)", packMACHex, data)
 	return err
 }
 
