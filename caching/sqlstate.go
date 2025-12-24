@@ -452,7 +452,7 @@ func (c *SQLState) DelDeleted(blobType resources.Type, blobCsum objects.MAC) err
 func (c *SQLState) PutPackfile(packfile objects.MAC, data []byte) error {
 	packMACHex := hex.EncodeToString(packfile[:])
 
-	_, err := c.db.Exec("INSERT INTO packfiles(mac, payload) VALUES(?,  ?)", packMACHex, data)
+	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, payload) VALUES(?,  ?)", packMACHex, data)
 	return err
 }
 
