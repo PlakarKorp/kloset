@@ -12,6 +12,7 @@ type Flags uint32
 const (
 	FLAG_LOCALFS Flags = 1 << 0
 	FLAG_FILE    Flags = 1 << 1
+	FLAG_STREAM  Flags = 1 << 2
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")
@@ -115,6 +116,8 @@ func ParseFlag(name string) (Flags, error) {
 		return FLAG_LOCALFS, nil
 	case "file":
 		return FLAG_FILE, nil
+	case "stream":
+		return FLAG_STREAM, nil
 	default:
 		return 0, ErrUnknownFlag
 	}
