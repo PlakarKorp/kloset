@@ -5,7 +5,7 @@ go 1.24.0
 require (
 	github.com/PlakarKorp/go-cdc-chunkers v1.0.2
 	github.com/PlakarKorp/go-human2duration v0.1.6
-	github.com/cockroachdb/pebble/v2 v2.1.2
+	github.com/cockroachdb/pebble/v2 v2.1.3
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gabriel-vasile/mimetype v1.4.12
 	github.com/go-git/go-git/v5 v5.16.4
@@ -34,7 +34,7 @@ require (
 	github.com/cockroachdb/errors v1.11.3 // indirect
 	github.com/cockroachdb/logtags v0.0.0-20241215232642-bb51bb14a506 // indirect
 	github.com/cockroachdb/redact v1.1.6 // indirect
-	github.com/cockroachdb/swiss v0.0.0-20250624142022-d6e517c1d961 // indirect
+	github.com/cockroachdb/swiss v0.0.0-20251224182025-b0f6560f979b // indirect
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/getsentry/sentry-go v0.31.1 // indirect
