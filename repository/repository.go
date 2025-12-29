@@ -11,6 +11,7 @@ import (
 	"iter"
 	"math/big"
 	"math/bits"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -229,6 +230,10 @@ func (r *Repository) stateCacheDir() string {
 	return path.Join(r.AppContext().CacheDir, caching.CACHE_VERSION, "store", r.Configuration().RepositoryID.String())
 }
 
+func (r *Repository) getStateFilePath(stateID objects.MAC) string {
+	return path.Join(r.stateCacheDir(), fmt.Sprintf("%x.state", stateID))
+}
+
 func (r *Repository) RebuildState() error {
 	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), false)
 	if err != nil {
@@ -236,6 +241,27 @@ func (r *Repository) RebuildState() error {
 	}
 
 	return r.RebuildStateWithCache(cacheInstance)
+}
+
+func (r *Repository) IngestStateFile(stateID objects.MAC) error {
+	statePath := r.getStateFilePath(stateID)
+	rd, err := r.OpenStateFromStateFile(statePath)
+	if err != nil {
+		return err
+	}
+	defer rd.Close()
+
+	if err = r.state.MergeState(stateID, rd); err != nil {
+		return err
+	}
+
+	// XXX: Not sure about deleting right here. That's tied a lot to the way
+	// plakar works.
+	if err := os.Remove(statePath); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) error {
@@ -555,6 +581,34 @@ func (r *Repository) GetStates() ([]objects.MAC, error) {
 	return r.store.GetStates(r.appContext)
 }
 
+func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, error) {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "OpenStateFromStateFile(%s): %s", file, time.Since(t0))
+	}()
+
+	tmpStateFile, err := os.Open(file)
+	if err != nil {
+		return nil, err
+	}
+
+	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, tmpStateFile)
+	if err != nil {
+		return nil, err
+	}
+
+	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
+		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
+			file, version, versioning.GetCurrentVersion(resources.RT_STATE))
+	}
+
+	rd, err = r.decode(rd)
+	if err != nil {
+		return nil, err
+	}
+	return rd, err
+}
+
 func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
@@ -598,6 +652,14 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 	if err != nil {
 		return err
 	}
+
+	tmpStateFile, err := os.Create(r.getStateFilePath(mac))
+	if err != nil {
+		return err
+	}
+	defer tmpStateFile.Close()
+
+	rd = io.TeeReader(rd, tmpStateFile)
 
 	span := r.ioStats.GetReadSpan()
 	nbytes, err := r.store.PutState(r.appContext, mac, rd)
