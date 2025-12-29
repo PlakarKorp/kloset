@@ -127,7 +127,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	return results, nil
 }
 
-func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRefresher func() error) error {
+func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRefresher func(objects.MAC) error) error {
 	if src.Header.Identity.Identifier != uuid.Nil {
 		data, err := src.repository.GetBlobBytes(resources.RT_SIGNATURE, src.Header.Identifier)
 		if err != nil {
