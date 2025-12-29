@@ -10,9 +10,9 @@ import (
 type Flags uint32
 
 const (
-	FLAG_LOCALFS Flags = 1 << 0
-	FLAG_FILE    Flags = 1 << 1
-	FLAG_STREAM  Flags = 1 << 2
+	FLAG_LOCALFS Flags = 1 << iota
+	FLAG_FILE
+	FLAG_STREAM
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")
