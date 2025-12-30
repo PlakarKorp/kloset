@@ -249,14 +249,15 @@ func (r *Repository) IngestStateFile(stateID objects.MAC) error {
 	if err != nil {
 		return err
 	}
-	defer rd.Close()
 
 	if err = r.state.MergeState(stateID, rd); err != nil {
+		rd.Close()
 		return err
 	}
 
-	// XXX: Not sure about deleting right here. That's tied a lot to the way
-	// plakar works.
+	// We can't defer this one, because of windows.
+	rd.Close()
+
 	if err := os.Remove(statePath); err != nil {
 		return err
 	}
@@ -602,11 +603,7 @@ func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, error) 
 			file, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
 
-	rd, err = r.decode(rd)
-	if err != nil {
-		return nil, err
-	}
-	return rd, err
+	return r.decode(rd)
 }
 
 func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
