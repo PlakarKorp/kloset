@@ -187,10 +187,9 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	defer emitter.Close()
 
 	backupCtx, err := snap.prepareBackup(imp)
-	for _, bi := range backupCtx.indexes {
-		defer bi.Close(snap.Logger())
+	if backupCtx != nil {
+		defer backupCtx.indexes.Close(snap.Logger())
 	}
-
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
