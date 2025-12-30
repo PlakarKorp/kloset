@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
@@ -196,12 +195,6 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	}
 
 	defer backupCtx.scanLog.Close()
-
-	/* checkpoint handling */
-	if !snap.builderOptions.NoCheckpoint {
-		snap.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState()
-	}
 
 	/* meta store */
 	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
