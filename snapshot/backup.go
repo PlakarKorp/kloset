@@ -350,9 +350,8 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 				return
 			}
 
-			// XXX: Pass down the path to the delta state db.
-			if bc.StateRefresher != nil {
-				if err := bc.StateRefresher(oldStateId); err != nil {
+			if snap.builderOptions.StateRefresher != nil {
+				if err := snap.builderOptions.StateRefresher(oldStateId); err != nil {
 					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
 					return
 				}
@@ -855,15 +854,14 @@ func (snap *Builder) prepareBackup(imp importer.Importer) (*BackupContext, error
 	}
 
 	backupCtx := &BackupContext{
-		imp:            imp,
-		scanCache:      snap.scanCache,
-		vfsEntBatch:    scanLog.NewBatch(),
-		vfsCache:       snap.vfsCache,
-		flushEnd:       make(chan bool),
-		flushEnded:     make(chan error),
-		stateId:        snap.Header.Identifier,
-		scanLog:        scanLog,
-		StateRefresher: snap.builderOptions.StateRefresher,
+		imp:         imp,
+		scanCache:   snap.scanCache,
+		vfsEntBatch: scanLog.NewBatch(),
+		vfsCache:    snap.vfsCache,
+		flushEnd:    make(chan bool),
+		flushEnded:  make(chan error),
+		stateId:     snap.Header.Identifier,
+		scanLog:     scanLog,
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()
