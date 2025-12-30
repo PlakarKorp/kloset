@@ -245,5 +245,5 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
-	return snap.Commit(!snap.builderOptions.NoCommit)
+	return snap.Commit()
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
@@ -394,4 +395,84 @@ func (snap *Builder) flushDeltaState() {
 			}
 		}
 	}
+}
+
+func (snap *Builder) PutSnapshot() ([]byte, error) {
+	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
+	// Maybe this could be stopped earlier.
+	if snap.flushTick != nil {
+		snap.flushTerminating.Store(true)
+		snap.flushTick.Stop()
+	}
+
+	serializedHdr, err := snap.Header.Serialize()
+	if err != nil {
+		return nil, err
+	}
+
+	if kp := snap.AppContext().Keypair; kp != nil {
+		serializedHdrMAC := snap.repository.ComputeMAC(serializedHdr)
+		signature := kp.Sign(serializedHdrMAC[:])
+		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := snap.repository.PutBlob(resources.RT_SNAPSHOT, snap.Header.Identifier, serializedHdr); err != nil {
+		return nil, err
+	}
+
+	return serializedHdr, nil
+}
+
+func (snap *Builder) Commit() error {
+	snap.emitter.Info("snapshot.commit.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.commit.end", map[string]any{})
+
+	var serializedHdr []byte
+	var err error
+	if serializedHdr, err = snap.PutSnapshot(); err != nil {
+		return err
+	}
+
+	snap.repository.PackerManager.Wait()
+
+	// We are done with packfiles we can flush the last state, either through
+	// the flusher, or manually here.
+	if snap.flushTick != nil {
+		snap.flushEnd <- true
+		close(snap.flushEnd)
+		err = <-snap.flushEnded
+	} else {
+		err = snap.repository.CommitTransaction(snap.Header.Identifier)
+	}
+	if err != nil {
+		snap.Logger().Warn("Failed to push the state to the repository %s", err)
+		return err
+	}
+
+	cache, err := snap.AppContext().GetCache().Repository(snap.repository.Configuration().RepositoryID)
+	if err == nil {
+		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
+	}
+
+	totalSize := uint64(0)
+	totalErrors := uint64(0)
+	for _, source := range snap.Header.Sources {
+		totalSize += source.Summary.Directory.Size + source.Summary.Below.Size
+		totalErrors += source.Summary.Directory.Errors + source.Summary.Below.Errors
+	}
+
+	rBytes := snap.repository.RBytes()
+	wBytes := snap.repository.WBytes()
+
+	target, err := snap.repository.Location()
+	if err != nil {
+		return err
+	}
+
+	snap.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
+
+	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
+	return nil
 }
