@@ -339,12 +339,6 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 
 	defer sourceCtx.scanLog.Close()
 
-	/* checkpoint handling */
-	if !options.NoCheckpoint {
-		snap.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState()
-	}
-
 	/* meta store */
 	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
 	if err != nil {

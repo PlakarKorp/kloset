@@ -86,6 +86,12 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
+
+	if !builderOptions.NoCheckpoint {
+		snap.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState()
+	}
+
 	return snap, nil
 }
 
@@ -130,6 +136,12 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
+
+	if !builderOptions.NoCheckpoint {
+		snap.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState()
+	}
+
 	return snap, nil
 }
 
@@ -203,6 +215,12 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	snap.Header.SetContext("Client", snap.AppContext().Client)
 
 	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
+
+	if !builderOptions.NoCheckpoint {
+		snap.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState()
+	}
+
 	return snap, nil
 }
 
