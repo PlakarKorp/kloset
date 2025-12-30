@@ -317,13 +317,10 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 		}
 	}
 
-	source := header.NewSource()
-	source.Importer.Origin = origin
-	source.Importer.Type = typ
 	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
 
 	if options.Name == "" {
-		snap.Header.Name = root + " @ " + source.Importer.Origin
+		snap.Header.Name = root + " @ " + origin
 	} else {
 		snap.Header.Name = options.Name
 	}
@@ -366,8 +363,9 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 
 	snap.Header.Duration = time.Since(beginTime)
 
-	// create a source:
-	// append to snap.Header.Sources the source filled with these
+	source := header.NewSource()
+	source.Importer.Origin = origin
+	source.Importer.Type = typ
 	source.Importer.Directory = root
 	source.VFS = *vfsHeader
 	source.Summary = *rootSummary
