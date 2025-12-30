@@ -29,6 +29,8 @@ func TestRebuildWithRemoteStates(t *testing.T) {
 	repo, err := NewRepository(nil, nil)
 	require.NoError(t, err)
 
+	repo.NoStateToLocalDisk = true
+
 	cache := newCache()
 
 	for i := range 5 {
@@ -56,6 +58,8 @@ func TestRebuildWithRemoteStates(t *testing.T) {
 func TestRebuildWithLocalState(t *testing.T) {
 	repo, err := NewRepository(nil, nil)
 	require.NoError(t, err)
+
+	repo.NoStateToLocalDisk = true
 
 	cache := newCache()
 
@@ -96,6 +100,7 @@ func TestRebuildNewLayout(t *testing.T) {
 	repo, err := NewRepository(nil, nil)
 	require.NoError(t, err)
 
+	repo.NoStateToLocalDisk = true
 	cache := newCache()
 
 	for i := range 3 {
