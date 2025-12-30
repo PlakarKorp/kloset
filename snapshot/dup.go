@@ -1,7 +1,7 @@
 package snapshot
 
-func (snap *Snapshot) Dup() (*Snapshot, error) {
-	newSnapshot, err := snap.Fork()
+func (snap *Snapshot) Dup(builderOptions *BackupOptions) (*Snapshot, error) {
+	newSnapshot, err := snap.Fork(builderOptions)
 	if err != nil {
 		return nil, err
 	}
