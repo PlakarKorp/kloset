@@ -377,7 +377,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 	}
 }
 
-func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error {
+func (snap *Builder) Backup(imp importer.Importer) error {
 	beginTime := time.Now()
 
 	emitter := snap.Emitter("backup")
@@ -407,6 +407,8 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 		snap.repository.PackerManager.Wait()
 		return err
 	}
+
+	options := snap.builderOptions
 
 	if !options.ForcedTimestamp.IsZero() {
 		if options.ForcedTimestamp.Before(time.Now()) {
