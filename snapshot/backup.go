@@ -17,7 +17,6 @@ import (
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
-	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -50,17 +49,7 @@ type BackupContext struct {
 	fileidx *btree.BTree[string, int, []byte]
 	metaidx *btree.BTree[string, int, []byte]
 
-	stateId objects.MAC
-
-	flushTick        *time.Ticker
-	flushEnd         chan bool
-	flushEnded       chan error
-	flushTerminating atomic.Bool
-	StateRefresher   func(objects.MAC) error
-
 	indexes []*BackupIndexes // Aligned with the number of importers.
-
-	emitter *events.Emitter
 
 	scanLog *scanlog.ScanLog
 }
@@ -162,7 +151,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	case record.Error != nil:
 		record := record.Error
 		backupCtx.recordError(record.Pathname, record.Err)
-		backupCtx.emitter.PathError(record.Pathname, record.Err)
+		snap.emitter.PathError(record.Pathname, record.Err)
 
 	case record.Record != nil:
 		record := record.Record
@@ -172,13 +161,13 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 			return
 		}
 
-		backupCtx.emitter.Path(record.Pathname)
+		snap.emitter.Path(record.Pathname)
 
 		// XXX: Remove this when we introduce the Location object.
 		repoLocation, err := snap.repository.Location()
 		if err != nil {
 			backupCtx.recordError(record.Pathname, err)
-			backupCtx.emitter.FileError(record.Pathname, err)
+			snap.emitter.FileError(record.Pathname, err)
 			return
 		}
 
@@ -198,13 +187,13 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 			return
 		}
 
-		backupCtx.emitter.File(record.Pathname)
+		snap.emitter.File(record.Pathname)
 
 		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
-			backupCtx.emitter.FileError(record.Pathname, err)
+			snap.emitter.FileError(record.Pathname, err)
 			backupCtx.recordError(record.Pathname, err)
 		} else {
-			backupCtx.emitter.FileOk(record.Pathname)
+			snap.emitter.FileOk(record.Pathname)
 		}
 
 		if record.IsXattr {
@@ -237,7 +226,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
-	backupCtx.emitter.Info("snapshot.import.start", map[string]any{})
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
 
 	var stats scanStats
 	for i, cker := range ckers {
@@ -284,7 +273,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 
 	backupCtx.vfsEntBatch = nil
 
-	backupCtx.emitter.Info("snapshot.import.done", map[string]any{
+	snap.emitter.Info("snapshot.import.done", map[string]any{
 		"nfiles": stats.nfiles,
 		"ndirs":  stats.ndirs,
 		"size":   stats.size,
@@ -293,93 +282,8 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	return nil
 }
 
-func (snap *Builder) flushDeltaState(bc *BackupContext) {
-	for {
-		select {
-		case <-snap.repository.AppContext().Done():
-			return
-		case <-bc.flushEnd:
-			// End of backup we push the last and final State.
-			err := snap.repository.CommitTransaction(bc.stateId)
-			if err != nil {
-				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
-			}
-
-			if bc.StateRefresher != nil {
-				if err := bc.StateRefresher(bc.stateId); err != nil {
-					snap.Logger().Warn("Failed to reload the final state to the repository %s", err)
-				}
-			}
-
-			// See below
-			if snap.deltaCache != snap.scanCache {
-				snap.deltaCache.Close()
-			}
-
-			bc.flushEnded <- err
-			close(bc.flushEnded)
-			return
-		case <-bc.flushTick.C:
-			// In case the previous Flushing operation was too long and the
-			// ticker got a chance to queue another tick we might end up here
-			// rather than in flushEnd so just skip this and go to the final
-			// state push.
-			if bc.flushTerminating.Load() {
-				continue
-			}
-
-			// New Delta
-			oldCache := snap.deltaCache
-			oldStateId := bc.stateId
-
-			identifier := objects.RandomMAC()
-			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
-			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
-				return
-			}
-
-			bc.stateId = identifier
-			snap.deltaCache = newDeltaCache
-
-			// Now that the backup is free to progress we can serialize and push
-			// the resulting statefile to the repo.
-			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, bc.stateId)
-			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
-				return
-			}
-
-			if snap.builderOptions.StateRefresher != nil {
-				if err := snap.builderOptions.StateRefresher(oldStateId); err != nil {
-					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
-					return
-				}
-			} else {
-				if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
-					return
-				}
-			}
-
-			snap.repository.RemoveTransaction(oldStateId)
-
-			// The first cache is always the scanCache, only in this function we
-			// allocate a new and different one, so when we first hit this function
-			// do not close the deltaCache, as it'll be closed at the end of the
-			// backup because it's used by other parts of the code.
-			if oldCache != snap.scanCache {
-				oldCache.Close()
-			}
-		}
-	}
-}
-
 func (snap *Builder) Backup(imp importer.Importer) error {
 	beginTime := time.Now()
-
-	emitter := snap.Emitter("backup")
-	defer emitter.Close()
 
 	done, err := snap.Lock()
 	if err != nil {
@@ -435,14 +339,13 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-	backupCtx.emitter = emitter
 
 	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
 	if !options.NoCheckpoint {
-		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState(backupCtx)
+		snap.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState()
 	}
 
 	/* meta store */
@@ -476,7 +379,7 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
 
-	return snap.Commit(backupCtx, !options.NoCommit)
+	return snap.Commit(!options.NoCommit)
 }
 
 func entropy(data []byte) (float64, [256]float64) {
@@ -695,17 +598,15 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	return object, objectMAC, totalDataSize, nil
 }
 
-func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
-	bc.emitter.Info("snapshot.commit.start", map[string]any{})
-	defer bc.emitter.Info("snapshot.commit.end", map[string]any{})
+func (snap *Builder) Commit(commit bool) error {
+	snap.emitter.Info("snapshot.commit.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.commit.end", map[string]any{})
 	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
 	// Maybe this could be stopped earlier.
 
-	// If we end up in here without a BackupContext we come from Sync and we
-	// can't rely on the flusher
-	if bc != nil && bc.flushTick != nil {
-		bc.flushTerminating.Store(true)
-		bc.flushTick.Stop()
+	if snap.flushTick != nil {
+		snap.flushTerminating.Store(true)
+		snap.flushTick.Stop()
 	}
 
 	serializedHdr, err := snap.Header.Serialize()
@@ -733,10 +634,10 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 
 	// We are done with packfiles we can flush the last state, either through
 	// the flusher, or manually here.
-	if bc != nil && bc.flushTick != nil {
-		bc.flushEnd <- true
-		close(bc.flushEnd)
-		err = <-bc.flushEnded
+	if snap.flushTick != nil {
+		snap.flushEnd <- true
+		close(snap.flushEnd)
+		err = <-snap.flushEnded
 	} else {
 		err = snap.repository.CommitTransaction(snap.Header.Identifier)
 	}
@@ -765,7 +666,7 @@ func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
 		return err
 	}
 
-	bc.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
+	snap.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
@@ -858,9 +759,6 @@ func (snap *Builder) prepareBackup(imp importer.Importer) (*BackupContext, error
 		scanCache:   snap.scanCache,
 		vfsEntBatch: scanLog.NewBatch(),
 		vfsCache:    snap.vfsCache,
-		flushEnd:    make(chan bool),
-		flushEnded:  make(chan error),
-		stateId:     snap.Header.Identifier,
 		scanLog:     scanLog,
 	}
 
@@ -1256,8 +1154,8 @@ func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
 }
 
 func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
-	backupCtx.emitter.Info("snapshot.vfs.start", map[string]any{})
-	defer backupCtx.emitter.Info("snapshot.vfs.end", map[string]any{})
+	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
 	if err := snap.relinkNodes(backupCtx); err != nil {
 		return nil, nil, err
@@ -1361,7 +1259,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		backupCtx.emitter.DirectoryOk(dirPath)
+		snap.emitter.DirectoryOk(dirPath)
 
 		if dirPath == "/" {
 			if rootSummary != nil {
@@ -1409,8 +1307,8 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 }
 
 func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
-	backupCtx.emitter.Info("snapshot.index.start", map[string]any{})
-	defer backupCtx.emitter.Info("snapshot.index.end", map[string]any{})
+	snap.emitter.Info("snapshot.index.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 	ctmac, err := persistIndex(snap, backupCtx.indexes[0].ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil

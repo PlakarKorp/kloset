@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
@@ -30,7 +31,14 @@ type Builder struct {
 
 	builderOptions *BuilderOptions
 
-	Header *header.Header
+	stateId          objects.MAC
+	flushTick        *time.Ticker
+	flushEnd         chan bool
+	flushEnded       chan error
+	flushTerminating atomic.Bool
+
+	Header  *header.Header
+	emitter *events.Emitter
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
@@ -54,8 +62,12 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 
 		builderOptions: builderOptions,
 		Header:         header.NewHeader("default", identifier),
+		stateId:        identifier,
+		flushEnd:       make(chan bool),
+		flushEnded:     make(chan error),
 	}
 	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
+	snap.emitter = snap.Emitter("backup")
 
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
@@ -93,9 +105,13 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 
 		builderOptions: builderOptions,
 		Header:         header.NewHeader("default", identifier),
+		stateId:        identifier,
+		flushEnd:       make(chan bool),
+		flushEnded:     make(chan error),
 	}
-
 	snap.repository = repo
+	snap.emitter = snap.Emitter("backup")
+
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
 		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
@@ -142,6 +158,9 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 
 		builderOptions: builderOptions,
 		Header:         header.NewHeader("default", identifier),
+		stateId:        identifier,
+		flushEnd:       make(chan bool),
+		flushEnded:     make(chan error),
 	}
 
 	snap.Header.Timestamp = time.Now()
@@ -164,6 +183,8 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	copy(snap.Header.Sources, src.Header.Sources)
 
 	snap.repository = src.repository.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, "")
+
+	snap.emitter = snap.Emitter("backup")
 
 	if snap.AppContext().Identity != uuid.Nil {
 		snap.Header.Identity.Identifier = snap.AppContext().Identity
@@ -190,6 +211,7 @@ func (snap *Builder) Repository() *repository.Repository {
 
 func (snap *Builder) Close() error {
 	snap.Logger().Trace("snapshotBuilder", "%x: Close(): %x", snap.Header.Identifier, snap.Header.GetIndexShortID())
+	defer snap.emitter.Close()
 
 	if snap.scanCache != nil {
 		return snap.scanCache.Close()
@@ -295,4 +317,81 @@ func (snap *Builder) Lock() (chan bool, error) {
 
 func (snap *Builder) Unlock(ping chan bool) {
 	close(ping)
+}
+
+func (snap *Builder) flushDeltaState() {
+	for {
+		select {
+		case <-snap.repository.AppContext().Done():
+			return
+		case <-snap.flushEnd:
+			// End of backup we push the last and final State.
+			err := snap.repository.CommitTransaction(snap.stateId)
+			if err != nil {
+				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
+			}
+
+			// See below
+			if snap.deltaCache != snap.scanCache {
+				snap.deltaCache.Close()
+			}
+
+			snap.flushEnded <- err
+			close(snap.flushEnded)
+			return
+		case <-snap.flushTick.C:
+			// In case the previous Flushing operation was too long and the
+			// ticker got a chance to queue another tick we might end up here
+			// rather than in flushEnd so just skip this and go to the final
+			// state push.
+			if snap.flushTerminating.Load() {
+				continue
+			}
+
+			// New Delta
+			oldCache := snap.deltaCache
+			oldStateId := snap.stateId
+
+			identifier := objects.RandomMAC()
+			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
+			if err != nil {
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
+				return
+			}
+
+			snap.stateId = identifier
+			snap.deltaCache = newDeltaCache
+
+			// Now that the backup is free to progress we can serialize and push
+			// the resulting statefile to the repo.
+			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, snap.stateId)
+			if err != nil {
+				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
+				return
+			}
+
+			// XXX: Pass down the path to the delta state db.
+			if snap.builderOptions.StateRefresher != nil {
+				if err := snap.builderOptions.StateRefresher(); err != nil {
+					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					return
+				}
+			} else {
+				if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
+					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					return
+				}
+			}
+
+			snap.repository.RemoveTransaction(oldStateId)
+
+			// The first cache is always the scanCache, only in this function we
+			// allocate a new and different one, so when we first hit this function
+			// do not close the deltaCache, as it'll be closed at the end of the
+			// backup because it's used by other parts of the code.
+			if oldCache != snap.scanCache {
+				oldCache.Close()
+			}
+		}
+	}
 }

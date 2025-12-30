@@ -195,14 +195,13 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-	backupCtx.emitter = emitter
 
 	defer backupCtx.scanLog.Close()
 
 	/* checkpoint handling */
 	if !snap.builderOptions.NoCheckpoint {
-		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState(backupCtx)
+		snap.flushTick = time.NewTicker(1 * time.Hour)
+		go snap.flushDeltaState()
 	}
 
 	/* meta store */
@@ -246,5 +245,5 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
-	return snap.Commit(backupCtx, !snap.builderOptions.NoCommit)
+	return snap.Commit(!snap.builderOptions.NoCommit)
 }
