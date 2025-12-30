@@ -40,7 +40,6 @@ type BackupIndexes struct {
 type BackupContext struct {
 	imp      importer.Importer
 	excludes *exclude.RuleSet
-	noXattr  bool
 
 	scanCache *caching.ScanCache
 	vfsCache  *vfs.Filesystem
@@ -169,7 +168,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		record := record.Record
 		defer record.Close()
 
-		if backupCtx.noXattr && record.IsXattr {
+		if snap.builderOptions.NoXattr && record.IsXattr {
 			return
 		}
 
@@ -857,7 +856,6 @@ func (snap *Builder) prepareBackup(imp importer.Importer) (*BackupContext, error
 
 	backupCtx := &BackupContext{
 		imp:            imp,
-		noXattr:        snap.builderOptions.NoXattr,
 		scanCache:      snap.scanCache,
 		vfsEntBatch:    scanLog.NewBatch(),
 		vfsCache:       snap.vfsCache,
