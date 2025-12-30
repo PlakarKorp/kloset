@@ -111,7 +111,8 @@ func NewHeader(name string, identifier objects.MAC) *Header {
 
 		Identity: Identity{},
 
-		Sources: []Source{NewSource()},
+		//Sources: []Source{NewSource()},
+		Sources: []Source{},
 	}
 }
 
