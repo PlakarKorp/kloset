@@ -28,7 +28,7 @@ type Builder struct {
 	deltaCache *caching.ScanCache
 	vfsCache   *vfs.Filesystem
 
-	builderOptions *BackupOptions
+	builderOptions *BuilderOptions
 
 	Header *header.Header
 }
@@ -37,7 +37,7 @@ func (snap *Builder) Emitter(workflow string) *events.Emitter {
 	return snap.AppContext().Events().NewSnapshotEmitter(snap.repository.Configuration().RepositoryID, snap.Header.Identifier, workflow)
 }
 
-func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC, builderOptions *BackupOptions) (*Builder, error) {
+func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC, builderOptions *BuilderOptions) (*Builder, error) {
 	identifier := snapId
 	if identifier == objects.NilMac {
 		identifier = objects.RandomMAC()
@@ -80,7 +80,7 @@ func (snap *Builder) WithVFSCache(vfsCache *vfs.Filesystem) {
 	snap.vfsCache = vfsCache
 }
 
-func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOptions *BackupOptions) (*Builder, error) {
+func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOptions *BuilderOptions) (*Builder, error) {
 	identifier := objects.RandomMAC()
 	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
 	if err != nil {
@@ -116,7 +116,7 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 	return snap, nil
 }
 
-func (src *Snapshot) Fork(builderOptions *BackupOptions) (*Builder, error) {
+func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 
 	identifier := objects.RandomMAC()
 	scanCache, err := src.repository.AppContext().GetCache().Scan(identifier)

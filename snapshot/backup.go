@@ -72,7 +72,7 @@ type scanStats struct {
 	size   uint64
 }
 
-type BackupOptions struct {
+type BuilderOptions struct {
 	Name            string
 	Tags            []string
 	Excludes        []string
@@ -849,7 +849,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
+func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOptions) (*BackupContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
