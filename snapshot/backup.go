@@ -425,7 +425,7 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 		snap.Header.Name = options.Name
 	}
 
-	backupCtx, err := snap.prepareBackup(imp, options)
+	backupCtx, err := snap.prepareBackup(imp)
 	if backupCtx != nil {
 		for _, bi := range backupCtx.indexes {
 			defer bi.Close(snap.Logger())
@@ -848,7 +848,7 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOptions) (*BackupContext, error) {
+func (snap *Builder) prepareBackup(imp importer.Importer) (*BackupContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
@@ -856,7 +856,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOpt
 
 	backupCtx := &BackupContext{
 		imp:            imp,
-		noXattr:        backupOpts.NoXattr,
+		noXattr:        snap.builderOptions.NoXattr,
 		scanCache:      snap.scanCache,
 		vfsEntBatch:    scanLog.NewBatch(),
 		vfsCache:       snap.vfsCache,
@@ -864,11 +864,11 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BuilderOpt
 		flushEnded:     make(chan error),
 		stateId:        snap.Header.Identifier,
 		scanLog:        scanLog,
-		StateRefresher: backupOpts.StateRefresher,
+		StateRefresher: snap.builderOptions.StateRefresher,
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()
-	if err := backupCtx.excludes.AddRulesFromArray(backupOpts.Excludes); err != nil {
+	if err := backupCtx.excludes.AddRulesFromArray(snap.builderOptions.Excludes); err != nil {
 		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
 
