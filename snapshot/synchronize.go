@@ -173,9 +173,8 @@ func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRef
 	dst.Header.Context = src.Header.Context
 
 	return dst.ingestSync(imp, &BackupOptions{
-		CleanupVFSCache: true,
-		StateRefresher:  stateRefresher,
-		NoCheckpoint:    !checkpoint,
+		StateRefresher: stateRefresher,
+		NoCheckpoint:   !checkpoint,
 	}, commit)
 }
 

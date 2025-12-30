@@ -79,7 +79,6 @@ type BackupOptions struct {
 	NoCheckpoint    bool
 	NoCommit        bool
 	NoXattr         bool
-	CleanupVFSCache bool
 	ForcedTimestamp time.Time
 	StateRefresher  func(objects.MAC) error
 }
