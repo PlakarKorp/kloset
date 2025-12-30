@@ -87,6 +87,8 @@ type Repository struct {
 	storageSizeDirty bool
 
 	macHasherPool *HasherPool
+
+	NoStateToLocalDisk bool
 }
 
 func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
@@ -650,13 +652,15 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		return err
 	}
 
-	tmpStateFile, err := os.Create(r.getStateFilePath(mac))
-	if err != nil {
-		return err
-	}
-	defer tmpStateFile.Close()
+	if !r.NoStateToLocalDisk {
+		tmpStateFile, err := os.Create(r.getStateFilePath(mac))
+		if err != nil {
+			return err
+		}
+		defer tmpStateFile.Close()
 
-	rd = io.TeeReader(rd, tmpStateFile)
+		rd = io.TeeReader(rd, tmpStateFile)
+	}
 
 	span := r.ioStats.GetReadSpan()
 	nbytes, err := r.store.PutState(r.appContext, mac, rd)
