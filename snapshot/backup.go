@@ -379,7 +379,7 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
 
-	return snap.Commit(!options.NoCommit)
+	return nil
 }
 
 func entropy(data []byte) (float64, [256]float64) {
@@ -596,80 +596,6 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 		}
 	}
 	return object, objectMAC, totalDataSize, nil
-}
-
-func (snap *Builder) Commit(commit bool) error {
-	snap.emitter.Info("snapshot.commit.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.commit.end", map[string]any{})
-	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
-	// Maybe this could be stopped earlier.
-
-	if snap.flushTick != nil {
-		snap.flushTerminating.Store(true)
-		snap.flushTick.Stop()
-	}
-
-	serializedHdr, err := snap.Header.Serialize()
-	if err != nil {
-		return err
-	}
-
-	if kp := snap.AppContext().Keypair; kp != nil {
-		serializedHdrMAC := snap.repository.ComputeMAC(serializedHdr)
-		signature := kp.Sign(serializedHdrMAC[:])
-		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature); err != nil {
-			return err
-		}
-	}
-
-	if err := snap.repository.PutBlob(resources.RT_SNAPSHOT, snap.Header.Identifier, serializedHdr); err != nil {
-		return err
-	}
-
-	if !commit {
-		return nil
-	}
-
-	snap.repository.PackerManager.Wait()
-
-	// We are done with packfiles we can flush the last state, either through
-	// the flusher, or manually here.
-	if snap.flushTick != nil {
-		snap.flushEnd <- true
-		close(snap.flushEnd)
-		err = <-snap.flushEnded
-	} else {
-		err = snap.repository.CommitTransaction(snap.Header.Identifier)
-	}
-	if err != nil {
-		snap.Logger().Warn("Failed to push the state to the repository %s", err)
-		return err
-	}
-
-	cache, err := snap.AppContext().GetCache().Repository(snap.repository.Configuration().RepositoryID)
-	if err == nil {
-		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
-	}
-
-	totalSize := uint64(0)
-	totalErrors := uint64(0)
-	for _, source := range snap.Header.Sources {
-		totalSize += source.Summary.Directory.Size + source.Summary.Below.Size
-		totalErrors += source.Summary.Directory.Errors + source.Summary.Below.Errors
-	}
-
-	rBytes := snap.repository.RBytes()
-	wBytes := snap.repository.WBytes()
-
-	target, err := snap.repository.Location()
-	if err != nil {
-		return err
-	}
-
-	snap.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
-
-	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
-	return nil
 }
 
 func (bi *BackupIndexes) Close(log *logging.Logger) {
