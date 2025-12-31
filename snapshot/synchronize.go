@@ -175,13 +175,6 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 }
 
 func (snap *Builder) ingestSync(imp *syncImporter) error {
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-	defer snap.Unlock(done)
-
 	emitter := snap.Emitter("sync")
 	defer emitter.Close()
 
