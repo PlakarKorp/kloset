@@ -9,6 +9,8 @@ import (
 )
 
 type Source struct {
+	ctx context.Context
+
 	imp importer.Importer
 
 	origin string
@@ -35,6 +37,7 @@ func NewSource(ctx context.Context, imp importer.Importer) (*Source, error) {
 	}
 
 	return &Source{
+		ctx:      ctx,
 		imp:      imp,
 		origin:   origin,
 		typ:      typ,
@@ -54,4 +57,8 @@ func (s *Source) GetHeader() header.Source {
 	hSource.Importer.Directory = s.root
 
 	return hSource
+}
+
+func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
+	return s.imp.Scan(s.ctx)
 }
