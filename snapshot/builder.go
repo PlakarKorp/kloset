@@ -43,6 +43,8 @@ type Builder struct {
 	emitter *events.Emitter
 
 	lockReleaser chan bool
+
+	beginTime time.Time
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
@@ -66,6 +68,8 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 		stateId:        identifier,
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan error),
+
+		beginTime: time.Now(),
 	}
 
 	snap.Header.SetContext("Hostname", appContext.Hostname)
@@ -426,6 +430,8 @@ func (snap *Builder) PutSnapshot() ([]byte, error) {
 func (snap *Builder) Commit() error {
 	snap.emitter.Info("snapshot.commit.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.commit.end", map[string]any{})
+
+	snap.Header.Duration = time.Since(snap.beginTime)
 
 	var serializedHdr []byte
 	var err error

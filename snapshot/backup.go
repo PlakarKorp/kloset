@@ -282,8 +282,6 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 }
 
 func (snap *Builder) Backup(imp importer.Importer) error {
-	beginTime := time.Now()
-
 	origin, err := imp.Origin(snap.AppContext())
 	if err != nil {
 		snap.repository.PackerManager.Wait()
@@ -337,8 +335,6 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-
-	snap.Header.Duration = time.Since(beginTime)
 
 	source := header.NewSource()
 	source.Importer.Origin = origin
