@@ -19,10 +19,11 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
-	"github.com/google/uuid"
 )
 
 type Builder struct {
+	appContext *kcontext.KContext
+
 	repository *repository.RepositoryWriter
 
 	//This is protecting the above two pointers, not their underlying objects
@@ -43,21 +44,18 @@ type Builder struct {
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
-	return snap.AppContext().Events().NewSnapshotEmitter(snap.repository.Configuration().RepositoryID, snap.Header.Identifier, workflow)
+	return snap.appContext.Events().NewSnapshotEmitter(snap.repository.Configuration().RepositoryID, snap.Header.Identifier, workflow)
 }
 
-func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC, builderOptions *BuilderOptions) (*Builder, error) {
-	identifier := snapId
-	if identifier == objects.NilMac {
-		identifier = objects.RandomMAC()
-	}
-
-	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
+func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOptions *BuilderOptions) (*Builder, error) {
+	scanCache, err := appContext.GetCache().Scan(identifier)
 	if err != nil {
 		return nil, err
 	}
 
 	snap := &Builder{
+		appContext: appContext,
+
 		scanCache:  scanCache,
 		deltaCache: scanCache,
 
@@ -67,30 +65,40 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 		flushEnd:       make(chan bool),
 		flushEnded:     make(chan error),
 	}
-	snap.repository = repo.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
-	snap.emitter = snap.Emitter("backup")
 
-	if snap.AppContext().Identity != uuid.Nil {
-		snap.Header.Identity.Identifier = snap.AppContext().Identity
-		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
-	}
-	snap.Header.SetContext("Hostname", snap.AppContext().Hostname)
-	snap.Header.SetContext("Username", snap.AppContext().Username)
-	snap.Header.SetContext("OperatingSystem", snap.AppContext().OperatingSystem)
-	snap.Header.SetContext("MachineID", snap.AppContext().MachineID)
-	snap.Header.SetContext("CommandLine", snap.AppContext().CommandLine)
-	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", snap.AppContext().ProcessID))
-	snap.Header.SetContext("Architecture", snap.AppContext().Architecture)
+	snap.Header.SetContext("Hostname", appContext.Hostname)
+	snap.Header.SetContext("Username", appContext.Username)
+	snap.Header.SetContext("OperatingSystem", appContext.OperatingSystem)
+	snap.Header.SetContext("MachineID", appContext.MachineID)
+	snap.Header.SetContext("CommandLine", appContext.CommandLine)
+	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", appContext.ProcessID))
+	snap.Header.SetContext("Architecture", appContext.Architecture)
 	snap.Header.SetContext("NumCPU", fmt.Sprintf("%d", runtime.NumCPU()))
 	snap.Header.SetContext("MaxProcs", fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
-	snap.Header.SetContext("Client", snap.AppContext().Client)
-
-	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
+	snap.Header.SetContext("Client", appContext.Client)
 
 	if !builderOptions.NoCheckpoint {
 		snap.flushTick = time.NewTicker(1 * time.Hour)
 		go snap.flushDeltaState()
 	}
+
+	return snap, nil
+}
+
+func Create(repo *repository.Repository, packingStrategy repository.RepositoryType, packfileTmpDir string, snapId objects.MAC, builderOptions *BuilderOptions) (*Builder, error) {
+	identifier := snapId
+	if identifier == objects.NilMac {
+		identifier = objects.RandomMAC()
+	}
+
+	snap, err := newBuilder(repo.AppContext(), identifier, builderOptions)
+	if err != nil {
+		return nil, err
+	}
+	snap.repository = repo.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
+	snap.emitter = snap.Emitter("backup")
+
+	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
 	return snap, nil
 }
@@ -101,46 +109,15 @@ func (snap *Builder) WithVFSCache(vfsCache *vfs.Filesystem) {
 
 func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOptions *BuilderOptions) (*Builder, error) {
 	identifier := objects.RandomMAC()
-	scanCache, err := repo.AppContext().GetCache().Scan(identifier)
+
+	snap, err := newBuilder(repo.AppContext(), identifier, builderOptions)
 	if err != nil {
 		return nil, err
-	}
-
-	snap := &Builder{
-		scanCache:  scanCache,
-		deltaCache: scanCache,
-
-		builderOptions: builderOptions,
-		Header:         header.NewHeader("default", identifier),
-		stateId:        identifier,
-		flushEnd:       make(chan bool),
-		flushEnded:     make(chan error),
 	}
 	snap.repository = repo
 	snap.emitter = snap.Emitter("backup")
 
-	if snap.AppContext().Identity != uuid.Nil {
-		snap.Header.Identity.Identifier = snap.AppContext().Identity
-		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
-	}
-
-	snap.Header.SetContext("Hostname", snap.AppContext().Hostname)
-	snap.Header.SetContext("Username", snap.AppContext().Username)
-	snap.Header.SetContext("OperatingSystem", snap.AppContext().OperatingSystem)
-	snap.Header.SetContext("MachineID", snap.AppContext().MachineID)
-	snap.Header.SetContext("CommandLine", snap.AppContext().CommandLine)
-	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", snap.AppContext().ProcessID))
-	snap.Header.SetContext("Architecture", snap.AppContext().Architecture)
-	snap.Header.SetContext("NumCPU", fmt.Sprintf("%d", runtime.NumCPU()))
-	snap.Header.SetContext("MaxProcs", fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
-	snap.Header.SetContext("Client", snap.AppContext().Client)
-
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
-
-	if !builderOptions.NoCheckpoint {
-		snap.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState()
-	}
 
 	return snap, nil
 }
@@ -148,10 +125,6 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 
 	identifier := objects.RandomMAC()
-	scanCache, err := src.repository.AppContext().GetCache().Scan(identifier)
-	if err != nil {
-		return nil, err
-	}
 
 	location, err := src.repository.Location()
 	if err != nil {
@@ -165,15 +138,9 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 		packingStrategy = repository.DefaultType
 	}
 
-	snap := &Builder{
-		scanCache:  scanCache,
-		deltaCache: scanCache,
-
-		builderOptions: builderOptions,
-		Header:         header.NewHeader("default", identifier),
-		stateId:        identifier,
-		flushEnd:       make(chan bool),
-		flushEnded:     make(chan error),
+	snap, err := newBuilder(src.AppContext(), identifier, builderOptions)
+	if err != nil {
+		return nil, err
 	}
 
 	snap.Header.Timestamp = time.Now()
@@ -195,31 +162,10 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	snap.Header.Sources = make([]header.Source, len(src.Header.Sources))
 	copy(snap.Header.Sources, src.Header.Sources)
 
-	snap.repository = src.repository.NewRepositoryWriter(scanCache, snap.Header.Identifier, packingStrategy, "")
-
+	snap.repository = src.repository.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, "")
 	snap.emitter = snap.Emitter("backup")
 
-	if snap.AppContext().Identity != uuid.Nil {
-		snap.Header.Identity.Identifier = snap.AppContext().Identity
-		snap.Header.Identity.PublicKey = snap.AppContext().Keypair.PublicKey
-	}
-	snap.Header.SetContext("Hostname", snap.AppContext().Hostname)
-	snap.Header.SetContext("Username", snap.AppContext().Username)
-	snap.Header.SetContext("OperatingSystem", snap.AppContext().OperatingSystem)
-	snap.Header.SetContext("MachineID", snap.AppContext().MachineID)
-	snap.Header.SetContext("CommandLine", snap.AppContext().CommandLine)
-	snap.Header.SetContext("ProcessID", fmt.Sprintf("%d", snap.AppContext().ProcessID))
-	snap.Header.SetContext("Architecture", snap.AppContext().Architecture)
-	snap.Header.SetContext("NumCPU", fmt.Sprintf("%d", runtime.NumCPU()))
-	snap.Header.SetContext("MaxProcs", fmt.Sprintf("%d", runtime.GOMAXPROCS(0)))
-	snap.Header.SetContext("Client", snap.AppContext().Client)
-
 	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
-
-	if !builderOptions.NoCheckpoint {
-		snap.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState()
-	}
 
 	return snap, nil
 }
@@ -240,7 +186,7 @@ func (snap *Builder) Close() error {
 }
 
 func (snap *Builder) Logger() *logging.Logger {
-	return snap.AppContext().GetLogger()
+	return snap.appContext.GetLogger()
 }
 
 func (snap *Builder) AppContext() *kcontext.KContext {
@@ -254,7 +200,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 		return lockDone, nil
 	}
 
-	lock := repository.NewSharedLock(snap.AppContext().Hostname)
+	lock := repository.NewSharedLock(snap.appContext.Hostname)
 
 	buffer := &bytes.Buffer{}
 	err := lock.SerializeToStream(buffer)
@@ -318,7 +264,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 				snap.repository.DeleteLock(snap.Header.Identifier)
 				return
 			case <-time.After(repository.LOCK_REFRESH_RATE):
-				lock := repository.NewSharedLock(snap.AppContext().Hostname)
+				lock := repository.NewSharedLock(snap.appContext.Hostname)
 
 				buffer := &bytes.Buffer{}
 
@@ -341,7 +287,7 @@ func (snap *Builder) Unlock(ping chan bool) {
 func (snap *Builder) flushDeltaState() {
 	for {
 		select {
-		case <-snap.repository.AppContext().Done():
+		case <-snap.appContext.Done():
 			return
 		case <-snap.flushEnd:
 			// End of backup we push the last and final State.
@@ -374,7 +320,7 @@ func (snap *Builder) flushDeltaState() {
 			identifier := objects.RandomMAC()
 			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
 			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
+				snap.appContext.Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
 				return
 			}
 
@@ -385,19 +331,19 @@ func (snap *Builder) flushDeltaState() {
 			// the resulting statefile to the repo.
 			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, snap.stateId)
 			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
+				snap.appContext.Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
 				return
 			}
 
 			// XXX: Pass down the path to the delta state db.
 			if snap.builderOptions.StateRefresher != nil {
 				if err := snap.builderOptions.StateRefresher(); err != nil {
-					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					snap.appContext.Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
 					return
 				}
 			} else {
 				if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					snap.appContext.Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
 					return
 				}
 			}
@@ -428,7 +374,7 @@ func (snap *Builder) PutSnapshot() ([]byte, error) {
 		return nil, err
 	}
 
-	if kp := snap.AppContext().Keypair; kp != nil {
+	if kp := snap.appContext.Keypair; kp != nil {
 		serializedHdrMAC := snap.repository.ComputeMAC(serializedHdr)
 		signature := kp.Sign(serializedHdrMAC[:])
 		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature); err != nil {
@@ -469,7 +415,7 @@ func (snap *Builder) Commit() error {
 		return err
 	}
 
-	cache, err := snap.AppContext().GetCache().Repository(snap.repository.Configuration().RepositoryID)
+	cache, err := snap.appContext.GetCache().Repository(snap.repository.Configuration().RepositoryID)
 	if err == nil {
 		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
