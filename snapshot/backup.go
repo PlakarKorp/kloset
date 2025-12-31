@@ -215,7 +215,7 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := sourceCtx.source.imp.Scan(snap.AppContext())
+	scanner, err := sourceCtx.source.GetScanner()
 	if err != nil {
 		return err
 	}
