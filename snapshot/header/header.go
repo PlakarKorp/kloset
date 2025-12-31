@@ -93,6 +93,8 @@ type Header struct {
 	Tags            []string           `msgpack:"tags" json:"tags"`
 	Context         []KeyValue         `msgpack:"context" json:"context"`
 	Sources         []Source           `msgpack:"sources" json:"sources"`
+	Sequence        uuid.UUID          `msgpack:"sequence" json:"sequence"`
+	Parent          objects.MAC        `msgpack:"parent" json:"parent"`
 }
 
 func NewHeader(name string, identifier objects.MAC) *Header {
