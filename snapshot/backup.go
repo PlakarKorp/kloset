@@ -17,7 +17,6 @@ import (
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
-	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -37,8 +36,7 @@ type sourceIndexes struct {
 }
 
 type sourceContext struct {
-	imp      importer.Importer
-	excludes *exclude.RuleSet
+	source *Source
 
 	vfsCache *vfs.Filesystem
 
@@ -142,7 +140,7 @@ func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *
 		return false
 	}
 
-	return sourceCtx.excludes.IsExcluded(pathname, isDir)
+	return sourceCtx.source.excludes.IsExcluded(pathname, isDir)
 }
 
 func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
@@ -217,7 +215,7 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := sourceCtx.imp.Scan(snap.AppContext())
+	scanner, err := sourceCtx.source.imp.Scan(snap.AppContext())
 	if err != nil {
 		return err
 	}
@@ -281,26 +279,12 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 	return nil
 }
 
-func (snap *Builder) Backup(imp importer.Importer) error {
-	origin, err := imp.Origin(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
+func (snap *Builder) Import(source *Source) error {
+	return snap.Backup(source)
+}
 
-	typ, err := imp.Type(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	root, err := imp.Root(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	sourceCtx, err := snap.prepareSource(imp)
+func (snap *Builder) Backup(source *Source) error {
+	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
 	}
@@ -336,15 +320,12 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 		return err
 	}
 
-	source := header.NewSource()
-	source.Importer.Origin = origin
-	source.Importer.Type = typ
-	source.Importer.Directory = root
-	source.VFS = *vfsHeader
-	source.Summary = *rootSummary
-	source.Indexes = indexes
+	headerSource := source.GetHeader()
+	headerSource.VFS = *vfsHeader
+	headerSource.Summary = *rootSummary
+	headerSource.Indexes = indexes
 
-	snap.Header.Sources = append(snap.Header.Sources, source)
+	snap.Header.Sources = append(snap.Header.Sources, headerSource)
 
 	return nil
 }
@@ -641,22 +622,17 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareSource(imp importer.Importer) (*sourceContext, error) {
+func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
 	}
 
 	sourceCtx := &sourceContext{
-		imp:         imp,
+		source:      source,
 		vfsEntBatch: scanLog.NewBatch(),
 		vfsCache:    snap.vfsCache,
 		scanLog:     scanLog,
-	}
-
-	sourceCtx.excludes = exclude.NewRuleSet()
-	if err := sourceCtx.excludes.AddRulesFromArray(snap.builderOptions.Excludes); err != nil {
-		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
 	}
 
 	if bi, err := snap.makeBackupIndexes(); err != nil {
