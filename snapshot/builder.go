@@ -334,6 +334,12 @@ func (snap *Builder) flushDeltaState() {
 				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
 			}
 
+			if snap.builderOptions.StateRefresher != nil {
+				if err := snap.builderOptions.StateRefresher(snap.stateId); err != nil {
+					snap.Logger().Warn("Failed to reload the final state to the repository %s", err)
+				}
+			}
+
 			// See below
 			if snap.deltaCache != snap.scanCache {
 				snap.deltaCache.Close()
@@ -373,9 +379,8 @@ func (snap *Builder) flushDeltaState() {
 				return
 			}
 
-			// XXX: Pass down the path to the delta state db.
 			if snap.builderOptions.StateRefresher != nil {
-				if err := snap.builderOptions.StateRefresher(); err != nil {
+				if err := snap.builderOptions.StateRefresher(oldStateId); err != nil {
 					snap.appContext.Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
 					return
 				}
