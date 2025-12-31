@@ -284,13 +284,6 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 func (snap *Builder) Backup(imp importer.Importer) error {
 	beginTime := time.Now()
 
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-	defer snap.Unlock(done)
-
 	origin, err := imp.Origin(snap.AppContext())
 	if err != nil {
 		snap.repository.PackerManager.Wait()
@@ -307,22 +300,6 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
-	}
-
-	options := snap.builderOptions
-
-	if !options.ForcedTimestamp.IsZero() {
-		if options.ForcedTimestamp.Before(time.Now()) {
-			snap.Header.Timestamp = options.ForcedTimestamp.UTC()
-		}
-	}
-
-	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
-
-	if options.Name == "" {
-		snap.Header.Name = root + " @ " + origin
-	} else {
-		snap.Header.Name = options.Name
 	}
 
 	sourceCtx, err := snap.prepareBackup(imp)

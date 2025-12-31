@@ -41,6 +41,8 @@ type Builder struct {
 
 	Header  *header.Header
 	emitter *events.Emitter
+
+	lockReleaser chan bool
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
@@ -82,6 +84,15 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 		go snap.flushDeltaState()
 	}
 
+	if !builderOptions.ForcedTimestamp.IsZero() {
+		if builderOptions.ForcedTimestamp.Before(time.Now()) {
+			snap.Header.Timestamp = builderOptions.ForcedTimestamp.UTC()
+		}
+	}
+
+	snap.Header.Tags = append(snap.Header.Tags, builderOptions.Tags...)
+	snap.Header.Name = builderOptions.Name
+
 	return snap, nil
 }
 
@@ -97,6 +108,13 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	}
 	snap.repository = repo.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
 	snap.emitter = snap.Emitter("backup")
+
+	done, err := snap.Lock()
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return nil, err
+	}
+	snap.lockReleaser = done
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
@@ -116,6 +134,13 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 	}
 	snap.repository = repo
 	snap.emitter = snap.Emitter("backup")
+
+	done, err := snap.Lock()
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return nil, err
+	}
+	snap.lockReleaser = done
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
@@ -165,6 +190,13 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	snap.repository = src.repository.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, "")
 	snap.emitter = snap.Emitter("backup")
 
+	done, err := snap.Lock()
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return nil, err
+	}
+	snap.lockReleaser = done
+
 	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
 
 	return snap, nil
@@ -177,6 +209,8 @@ func (snap *Builder) Repository() *repository.Repository {
 func (snap *Builder) Close() error {
 	snap.Logger().Trace("snapshotBuilder", "%x: Close(): %x", snap.Header.Identifier, snap.Header.GetIndexShortID())
 	defer snap.emitter.Close()
+
+	snap.Unlock()
 
 	if snap.scanCache != nil {
 		return snap.scanCache.Close()
@@ -280,8 +314,8 @@ func (snap *Builder) Lock() (chan bool, error) {
 	return lockDone, nil
 }
 
-func (snap *Builder) Unlock(ping chan bool) {
-	close(ping)
+func (snap *Builder) Unlock() {
+	close(snap.lockReleaser)
 }
 
 func (snap *Builder) flushDeltaState() {
