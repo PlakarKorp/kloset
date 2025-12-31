@@ -300,7 +300,7 @@ func (snap *Builder) Backup(imp importer.Importer) error {
 		return err
 	}
 
-	sourceCtx, err := snap.prepareBackup(imp)
+	sourceCtx, err := snap.prepareSource(imp)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
 	}
@@ -641,7 +641,7 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer) (*sourceContext, error) {
+func (snap *Builder) prepareSource(imp importer.Importer) (*sourceContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err

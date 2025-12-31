@@ -178,7 +178,7 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	emitter := snap.Emitter("sync")
 	defer emitter.Close()
 
-	backupCtx, err := snap.prepareBackup(imp)
+	backupCtx, err := snap.prepareSource(imp)
 	if backupCtx != nil {
 		defer backupCtx.indexes.Close(snap.Logger())
 	}
