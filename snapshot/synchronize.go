@@ -178,8 +178,18 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	emitter := snap.Emitter("sync")
 	defer emitter.Close()
 
-	source, err := NewSource(snap.AppContext(), imp)
+	typ, err := imp.Type(snap.AppContext())
 	if err != nil {
+		return err
+	}
+
+	origin, err := imp.Origin(snap.AppContext())
+	if err != nil {
+		return err
+	}
+
+	source := NewSource(snap.AppContext(), typ, origin, 0)
+	if err := source.AddImporter(imp); err != nil {
 		return err
 	}
 
