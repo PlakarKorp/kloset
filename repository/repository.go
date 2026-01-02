@@ -150,6 +150,13 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		ioStats:          iostat.New(),
 	}
 
+	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), false)
+	if err != nil {
+		return nil, err
+	}
+
+	r.state = state.NewLocalState(cacheInstance)
+
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
 		hasher := r.GetMACHasher()
 		hasher.Reset()
@@ -163,7 +170,7 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 	return r, nil
 }
 
-func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte) (*Repository, error) {
+func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte, readonlyCache bool) (*Repository, error) {
 	t0 := time.Now()
 	defer func() {
 		ctx.GetLogger().Trace("repository", "NewNoRebuild(store=%p): %s", store, time.Since(t0))
@@ -206,7 +213,7 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		ioStats:          iostat.New(),
 	}
 
-	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), true)
+	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), readonlyCache)
 	if err != nil {
 		return nil, err
 	}
@@ -237,12 +244,80 @@ func (r *Repository) getStateFilePath(stateID objects.MAC) string {
 }
 
 func (r *Repository) RebuildState() error {
-	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), false)
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "rebuildState(): %s", time.Since(t0))
+	}()
+
+	// identify local states
+	localStates, err := r.state.GetStates()
 	if err != nil {
 		return err
 	}
 
-	return r.RebuildStateWithCache(cacheInstance)
+	// identify remote states
+	remoteStates, err := r.GetStates()
+	if err != nil {
+		return err
+	}
+
+	remoteStatesMap := make(map[objects.MAC]struct{})
+	for _, stateID := range remoteStates {
+		remoteStatesMap[stateID] = struct{}{}
+	}
+
+	// build delta of local and remote states
+	localStatesMap := make(map[objects.MAC]struct{})
+	outdatedStates := make([]objects.MAC, 0)
+	for stateID := range localStates {
+		localStatesMap[stateID] = struct{}{}
+
+		if _, exists := remoteStatesMap[stateID]; !exists {
+			outdatedStates = append(outdatedStates, stateID)
+		}
+	}
+
+	missingStates := make([]objects.MAC, 0)
+	for _, stateID := range remoteStates {
+		if _, exists := localStatesMap[stateID]; !exists {
+			missingStates = append(missingStates, stateID)
+		}
+	}
+
+	rebuilt := false
+	for _, stateID := range missingStates {
+		remoteStateRd, err := r.GetState(stateID)
+		if err != nil {
+			return err
+		}
+
+		err = r.state.MergeState(stateID, remoteStateRd)
+		remoteStateRd.Close()
+
+		if err != nil {
+			return err
+		}
+
+		rebuilt = true
+	}
+
+	// delete local states that are not present in remote
+	for _, stateID := range outdatedStates {
+		if err := r.state.DelState(stateID); err != nil {
+			return err
+		}
+		rebuilt = true
+	}
+
+	// The first Serial id is our repository ID, this allows us to deal
+	// naturally with concurrent first backups.
+	r.state.UpdateSerialOr(r.configuration.RepositoryID)
+
+	if rebuilt {
+		r.storageSizeDirty = true
+	}
+
+	return nil
 }
 
 func (r *Repository) IngestStateFile(stateID objects.MAC) error {
@@ -267,6 +342,8 @@ func (r *Repository) IngestStateFile(stateID objects.MAC) error {
 	return nil
 }
 
+// Rebuild state with a specified different cache, this will go away in the
+// future.
 func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) error {
 	t0 := time.Now()
 	defer func() {
