@@ -236,6 +236,10 @@ func (ls *LocalState) PutState(stateID objects.MAC) error {
 	return nil
 }
 
+func (ls *LocalState) GetStates() (map[objects.MAC][]byte, error) {
+	return ls.cache.GetStates()
+}
+
 /* On disk format is <EntryType><EntryLength><Entry>...N<header>
  * Counting keys would mean iterating twice so we reverse the format and add a
  * type.
