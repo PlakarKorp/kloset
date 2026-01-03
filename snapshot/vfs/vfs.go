@@ -308,7 +308,7 @@ func (fsc *Filesystem) ReadDir(path string) ([]fs.DirEntry, error) {
 		if err != nil {
 			return nil, err
 		}
-		entries = append(entries, entry) // *Entry must implement fs.DirEntry
+		entries = append(entries, entry)
 	}
 
 	return entries, nil
