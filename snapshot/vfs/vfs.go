@@ -2,7 +2,6 @@ package vfs
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"io/fs"
 	"iter"
@@ -51,7 +50,6 @@ type Filesystem struct {
 	errors  *btree.BTree[string, objects.MAC, objects.MAC]
 	dirpack *btree.BTree[string, objects.MAC, objects.MAC]
 	repo    *repository.Repository
-	chroot  string
 	mount   string
 }
 
@@ -137,38 +135,9 @@ func (fsc *Filesystem) Mount(pathname string) (*Filesystem, error) {
 		return nil, fs.ErrInvalid
 	}
 
-	if fsc.chroot != "" {
-		return nil, fmt.Errorf("fs already chrooted; can't mount")
-	}
-
 	newfs := *fsc
 	fsc.mount = pathname
 	return &newfs, nil
-}
-
-func (fsc *Filesystem) Chroot(pathname string) (*Filesystem, error) {
-	pathname = path.Clean(pathname)
-	if !path.IsAbs(pathname) {
-		return nil, fs.ErrInvalid
-	}
-
-	if fsc.mount != "" {
-		return nil, fmt.Errorf("fs already mounted; can't chroot")
-	}
-
-	entry, err := fsc.GetEntry(pathname)
-	if err != nil {
-		return nil, err
-	}
-
-	if !entry.IsDir() {
-		return nil, fs.ErrInvalid
-	}
-
-	chrootedVFS := *fsc
-	chrootedVFS.chroot = entry.Path()
-
-	return &chrootedVFS, nil
 }
 
 func (fsc *Filesystem) lookup(entrypath string) (*Entry, error) {
@@ -193,12 +162,6 @@ func (fsc *Filesystem) lookup(entrypath string) (*Entry, error) {
 func (fsc *Filesystem) patch(entry *Entry) *Entry {
 	var newpath string
 
-	if fsc.chroot != "" {
-		newpath = strings.TrimPrefix(entry.Path(), fsc.chroot)
-		if newpath == "" {
-			newpath = "/"
-		}
-	}
 	if fsc.mount != "" {
 		newpath = path.Join(fsc.mount, entry.Path())
 	}
@@ -391,9 +354,7 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 		entrypath = "/" + entrypath
 	}
 
-	if fsc.chroot != "" {
-		entrypath = path.Join(fsc.chroot, entrypath)
-	} else if fsc.mount != "" {
+	if fsc.mount != "" {
 		if !strings.HasPrefix(entrypath, fsc.mount) {
 			return nil, errors.ErrUnsupported
 		}
@@ -477,9 +438,7 @@ func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
 		entrypath = "/" + entrypath
 	}
 
-	if fsc.chroot != "" {
-		entrypath = path.Join(fsc.chroot, entrypath)
-	} else if fsc.mount != "" {
+	if fsc.mount != "" {
 		if !strings.HasPrefix(entrypath, fsc.mount) {
 			return nil, errors.ErrUnsupported
 		}
