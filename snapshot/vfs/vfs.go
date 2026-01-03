@@ -297,17 +297,21 @@ func (fsc *Filesystem) Stat(name string) (fs.FileInfo, error) {
 	return entry.FileInfo, nil
 }
 
-func (fsc *Filesystem) ReadDir(path string) (entries []fs.DirEntry, err error) {
-	fp, err := fsc.Open(path)
+func (fsc *Filesystem) ReadDir(path string) ([]fs.DirEntry, error) {
+	it, err := fsc.Children(path)
 	if err != nil {
-		return
-	}
-	dir, ok := fp.(fs.ReadDirFile)
-	if !ok {
-		return entries, fs.ErrInvalid
+		return nil, err
 	}
 
-	return dir.ReadDir(-1)
+	var entries []fs.DirEntry
+	for entry, err := range it {
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, entry)
+	}
+
+	return entries, nil
 }
 
 func (fsc *Filesystem) filesbelow(prefix string) iter.Seq2[*Entry, error] {
