@@ -21,6 +21,8 @@ import (
 func init() {
 	versioning.Register(resources.RT_VFS_BTREE, versioning.FromString(btree.BTREE_VERSION))
 	versioning.Register(resources.RT_VFS_NODE, versioning.FromString(btree.NODE_VERSION))
+	versioning.Register(resources.RT_VFS_CACHE, versioning.FromString(btree.NODE_VERSION))
+
 }
 
 type Score struct {

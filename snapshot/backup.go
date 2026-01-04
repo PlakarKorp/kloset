@@ -14,9 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/singleflight"
+
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/lru"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/logging"
@@ -64,6 +67,14 @@ type BackupContext struct {
 	emitter *events.Emitter
 
 	scanLog *scanlog.ScanLog
+
+	// POC
+	importerType   string
+	importerOrigin string
+
+	dirpackLRU *lru.Cache[string, *Dirpack]
+	dirpackMu  sync.Mutex
+	dirpackSF  singleflight.Group
 }
 
 type scanStats struct {
@@ -437,6 +448,9 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 		return err
 	}
 	backupCtx.emitter = emitter
+
+	backupCtx.importerType = typ
+	backupCtx.importerOrigin = origin
 
 	defer backupCtx.scanLog.Close()
 
@@ -865,6 +879,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 		stateId:        snap.Header.Identifier,
 		scanLog:        scanLog,
 		StateRefresher: backupOpts.StateRefresher,
+		dirpackLRU:     lru.New[string, *Dirpack](128, nil),
 	}
 
 	backupCtx.excludes = exclude.NewRuleSet()
@@ -881,6 +896,76 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
+func (snap *Builder) loadDirpackFromRepo(backupCtx *BackupContext, parentPath string) (*Dirpack, error) {
+	vfsCacheMAC := snap.repository.ComputeMAC([]byte(
+		fmt.Sprintf("%s:%s:%s", backupCtx.importerType, backupCtx.importerOrigin, parentPath),
+	))
+
+	// all errors are treated as cache miss
+	dirpackKey, err := snap.repository.GetBlobBytes(resources.RT_VFS_CACHE, vfsCacheMAC)
+	if err != nil {
+		return nil, nil
+	}
+
+	buffer, err := snap.repository.GetBlobBytes(resources.RT_OBJECT, objects.MAC(dirpackKey))
+	if err != nil {
+		return nil, nil
+	}
+
+	obj, err := objects.NewObjectFromBytes(buffer)
+	if err != nil {
+		return nil, nil
+	}
+
+	var size int64
+	for _, c := range obj.Chunks {
+		size += int64(c.Length)
+	}
+
+	rd := vfs.NewObjectReader(snap.Repository(), obj, size)
+	dp, err := NewDirpackFromReader(rd)
+	if err != nil {
+		return nil, nil
+	}
+	return dp, nil
+}
+
+func (snap *Builder) getDirpack(backupCtx *BackupContext, parentPath string) (*Dirpack, error) {
+	// fast path: we check cache under a short lock
+	backupCtx.dirpackMu.Lock()
+	if dp, ok := backupCtx.dirpackLRU.Get(parentPath); ok {
+		backupCtx.dirpackMu.Unlock()
+		return dp, nil
+	}
+	backupCtx.dirpackMu.Unlock()
+
+	// slow path: only one goroutine does the load for this parentPath.
+	v, err, _ := backupCtx.dirpackSF.Do(parentPath, func() (any, error) {
+		// re-check after entering the singleflight
+		backupCtx.dirpackMu.Lock()
+		if dp, ok := backupCtx.dirpackLRU.Get(parentPath); ok {
+			backupCtx.dirpackMu.Unlock()
+			return dp, nil
+		}
+		backupCtx.dirpackMu.Unlock()
+
+		dp, err := snap.loadDirpackFromRepo(backupCtx, parentPath)
+		if err != nil {
+			return nil, err
+		}
+
+		backupCtx.dirpackMu.Lock()
+		backupCtx.dirpackLRU.Put(parentPath, dp)
+		backupCtx.dirpackMu.Unlock()
+
+		return dp, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.(*Dirpack), nil
+}
+
 func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
 	if backupCtx.vfsCache == nil {
 		return nil, nil
@@ -890,7 +975,14 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 		return nil, nil
 	}
 
-	entry, err := backupCtx.vfsCache.GetEntryNoFollow(record.Pathname)
+	parentPath := path.Dir(record.Pathname)
+
+	dirpack, err := snap.getDirpack(backupCtx, parentPath)
+	if err != nil || dirpack == nil {
+		return nil, nil
+	}
+
+	entry, err := dirpack.GetEntry(path.Base(record.Pathname))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -918,9 +1010,9 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 		MAC:         entry.MAC,
 		ObjectMAC:   entry.Object,
 		FileInfo:    entry.FileInfo,
-		Chunks:      uint64(len(entry.ResolvedObject.Chunks)),
-		Entropy:     entry.ResolvedObject.Entropy,
-		ContentType: entry.ResolvedObject.ContentType,
+		Chunks:      entry.ChunksCount,
+		Entropy:     entry.Entropy,
+		ContentType: entry.ContentType,
 	}, nil
 }
 
@@ -988,6 +1080,9 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 
 	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
 		fileEntryMAC = cachedPath.MAC
+		fileEntry.ChunksCount = cachedPath.Chunks
+		fileEntry.Entropy = cachedPath.Entropy
+		fileEntry.ContentType = cachedPath.ContentType
 		if fileEntry.Object == (objects.MAC{}) && cachedPath.ObjectMAC != (objects.MAC{}) {
 			fileEntry.Object = cachedPath.ObjectMAC
 		}
@@ -1021,6 +1116,9 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 			Entropy:     meta.Entropy,
 			ContentType: meta.ContentType,
 		}
+		fileEntry.ChunksCount = meta.Chunks
+		fileEntry.Entropy = meta.Entropy
+		fileEntry.ContentType = meta.ContentType
 
 		serializedCachedPath, err = cp.Serialize()
 		if err != nil {
@@ -1038,7 +1136,6 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 	if err := backupCtx.indexes[0].ctidx.Insert(k, fileEntryMAC); err != nil {
 		return err
 	}
-
 	return backupCtx.batchRecordEntry(fileEntry)
 }
 
@@ -1385,6 +1482,13 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 
 		if err := backupCtx.fileidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
 			return nil, nil, err
+		}
+
+		if backupCtx.vfsCache != nil {
+			vfsCacheMAC := snap.repository.ComputeMAC([]byte(fmt.Sprintf("%s:%s:%s", backupCtx.importerType, backupCtx.importerOrigin, dirPath)))
+			if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_CACHE, vfsCacheMAC, res.mac[:]); err != nil {
+				return nil, nil, err
+			}
 		}
 	}
 
