@@ -1,7 +1,6 @@
 package vfs
 
 import (
-	"errors"
 	"io"
 	"io/fs"
 	"iter"
@@ -50,7 +49,6 @@ type Filesystem struct {
 	errors  *btree.BTree[string, objects.MAC, objects.MAC]
 	dirpack *btree.BTree[string, objects.MAC, objects.MAC]
 	repo    *repository.Repository
-	mount   string
 }
 
 func PathCmp(a, b string) int {
@@ -127,19 +125,6 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	return fs, nil
 }
 
-// Mount return a Filesystem that pretends to be "mounted" at
-// pathname.  All the vfs entries will result below pathname.
-func (fsc *Filesystem) Mount(pathname string) (*Filesystem, error) {
-	pathname = path.Clean(pathname)
-	if !path.IsAbs(pathname) {
-		return nil, fs.ErrInvalid
-	}
-
-	newfs := *fsc
-	fsc.mount = pathname
-	return &newfs, nil
-}
-
 func (fsc *Filesystem) lookup(entrypath string) (*Entry, error) {
 	entrypath = path.Clean(entrypath)
 	if !path.IsAbs(entrypath) {
@@ -155,22 +140,6 @@ func (fsc *Filesystem) lookup(entrypath string) (*Entry, error) {
 	}
 
 	return fsc.ResolveEntry(csum)
-}
-
-// patch patches the given entry wrt the current Chroot and/or Mount
-// operation, so that later paths returned by it are proper.
-func (fsc *Filesystem) patch(entry *Entry) *Entry {
-	var newpath string
-
-	if fsc.mount != "" {
-		newpath = path.Join(fsc.mount, entry.Path())
-	}
-
-	if newpath != "" {
-		entry.FileInfo.Lname = path.Base(newpath)
-		entry.ParentPath = path.Dir(newpath)
-	}
-	return entry
 }
 
 func (fsc *Filesystem) ResolveEntry(csum objects.MAC) (*Entry, error) {
@@ -210,7 +179,7 @@ func (fsc *Filesystem) ResolveEntry(csum objects.MAC) (*Entry, error) {
 		entry.ResolvedObject = obj
 	}
 
-	return fsc.patch(entry), nil
+	return entry, nil
 }
 
 func (fsc *Filesystem) ResolveXattr(mac objects.MAC) (*Xattr, error) {
@@ -358,15 +327,7 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 		entrypath = "/" + entrypath
 	}
 
-	if fsc.mount != "" {
-		if !strings.HasPrefix(entrypath, fsc.mount) {
-			return nil, errors.ErrUnsupported
-		}
-		entrypath = strings.TrimPrefix(entrypath, fsc.mount)
-		entrypath = path.Clean(entrypath)
-	} else {
-		entrypath = path.Clean(entrypath)
-	}
+	entrypath = path.Clean(entrypath)
 	if !path.IsAbs(entrypath) {
 		return nil, fs.ErrInvalid
 	}
@@ -419,7 +380,7 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 	}
 
 	if entry.FileInfo.Lmode&os.ModeSymlink == 0 {
-		return fsc.patch(entry), nil
+		return entry, nil
 	}
 
 	if path.IsAbs(entry.SymlinkTarget) {
@@ -427,14 +388,14 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 		if err != nil {
 			return nil, err
 		}
-		return fsc.patch(entry), nil
+		return entry, nil
 	}
 
 	entry, err = fsc.lookup(path.Join(path.Dir(entry.Path()), entry.SymlinkTarget))
 	if err != nil {
 		return nil, err
 	}
-	return fsc.patch(entry), nil
+	return entry, nil
 }
 
 func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
@@ -442,15 +403,7 @@ func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
 		entrypath = "/" + entrypath
 	}
 
-	if fsc.mount != "" {
-		if !strings.HasPrefix(entrypath, fsc.mount) {
-			return nil, errors.ErrUnsupported
-		}
-		entrypath = strings.TrimPrefix(entrypath, fsc.mount)
-		entrypath = path.Clean(entrypath)
-	} else {
-		entrypath = path.Clean(entrypath)
-	}
+	entrypath = path.Clean(entrypath)
 	if !path.IsAbs(entrypath) {
 		return nil, fs.ErrInvalid
 	}
@@ -468,7 +421,7 @@ func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
 		return nil, err
 	}
 
-	return fsc.patch(entry), nil
+	return entry, nil
 }
 
 func (fsc *Filesystem) Children(path string) (iter.Seq2[*Entry, error], error) {
