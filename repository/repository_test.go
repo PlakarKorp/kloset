@@ -269,7 +269,7 @@ func TestRepositoryCreation(t *testing.T) {
 		err = r.Create(ctx, wrappedConfig)
 		require.NoError(t, err)
 
-		repo, err := repository.NewNoRebuild(ctx, key, r, wrappedConfig)
+		repo, err := repository.NewNoRebuild(ctx, key, r, wrappedConfig, false)
 		require.NoError(t, err)
 		require.NotNil(t, repo)
 		size, err := repo.StorageSize()
