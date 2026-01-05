@@ -28,9 +28,6 @@ func TestSimpleBackup(t *testing.T) {
 	fs, err := snap.Filesystem()
 	require.NoError(t, err)
 
-	fs, err = fs.Chroot(snap.Header.GetSource(0).Importer.Directory)
-	require.NoError(t, err)
-
 	fp, err := fs.Open("hello.txt")
 	require.NoError(t, err, "can't open expected file")
 	require.NotNil(t, fp)
