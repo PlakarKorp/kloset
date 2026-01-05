@@ -11,7 +11,7 @@ require (
 	github.com/go-git/go-git/v5 v5.16.4
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
-	github.com/mattn/go-sqlite3 v1.14.32
+	github.com/mattn/go-sqlite3 v1.14.33
 	github.com/nickball/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5
 	github.com/pierrec/lz4/v4 v4.1.23
 	github.com/stretchr/testify v1.11.1
