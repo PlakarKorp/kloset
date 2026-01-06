@@ -58,7 +58,7 @@ type BackupContext struct {
 	flushEnd         chan bool
 	flushEnded       chan error
 	flushTerminating atomic.Bool
-	StateRefresher   func(objects.MAC) error
+	StateRefresher   func(objects.MAC, bool) error
 
 	indexes []*BackupIndexes // Aligned with the number of importers.
 
@@ -82,7 +82,7 @@ type BackupOptions struct {
 	NoXattr         bool
 	CleanupVFSCache bool
 	ForcedTimestamp time.Time
-	StateRefresher  func(objects.MAC) error
+	StateRefresher  func(objects.MAC, bool) error
 }
 
 var (
@@ -336,7 +336,7 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 			}
 
 			if bc.StateRefresher != nil {
-				if err := bc.StateRefresher(bc.stateId); err != nil {
+				if err := bc.StateRefresher(bc.stateId, true); err != nil {
 					snap.Logger().Warn("Failed to reload the final state to the repository %s", err)
 				}
 			}
@@ -380,9 +380,8 @@ func (snap *Builder) flushDeltaState(bc *BackupContext) {
 				return
 			}
 
-			// XXX: Pass down the path to the delta state db.
 			if bc.StateRefresher != nil {
-				if err := bc.StateRefresher(oldStateId); err != nil {
+				if err := bc.StateRefresher(oldStateId, false); err != nil {
 					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
 					return
 				}
