@@ -3,6 +3,7 @@ package repository_test
 import (
 	"bytes"
 	"io"
+	"os"
 	"testing"
 
 	"github.com/PlakarKorp/kloset/hashing"
@@ -245,6 +246,14 @@ func TestRepositoryCreation(t *testing.T) {
 
 	t.Run("NewNoRebuild", func(t *testing.T) {
 		ctx := ptesting.GenerateContext(t, nil, nil)
+
+		tmpCacheDir, err := os.MkdirTemp("", "tmp_cache")
+		require.NoError(t, err)
+		t.Cleanup(func() {
+			os.RemoveAll(tmpCacheDir)
+		})
+
+		ctx.CacheDir = tmpCacheDir
 
 		// create a storage
 		r, err := storage.New(ctx, map[string]string{"location": "mock:///nonexistent"})
