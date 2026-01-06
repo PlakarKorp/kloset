@@ -84,6 +84,7 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 	}
 	cache := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	ctx.SetCache(cache)
+	ctx.CacheDir = tmpCacheDir
 
 	// Create a new logger
 	var logger *logging.Logger
