@@ -20,12 +20,12 @@ type Options struct {
 	Stderr io.Writer `msgpack:"-"`
 }
 
-type Row struct {
+type Row struct { // ScanResult
 	Record *Record
-	Error  *Error
+	Error  *RecordError
 }
 
-type Record struct {
+type Record struct { // ScanRecord
 	Reader io.ReadCloser
 
 	Pathname           string
@@ -45,8 +45,8 @@ func (s *Record) Close() error {
 	return s.Reader.Close()
 }
 
-type Error struct {
-	Pathname string
+type RecordError struct { // ScanError
+	Pathname string //
 	Err      error
 }
 
