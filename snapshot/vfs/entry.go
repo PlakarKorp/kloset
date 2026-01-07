@@ -12,11 +12,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/iterator"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -95,7 +95,7 @@ func (e *Entry) MarshalJSON() ([]byte, error) {
 	return json.Marshal(ret)
 }
 
-func NewEntry(parentPath string, record *importer.ScanRecord) *Entry {
+func NewEntry(parentPath string, record *connectors.Record) *Entry {
 	target := ""
 	if record.Target != "" {
 		target = record.Target

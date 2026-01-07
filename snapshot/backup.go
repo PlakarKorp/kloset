@@ -17,6 +17,7 @@ import (
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/logging"
@@ -130,7 +131,7 @@ func (bc *BackupContext) recordError(path string, err error) error {
 	return bc.indexes[0].erridx.Insert(path, serialized)
 }
 
-func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
+func (bc *BackupContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
@@ -140,7 +141,7 @@ func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC obje
 	return bc.indexes[0].xattridx.Insert(xattr.ToPath(), serialized)
 }
 
-func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *importer.ScanResult) bool {
+func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *connectors.Row) bool {
 	var pathname string
 	var isDir bool
 	switch {
@@ -159,7 +160,7 @@ func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *
 	return backupCtx.excludes.IsExcluded(pathname, isDir)
 }
 
-func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
+func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *connectors.Row, stats *scanStats, chunker *chunkers.Chunker) {
 	switch {
 	case record.Error != nil:
 		record := record.Error
@@ -220,6 +221,30 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	}
 }
 
+func oldScanToNewScan(old *importer.ScanResult) *connectors.Row {
+	new := &connectors.Row{}
+	if old.Record != nil {
+		new.Record = &connectors.Record{
+			Reader:             old.Record.Reader,
+			Pathname:           old.Record.Pathname,
+			Target:             old.Record.Target,
+			FileInfo:           old.Record.FileInfo,
+			ExtendedAttributes: old.Record.ExtendedAttributes,
+			FileAttributes:     old.Record.FileAttributes,
+			IsXattr:            old.Record.IsXattr,
+			XattrName:          old.Record.XattrName,
+			XattrType:          old.Record.XattrType,
+		}
+	}
+	if old.Error != nil {
+		new.Error = &connectors.Error{
+			Pathname: old.Error.Pathname,
+			Err:      old.Error.Err,
+		}
+	}
+	return new
+}
+
 func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
@@ -256,14 +281,17 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 						return nil
 					}
 
-					if snap.skipExcludedPathname(backupCtx, record) {
+					// XXX - TEMPORARY CONVERSION
+					new := oldScanToNewScan(record)
+
+					if snap.skipExcludedPathname(backupCtx, new) {
 						if record.Record != nil {
 							record.Record.Close()
 						}
 						continue
 					}
 
-					snap.processRecord(idx, backupCtx, record, &stats, ck)
+					snap.processRecord(idx, backupCtx, new, &stats, ck)
 				}
 			}
 		})
@@ -881,7 +909,7 @@ func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOpti
 	return backupCtx, nil
 }
 
-func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
+func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *connectors.Record) (*objects.CachedPath, error) {
 	if backupCtx.vfsCache == nil {
 		return nil, nil
 	}
@@ -932,7 +960,7 @@ type contentMeta struct {
 	ContentType string
 }
 
-func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
+func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *connectors.Record) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
 		return &contentMeta{
 			ContentType: "application/x-not-regular-file",
@@ -972,7 +1000,7 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}, nil
 }
 
-func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
+func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *contentMeta, cachedPath *objects.CachedPath, record *connectors.Record) error {
 	if meta.ContentType == "" {
 		return fmt.Errorf("content type cannot be empty!")
 	}
@@ -1042,7 +1070,7 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 	return backupCtx.batchRecordEntry(fileEntry)
 }
 
-func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *connectors.Record, chunker *chunkers.Chunker) error {
 	cachedPath, err := snap.checkVFSCache(backupCtx, record)
 	if err != nil {
 		snap.Logger().Warn("VFS CACHE: %v", err)
@@ -1214,7 +1242,7 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 	parent := path.Dir(pathname)
 
 	if item == nil {
-		dirEntry := vfs.NewEntry(parent, &importer.ScanRecord{
+		dirEntry := vfs.NewEntry(parent, &connectors.Record{
 			Pathname: pathname,
 			FileInfo: objects.FileInfo{
 				Lname:    path.Base(pathname),
