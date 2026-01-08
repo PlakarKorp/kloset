@@ -237,7 +237,7 @@ func oldScanToNewScan(old *importer.ScanResult) *connectors.Row {
 		}
 	}
 	if old.Error != nil {
-		new.Error = &connectors.Error{
+		new.Error = &connectors.RecordError{
 			Pathname: old.Error.Pathname,
 			Err:      old.Error.Err,
 		}

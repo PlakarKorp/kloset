@@ -20,6 +20,8 @@ type Options struct {
 	Stderr io.Writer `msgpack:"-"`
 }
 
+// requests
+
 type Row struct { // ScanResult
 	Record *Record
 	Error  *RecordError
@@ -50,8 +52,11 @@ type RecordError struct { // ScanError
 	Err      error
 }
 
+/// acknowledgment
+
 type Result struct {
 	Pathname string
+	IsError  bool
 	IsXattr  bool
 	Err      error
 }
@@ -82,7 +87,7 @@ func NewXattr(pathname, xattr string, kind objects.Attribute, read func() (io.Re
 
 func NewError(pathname string, err error) *Row {
 	return &Row{
-		Error: &Error{
+		Error: &RecordError{
 			Pathname: pathname,
 			Err:      err,
 		},

@@ -14,7 +14,7 @@ type Exporter interface {
 	Origin() string
 	Type() string
 	Root() string
-	Export(context.Context) (chan<- *connectors.Row, error)
+	Export(context.Context, <-chan *connectors.Row, chan<- *connectors.Result) error
 	Close(context.Context) error
 }
 

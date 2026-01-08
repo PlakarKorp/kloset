@@ -28,8 +28,8 @@ func (m MockedImporter) Root() string {
 	return ""
 }
 
-func (m MockedImporter) Import(ctx context.Context) (<-chan *connectors.Row, error) {
-	return nil, nil
+func (m MockedImporter) Import(context.Context, chan<- *connectors.Row, <-chan *connectors.Result) error {
+	return nil
 }
 
 func (m MockedImporter) NewReader(string) (io.ReadCloser, error) {
