@@ -18,13 +18,13 @@ import (
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/connectors/importer"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/scanlog"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/gabriel-vasile/mimetype"
@@ -221,30 +221,31 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *co
 	}
 }
 
-func oldScanToNewScan(old *importer.ScanResult) *connectors.Row {
-	new := &connectors.Row{}
-	if old.Record != nil {
-		new.Record = &connectors.Record{
-			Reader:             old.Record.Reader,
-			Pathname:           old.Record.Pathname,
-			Target:             old.Record.Target,
-			FileInfo:           old.Record.FileInfo,
-			ExtendedAttributes: old.Record.ExtendedAttributes,
-			FileAttributes:     old.Record.FileAttributes,
-			IsXattr:            old.Record.IsXattr,
-			XattrName:          old.Record.XattrName,
-			XattrType:          old.Record.XattrType,
+/*
+	func oldScanToNewScan(old *importer.ScanResult) *connectors.Row {
+		new := &connectors.Row{}
+		if old.Record != nil {
+			new.Record = &connectors.Record{
+				Reader:             old.Record.Reader,
+				Pathname:           old.Record.Pathname,
+				Target:             old.Record.Target,
+				FileInfo:           old.Record.FileInfo,
+				ExtendedAttributes: old.Record.ExtendedAttributes,
+				FileAttributes:     old.Record.FileAttributes,
+				IsXattr:            old.Record.IsXattr,
+				XattrName:          old.Record.XattrName,
+				XattrType:          old.Record.XattrType,
+			}
 		}
-	}
-	if old.Error != nil {
-		new.Error = &connectors.RecordError{
-			Pathname: old.Error.Pathname,
-			Err:      old.Error.Err,
+		if old.Error != nil {
+			new.Error = &connectors.RecordError{
+				Pathname: old.Error.Pathname,
+				Err:      old.Error.Err,
+			}
 		}
+		return new
 	}
-	return new
-}
-
+*/
 func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
@@ -256,7 +257,10 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := backupCtx.imp.Scan(snap.AppContext())
+	c := make(chan *connectors.Row)
+	r := make(chan *connectors.Result)
+
+	err := backupCtx.imp.Import(snap.AppContext(), c, r)
 	if err != nil {
 		return err
 	}
@@ -276,22 +280,21 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 				case <-ctx.Done():
 					return ctx.Err()
 
-				case record, ok := <-scanner:
+				case record, ok := <-c:
 					if !ok {
 						return nil
 					}
 
 					// XXX - TEMPORARY CONVERSION
-					new := oldScanToNewScan(record)
 
-					if snap.skipExcludedPathname(backupCtx, new) {
+					if snap.skipExcludedPathname(backupCtx, record) {
 						if record.Record != nil {
 							record.Record.Close()
 						}
 						continue
 					}
 
-					snap.processRecord(idx, backupCtx, new, &stats, ck)
+					snap.processRecord(idx, backupCtx, record, &stats, ck)
 				}
 			}
 		})
@@ -301,7 +304,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		return err
 	}
 
-	for range scanner {
+	for range c {
 		// drain the importer channel since we might
 		// have been cancelled while the importer is
 		// trying to still produce some records.
@@ -418,23 +421,11 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	defer snap.Unlock(done)
 
-	origin, err := imp.Origin(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
+	origin := imp.Origin()
 
-	typ, err := imp.Type(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
+	typ := imp.Type()
 
-	root, err := imp.Root(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
+	root := imp.Root()
 
 	if !options.ForcedTimestamp.IsZero() {
 		if options.ForcedTimestamp.Before(time.Now()) {

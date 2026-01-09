@@ -8,9 +8,9 @@ import (
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
 )
@@ -25,40 +25,36 @@ type syncImporter struct {
 	failure error
 }
 
-func (p *syncImporter) Origin(ctx context.Context) (string, error) {
-	return p.origin, nil
+func (p *syncImporter) Origin() string {
+	return p.origin
 }
 
-func (p *syncImporter) Type(ctx context.Context) (string, error) {
-	return p.typ, nil
+func (p *syncImporter) Type() string {
+	return p.typ
 }
 
-func (p *syncImporter) Root(ctx context.Context) (string, error) {
-	return p.root, nil
+func (p *syncImporter) Root() string {
+	return p.root
 }
 
 func (p *syncImporter) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, error) {
+func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Row, results <-chan *connectors.Result) error {
 
 	erriter, err := p.fs.Errors("/")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	_, _, xattrtree := p.fs.BTrees()
 	xattriter, err := xattrtree.ScanFrom("/")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	results := make(chan *importer.ScanResult, 1000)
-
 	go func() {
-		defer close(results)
-
 		i := 0
 		for erritem, err := range erriter {
 			if i%1024 == 0 {
@@ -72,7 +68,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 				p.failure = err
 				return
 			}
-			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
+			records <- connectors.NewError(erritem.Name, fmt.Errorf("%s", erritem.Error))
 		}
 
 		i = 0
@@ -91,7 +87,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 				p.failure = err
 				return
 			}
-			results <- importer.NewScanXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
+			records <- connectors.NewXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
 				func() (io.ReadCloser, error) {
 					return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size)), nil
 				})
@@ -114,7 +110,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 			}
 			i++
 
-			results <- importer.NewScanRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
+			records <- connectors.NewRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
 				func() (io.ReadCloser, error) {
 					return p.fs.Open(path)
 				})
@@ -124,7 +120,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 		}
 	}()
 
-	return results, nil
+	return nil
 }
 
 func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRefresher func(objects.MAC, bool) error) error {

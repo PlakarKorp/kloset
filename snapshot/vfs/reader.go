@@ -11,6 +11,8 @@ import (
 
 const prefetchSize = 20 * 1024 * 1024
 
+//const prefetchSize = 4 * 1024 * 1024
+
 type ObjectReader struct {
 	object *objects.Object
 	repo   *repository.Repository

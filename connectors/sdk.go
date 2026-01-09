@@ -47,15 +47,55 @@ func (s *Record) Close() error {
 	return s.Reader.Close()
 }
 
+func (s *Record) Ok() *Result {
+	return &Result{
+		Pathname: s.Pathname,
+		FileInfo: s.FileInfo,
+		IsError:  false,
+		IsXattr:  s.IsXattr,
+		Err:      nil,
+	}
+}
+
+func (s *Record) Error(err error) *Result {
+	return &Result{
+		Pathname: s.Pathname,
+		FileInfo: s.FileInfo,
+		IsError:  false,
+		IsXattr:  s.IsXattr,
+		Err:      err,
+	}
+}
+
 type RecordError struct { // ScanError
-	Pathname string //
+	Pathname string
+	IsXattr  bool
 	Err      error
+}
+
+func (re *RecordError) Ok() *Result {
+	return &Result{
+		Pathname: re.Pathname,
+		IsError:  true,
+		IsXattr:  re.IsXattr,
+		Err:      nil,
+	}
+}
+
+func (re *RecordError) Error(err error) *Result {
+	return &Result{
+		Pathname: re.Pathname,
+		IsError:  true,
+		IsXattr:  re.IsXattr,
+		Err:      err,
+	}
 }
 
 /// acknowledgment
 
 type Result struct {
 	Pathname string
+	FileInfo objects.FileInfo
 	IsError  bool
 	IsXattr  bool
 	Err      error
