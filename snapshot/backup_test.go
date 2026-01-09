@@ -58,7 +58,7 @@ func TestBackupWithExcludes(t *testing.T) {
 	}))
 
 	summary := &snap.Header.GetSource(0).Summary
-	require.Equal(t, summary.Directory.Files, uint64(6))
+	require.Equal(t, uint64(6), summary.Directory.Files)
 }
 
 func errorGenerator(ch chan<- *importer.ScanResult) {

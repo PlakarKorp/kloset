@@ -17,8 +17,6 @@ import (
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
-	"github.com/PlakarKorp/kloset/events"
-	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -30,20 +28,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
-type BackupIndexes struct {
+type sourceIndexes struct {
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
 	dirpackidx *btree.BTree[string, int, objects.MAC]
 }
 
-type BackupContext struct {
-	imp      importer.Importer
-	excludes *exclude.RuleSet
-	noXattr  bool
+type sourceContext struct {
+	source *Source
 
-	scanCache *caching.ScanCache
-	vfsCache  *vfs.Filesystem
+	vfsCache *vfs.Filesystem
 
 	vfsEntBatch *scanlog.ScanBatch
 	vfsEntLock  sync.Mutex
@@ -51,17 +46,7 @@ type BackupContext struct {
 	fileidx *btree.BTree[string, int, []byte]
 	metaidx *btree.BTree[string, int, []byte]
 
-	stateId objects.MAC
-
-	flushTick        *time.Ticker
-	flushEnd         chan bool
-	flushEnded       chan error
-	flushTerminating atomic.Bool
-	StateRefresher   func(objects.MAC, bool) error
-
-	indexes []*BackupIndexes // Aligned with the number of importers.
-
-	emitter *events.Emitter
+	indexes *sourceIndexes // Aligned with the number of importers.
 
 	scanLog *scanlog.ScanLog
 }
@@ -72,14 +57,12 @@ type scanStats struct {
 	size   uint64
 }
 
-type BackupOptions struct {
+type BuilderOptions struct {
 	Name            string
 	Tags            []string
-	Excludes        []string
 	NoCheckpoint    bool
 	NoCommit        bool
 	NoXattr         bool
-	CleanupVFSCache bool
 	ForcedTimestamp time.Time
 	StateRefresher  func(objects.MAC, bool) error
 }
@@ -88,7 +71,7 @@ var (
 	ErrOutOfRange = errors.New("out of range")
 )
 
-func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
+func (sourceCtx *sourceContext) batchRecordEntry(entry *vfs.Entry) error {
 	path := entry.Path()
 
 	bytes, err := entry.ToBytes()
@@ -96,51 +79,51 @@ func (bc *BackupContext) batchRecordEntry(entry *vfs.Entry) error {
 		return err
 	}
 
-	bc.vfsEntLock.Lock()
-	defer bc.vfsEntLock.Unlock()
+	sourceCtx.vfsEntLock.Lock()
+	defer sourceCtx.vfsEntLock.Unlock()
 
 	if entry.FileInfo.IsDir() {
-		if err := bc.vfsEntBatch.PutDirectory(path, bytes); err != nil {
+		if err := sourceCtx.vfsEntBatch.PutDirectory(path, bytes); err != nil {
 			return err
 		}
 	} else {
-		if err := bc.vfsEntBatch.PutFile(path, bytes); err != nil {
+		if err := sourceCtx.vfsEntBatch.PutFile(path, bytes); err != nil {
 			return err
 		}
 	}
 
-	if bc.vfsEntBatch.Count() >= 1000 {
-		if err := bc.vfsEntBatch.Commit(); err != nil {
+	if sourceCtx.vfsEntBatch.Count() >= 1000 {
+		if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
 			return err
 		}
 
-		bc.vfsEntBatch = bc.scanLog.NewBatch()
+		sourceCtx.vfsEntBatch = sourceCtx.scanLog.NewBatch()
 	}
 
 	return nil
 }
 
-func (bc *BackupContext) recordError(path string, err error) error {
+func (sourceCtx *sourceContext) recordError(path string, err error) error {
 	entry := vfs.NewErrorItem(path, err.Error())
 	serialized, e := entry.ToBytes()
 	if e != nil {
 		return err
 	}
 
-	return bc.indexes[0].erridx.Insert(path, serialized)
+	return sourceCtx.indexes.erridx.Insert(path, serialized)
 }
 
-func (bc *BackupContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
+func (sourceCtx *sourceContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
 		return err
 	}
 
-	return bc.indexes[0].xattridx.Insert(xattr.ToPath(), serialized)
+	return sourceCtx.indexes.xattridx.Insert(xattr.ToPath(), serialized)
 }
 
-func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *importer.ScanResult) bool {
+func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *importer.ScanResult) bool {
 	var pathname string
 	var isDir bool
 	switch {
@@ -156,31 +139,31 @@ func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *
 		return false
 	}
 
-	return backupCtx.excludes.IsExcluded(pathname, isDir)
+	return sourceCtx.source.excludes.IsExcluded(pathname, isDir)
 }
 
-func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
+func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
 	switch {
 	case record.Error != nil:
 		record := record.Error
-		backupCtx.recordError(record.Pathname, record.Err)
-		backupCtx.emitter.PathError(record.Pathname, record.Err)
+		sourceCtx.recordError(record.Pathname, record.Err)
+		snap.emitter.PathError(record.Pathname, record.Err)
 
 	case record.Record != nil:
 		record := record.Record
 		defer record.Close()
 
-		if backupCtx.noXattr && record.IsXattr {
+		if snap.builderOptions.NoXattr && record.IsXattr {
 			return
 		}
 
-		backupCtx.emitter.Path(record.Pathname)
+		snap.emitter.Path(record.Pathname)
 
 		// XXX: Remove this when we introduce the Location object.
 		repoLocation, err := snap.repository.Location()
 		if err != nil {
-			backupCtx.recordError(record.Pathname, err)
-			backupCtx.emitter.FileError(record.Pathname, err)
+			sourceCtx.recordError(record.Pathname, err)
+			snap.emitter.FileError(record.Pathname, err)
 			return
 		}
 
@@ -194,19 +177,19 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 		if record.FileInfo.Mode().IsDir() {
 			atomic.AddUint64(&stats.ndirs, +1)
 			entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-			if err := backupCtx.batchRecordEntry(entry); err != nil {
-				backupCtx.recordError(record.Pathname, err)
+			if err := sourceCtx.batchRecordEntry(entry); err != nil {
+				sourceCtx.recordError(record.Pathname, err)
 			}
 			return
 		}
 
-		backupCtx.emitter.File(record.Pathname)
+		snap.emitter.File(record.Pathname)
 
-		if err := snap.processFileRecord(idx, backupCtx, record, chunker); err != nil {
-			backupCtx.emitter.FileError(record.Pathname, err)
-			backupCtx.recordError(record.Pathname, err)
+		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.FileError(record.Pathname, err)
+			sourceCtx.recordError(record.Pathname, err)
 		} else {
-			backupCtx.emitter.FileOk(record.Pathname)
+			snap.emitter.FileOk(record.Pathname)
 		}
 
 		if record.IsXattr {
@@ -220,7 +203,7 @@ func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *im
 	}
 }
 
-func (snap *Builder) importerJob(backupCtx *BackupContext) error {
+func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -231,7 +214,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := backupCtx.imp.Scan(snap.AppContext())
+	scanner, err := sourceCtx.source.GetScanner()
 	if err != nil {
 		return err
 	}
@@ -239,7 +222,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
-	backupCtx.emitter.Info("snapshot.import.start", map[string]any{})
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
 
 	var stats scanStats
 	for i, cker := range ckers {
@@ -256,14 +239,14 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 						return nil
 					}
 
-					if snap.skipExcludedPathname(backupCtx, record) {
+					if snap.skipExcludedPathname(sourceCtx, record) {
 						if record.Record != nil {
 							record.Record.Close()
 						}
 						continue
 					}
 
-					snap.processRecord(idx, backupCtx, record, &stats, ck)
+					snap.processRecord(idx, sourceCtx, record, &stats, ck)
 				}
 			}
 		})
@@ -280,13 +263,13 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	}
 
 	// Flush any left over entries.
-	if err := backupCtx.vfsEntBatch.Commit(); err != nil {
+	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
 		return err
 	}
 
-	backupCtx.vfsEntBatch = nil
+	sourceCtx.vfsEntBatch = nil
 
-	backupCtx.emitter.Info("snapshot.import.done", map[string]any{
+	snap.emitter.Info("snapshot.import.done", map[string]any{
 		"nfiles": stats.nfiles,
 		"ndirs":  stats.ndirs,
 		"size":   stats.size,
@@ -295,155 +278,21 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	return nil
 }
 
-func (snap *Builder) flushDeltaState(bc *BackupContext) {
-	for {
-		select {
-		case <-snap.repository.AppContext().Done():
-			return
-		case <-bc.flushEnd:
-			// End of backup we push the last and final State.
-			err := snap.repository.CommitTransaction(bc.stateId)
-			if err != nil {
-				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
-			}
-
-			if bc.StateRefresher != nil {
-				if err := bc.StateRefresher(bc.stateId, true); err != nil {
-					snap.Logger().Warn("Failed to reload the final state to the repository %s", err)
-				}
-			}
-
-			// See below
-			if snap.deltaCache != snap.scanCache {
-				snap.deltaCache.Close()
-			}
-
-			bc.flushEnded <- err
-			close(bc.flushEnded)
-			return
-		case <-bc.flushTick.C:
-			// In case the previous Flushing operation was too long and the
-			// ticker got a chance to queue another tick we might end up here
-			// rather than in flushEnd so just skip this and go to the final
-			// state push.
-			if bc.flushTerminating.Load() {
-				continue
-			}
-
-			// New Delta
-			oldCache := snap.deltaCache
-			oldStateId := bc.stateId
-
-			identifier := objects.RandomMAC()
-			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
-			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
-				return
-			}
-
-			bc.stateId = identifier
-			snap.deltaCache = newDeltaCache
-
-			// Now that the backup is free to progress we can serialize and push
-			// the resulting statefile to the repo.
-			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, bc.stateId)
-			if err != nil {
-				snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
-				return
-			}
-
-			if bc.StateRefresher != nil {
-				if err := bc.StateRefresher(oldStateId, false); err != nil {
-					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
-					return
-				}
-			} else {
-				if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-					snap.AppContext().Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
-					return
-				}
-			}
-
-			snap.repository.RemoveTransaction(oldStateId)
-
-			// The first cache is always the scanCache, only in this function we
-			// allocate a new and different one, so when we first hit this function
-			// do not close the deltaCache, as it'll be closed at the end of the
-			// backup because it's used by other parts of the code.
-			if oldCache != snap.scanCache {
-				oldCache.Close()
-			}
-		}
-	}
+func (snap *Builder) Import(source *Source) error {
+	return snap.Backup(source)
 }
 
-func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error {
-	beginTime := time.Now()
-
-	emitter := snap.Emitter("backup")
-	defer emitter.Close()
-
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
+func (snap *Builder) Backup(source *Source) error {
+	sourceCtx, err := snap.prepareSourceContext(source)
+	if sourceCtx != nil {
+		defer sourceCtx.indexes.Close(snap.Logger())
 	}
-	defer snap.Unlock(done)
-
-	origin, err := imp.Origin(snap.AppContext())
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	typ, err := imp.Type(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	root, err := imp.Root(snap.AppContext())
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	if !options.ForcedTimestamp.IsZero() {
-		if options.ForcedTimestamp.Before(time.Now()) {
-			snap.Header.Timestamp = options.ForcedTimestamp.UTC()
-		}
-	}
-
-	snap.Header.GetSource(0).Importer.Origin = origin
-	snap.Header.GetSource(0).Importer.Type = typ
-	snap.Header.Tags = append(snap.Header.Tags, options.Tags...)
-
-	if options.Name == "" {
-		snap.Header.Name = root + " @ " + snap.Header.GetSource(0).Importer.Origin
-	} else {
-		snap.Header.Name = options.Name
-	}
-
-	backupCtx, err := snap.prepareBackup(imp, options)
-	if backupCtx != nil {
-		for _, bi := range backupCtx.indexes {
-			defer bi.Close(snap.Logger())
-		}
-	}
-
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-	backupCtx.emitter = emitter
-
-	defer backupCtx.scanLog.Close()
-
-	/* checkpoint handling */
-	if !options.NoCheckpoint {
-		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState(backupCtx)
-	}
+	defer sourceCtx.scanLog.Close()
 
 	/* meta store */
 	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
@@ -452,31 +301,32 @@ func (snap *Builder) Backup(imp importer.Importer, options *BackupOptions) error
 	}
 	defer metastore.Close()
 
-	backupCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
+	sourceCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
 	if err != nil {
 		return err
 	}
 
 	/* importer */
-	if err := snap.importerJob(backupCtx); err != nil {
+	if err := snap.importerJob(sourceCtx); err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
 	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
+	vfsHeader, rootSummary, indexes, err := snap.persistTrees(sourceCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	snap.Header.Duration = time.Since(beginTime)
-	snap.Header.GetSource(0).Importer.Directory = root
-	snap.Header.GetSource(0).VFS = *vfsHeader
-	snap.Header.GetSource(0).Summary = *rootSummary
-	snap.Header.GetSource(0).Indexes = indexes
+	headerSource := source.GetHeader()
+	headerSource.VFS = *vfsHeader
+	headerSource.Summary = *rootSummary
+	headerSource.Indexes = indexes
 
-	return snap.Commit(backupCtx, !options.NoCommit)
+	snap.Header.Sources = append(snap.Header.Sources, headerSource)
+
+	return nil
 }
 
 func entropy(data []byte) (float64, [256]float64) {
@@ -695,83 +545,7 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	return object, objectMAC, totalDataSize, nil
 }
 
-func (snap *Builder) Commit(bc *BackupContext, commit bool) error {
-	bc.emitter.Info("snapshot.commit.start", map[string]any{})
-	defer bc.emitter.Info("snapshot.commit.end", map[string]any{})
-	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
-	// Maybe this could be stopped earlier.
-
-	// If we end up in here without a BackupContext we come from Sync and we
-	// can't rely on the flusher
-	if bc != nil && bc.flushTick != nil {
-		bc.flushTerminating.Store(true)
-		bc.flushTick.Stop()
-	}
-
-	serializedHdr, err := snap.Header.Serialize()
-	if err != nil {
-		return err
-	}
-
-	if kp := snap.AppContext().Keypair; kp != nil {
-		serializedHdrMAC := snap.repository.ComputeMAC(serializedHdr)
-		signature := kp.Sign(serializedHdrMAC[:])
-		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature); err != nil {
-			return err
-		}
-	}
-
-	if err := snap.repository.PutBlob(resources.RT_SNAPSHOT, snap.Header.Identifier, serializedHdr); err != nil {
-		return err
-	}
-
-	if !commit {
-		return nil
-	}
-
-	snap.repository.PackerManager.Wait()
-
-	// We are done with packfiles we can flush the last state, either through
-	// the flusher, or manually here.
-	if bc != nil && bc.flushTick != nil {
-		bc.flushEnd <- true
-		close(bc.flushEnd)
-		err = <-bc.flushEnded
-	} else {
-		err = snap.repository.CommitTransaction(snap.Header.Identifier)
-	}
-	if err != nil {
-		snap.Logger().Warn("Failed to push the state to the repository %s", err)
-		return err
-	}
-
-	cache, err := snap.AppContext().GetCache().Repository(snap.repository.Configuration().RepositoryID)
-	if err == nil {
-		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
-	}
-
-	totalSize := uint64(0)
-	totalErrors := uint64(0)
-	for _, source := range snap.Header.Sources {
-		totalSize += source.Summary.Directory.Size + source.Summary.Below.Size
-		totalErrors += source.Summary.Directory.Errors + source.Summary.Below.Errors
-	}
-
-	rBytes := snap.repository.RBytes()
-	wBytes := snap.repository.WBytes()
-
-	target, err := snap.repository.Location()
-	if err != nil {
-		return err
-	}
-
-	bc.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
-
-	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
-	return nil
-}
-
-func (bi *BackupIndexes) Close(log *logging.Logger) {
+func (bi *sourceIndexes) Close(log *logging.Logger) {
 	// We need to protect those behind nil checks because we might be cleaning
 	// up a half initialized backupIndex.
 	if bi.erridx != nil {
@@ -805,8 +579,8 @@ func (snap *Builder) tmpCacheDir() string {
 	return path.Join(snap.AppContext().CacheDir, caching.CACHE_VERSION, fmt.Sprintf("dbstorer-%x", snap.Header.Identifier))
 }
 
-func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
-	bi := &BackupIndexes{}
+func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
+	bi := &sourceIndexes{}
 
 	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
 	if err != nil {
@@ -847,41 +621,30 @@ func (snap *Builder) makeBackupIndexes() (*BackupIndexes, error) {
 	return bi, nil
 }
 
-func (snap *Builder) prepareBackup(imp importer.Importer, backupOpts *BackupOptions) (*BackupContext, error) {
+func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error) {
 	scanLog, err := scanlog.New(snap.tmpCacheDir())
 	if err != nil {
 		return nil, err
 	}
 
-	backupCtx := &BackupContext{
-		imp:            imp,
-		noXattr:        backupOpts.NoXattr,
-		scanCache:      snap.scanCache,
-		vfsEntBatch:    scanLog.NewBatch(),
-		vfsCache:       snap.vfsCache,
-		flushEnd:       make(chan bool),
-		flushEnded:     make(chan error),
-		stateId:        snap.Header.Identifier,
-		scanLog:        scanLog,
-		StateRefresher: backupOpts.StateRefresher,
-	}
-
-	backupCtx.excludes = exclude.NewRuleSet()
-	if err := backupCtx.excludes.AddRulesFromArray(backupOpts.Excludes); err != nil {
-		return nil, fmt.Errorf("failed to setup exclude rules: %w", err)
+	sourceCtx := &sourceContext{
+		source:      source,
+		vfsEntBatch: scanLog.NewBatch(),
+		vfsCache:    snap.vfsCache,
+		scanLog:     scanLog,
 	}
 
 	if bi, err := snap.makeBackupIndexes(); err != nil {
 		return nil, err
 	} else {
-		backupCtx.indexes = append(backupCtx.indexes, bi)
+		sourceCtx.indexes = bi
 	}
 
-	return backupCtx, nil
+	return sourceCtx, nil
 }
 
-func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
-	if backupCtx.vfsCache == nil {
+func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
+	if sourceCtx.vfsCache == nil {
 		return nil, nil
 	}
 
@@ -889,7 +652,7 @@ func (snap *Builder) checkVFSCache(backupCtx *BackupContext, record *importer.Sc
 		return nil, nil
 	}
 
-	entry, err := backupCtx.vfsCache.GetEntryNoFollow(record.Pathname)
+	entry, err := sourceCtx.vfsCache.GetEntryNoFollow(record.Pathname)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -971,7 +734,7 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}, nil
 }
 
-func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
+func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
 	if meta.ContentType == "" {
 		return fmt.Errorf("content type cannot be empty!")
 	}
@@ -1027,22 +790,22 @@ func (snap *Builder) writeFileEntry(idx int, backupCtx *BackupContext, meta *con
 		}
 	}
 
-	if err := backupCtx.metaidx.Insert(record.Pathname, serializedCachedPath); err != nil && err != btree.ErrExists {
+	if err := sourceCtx.metaidx.Insert(record.Pathname, serializedCachedPath); err != nil && err != btree.ErrExists {
 		return err
 	}
 
 	parts := strings.SplitN(meta.ContentType, ";", 2)
 	mime := parts[0]
 	k := fmt.Sprintf("/%s%s", mime, record.Pathname)
-	if err := backupCtx.indexes[0].ctidx.Insert(k, fileEntryMAC); err != nil {
+	if err := sourceCtx.indexes.ctidx.Insert(k, fileEntryMAC); err != nil {
 		return err
 	}
 
-	return backupCtx.batchRecordEntry(fileEntry)
+	return sourceCtx.batchRecordEntry(fileEntry)
 }
 
-func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
-	cachedPath, err := snap.checkVFSCache(backupCtx, record)
+func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+	cachedPath, err := snap.checkVFSCache(sourceCtx, record)
 	if err != nil {
 		snap.Logger().Warn("VFS CACHE: %v", err)
 	}
@@ -1053,20 +816,20 @@ func (snap *Builder) processFileRecord(idx int, backupCtx *BackupContext, record
 	}
 
 	if record.IsXattr {
-		return backupCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
+		return sourceCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
 	}
 
-	return snap.writeFileEntry(idx, backupCtx, meta, cachedPath, record)
+	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
 }
 
-func (snap *Builder) persistTrees(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
+func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
 
-	vfsHeader, summary, err := snap.persistVFS(backupCtx)
+	vfsHeader, summary, err := snap.persistVFS(sourceCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
 
-	indexes, err := snap.persistIndexes(backupCtx)
+	indexes, err := snap.persistIndexes(sourceCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -1092,17 +855,17 @@ type chunkifyResult struct {
 	err error
 }
 
-func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
+func (sourceCtx *sourceContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
 	// bytes is a slice that will be reused in the next iteration,
 	// swapping below our feet, so make a copy out of it
 	dupBytes := make([]byte, len(bytes))
 	copy(dupBytes, bytes)
 
-	if err := backupCtx.fileidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
+	if err := sourceCtx.fileidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
 		return err
 	}
 
-	data, found, err := backupCtx.metaidx.Find(path)
+	data, found, err := sourceCtx.metaidx.Find(path)
 	if err != nil {
 		return err
 	}
@@ -1133,15 +896,15 @@ func (backupCtx *BackupContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 	return nil
 }
 
-func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
+func (sourceCtx *sourceContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
 	if parent != "/" {
 		parent = strings.TrimRight(parent, "/")
 	}
 
-	for e := range backupCtx.scanLog.ListDirectPathnames(parent, false) {
+	for e := range sourceCtx.scanLog.ListDirectPathnames(parent, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
-			err := backupCtx.processFile(dirEntry, e.Payload, e.Path)
+			err := sourceCtx.processFile(dirEntry, e.Payload, e.Path)
 			if err != nil {
 				return err
 			}
@@ -1149,7 +912,7 @@ func (backupCtx *BackupContext) processChildren(builder *Builder, dirEntry *vfs.
 				return err
 			}
 		case scanlog.KindDirectory:
-			val, found, err := backupCtx.fileidx.Find(e.Path)
+			val, found, err := sourceCtx.fileidx.Find(e.Path)
 			if err != nil {
 				return err
 			}
@@ -1204,8 +967,8 @@ func writeFrame(builder *Builder, w io.Writer, typ DirPackEntry, data []byte) er
 
 }
 
-func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname string) error {
-	item, err := backupCtx.scanLog.GetDirectory(pathname)
+func (snap *Builder) relinkNodesRecursive(sourceCtx *sourceContext, pathname string) error {
+	item, err := sourceCtx.scanLog.GetDirectory(pathname)
 	if err != nil {
 		return err
 	}
@@ -1227,7 +990,7 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 			return err
 		}
 
-		if err := backupCtx.scanLog.PutDirectory(pathname, serialized); err != nil {
+		if err := sourceCtx.scanLog.PutDirectory(pathname, serialized); err != nil {
 			return err
 		}
 	}
@@ -1236,36 +999,36 @@ func (snap *Builder) relinkNodesRecursive(backupCtx *BackupContext, pathname str
 		// reached root
 		return nil
 	}
-	return snap.relinkNodesRecursive(backupCtx, parent)
+	return snap.relinkNodesRecursive(sourceCtx, parent)
 }
 
-func (snap *Builder) relinkNodes(backupCtx *BackupContext) error {
+func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 	var missingMap = make(map[string]struct{})
 
-	for e := range backupCtx.scanLog.ListPathnames("/", true) {
+	for e := range sourceCtx.scanLog.ListPathnames("/", true) {
 		missingMap[path.Dir(e.Path)] = struct{}{}
 		delete(missingMap, e.Path)
 	}
 
 	for missingDir := range missingMap {
-		if err := snap.relinkNodesRecursive(backupCtx, missingDir); err != nil {
+		if err := snap.relinkNodesRecursive(sourceCtx, missingDir); err != nil {
 			return err
 		}
 		delete(missingMap, missingDir)
 	}
 
-	return snap.relinkNodesRecursive(backupCtx, "/")
+	return snap.relinkNodesRecursive(sourceCtx, "/")
 }
 
-func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Summary, error) {
-	backupCtx.emitter.Info("snapshot.vfs.start", map[string]any{})
-	defer backupCtx.emitter.Info("snapshot.vfs.end", map[string]any{})
+func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
+	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
-	if err := snap.relinkNodes(backupCtx); err != nil {
+	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, nil, err
 	}
 
-	errcsum, err := persistMACIndex(snap, backupCtx.indexes[0].erridx,
+	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
 	if err != nil {
 		return nil, nil, err
@@ -1276,12 +1039,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	backupCtx.fileidx, err = btree.New(filestore, vfs.PathCmp, 50)
+	sourceCtx.fileidx, err = btree.New(filestore, vfs.PathCmp, 50)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer func() {
-		if err := backupCtx.fileidx.Close(); err != nil {
+		if err := sourceCtx.fileidx.Close(); err != nil {
 			snap.Logger().Warn("Failed to close fileidx btree: %s", err)
 		}
 	}()
@@ -1294,14 +1057,14 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	var rootSummary *vfs.Summary
 
 	dirPaths := make([]string, 0)
-	for e := range backupCtx.scanLog.ListDirectories("/", true) {
+	for e := range sourceCtx.scanLog.ListDirectories("/", true) {
 		dirPaths = append(dirPaths, e.Path)
 	}
 
 	for _, pathname := range dirPaths {
 		dirPath := pathname
 
-		dirBytes, err := backupCtx.scanLog.GetDirectory(dirPath)
+		dirBytes, err := sourceCtx.scanLog.GetDirectory(dirPath)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1328,12 +1091,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := backupCtx.processChildren(snap, dirEntry, pw, prefix); err != nil {
+		if err := sourceCtx.processChildren(snap, dirEntry, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
 
-		erriter, err := backupCtx.indexes[0].erridx.ScanFrom(prefix)
+		erriter, err := sourceCtx.indexes.erridx.ScanFrom(prefix)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1359,11 +1122,11 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
 		}
 
-		if err := backupCtx.indexes[0].dirpackidx.Insert(dirPath, res.mac); err != nil {
+		if err := sourceCtx.indexes.dirpackidx.Insert(dirPath, res.mac); err != nil {
 			return nil, nil, err
 		}
 
-		backupCtx.emitter.DirectoryOk(dirPath)
+		snap.emitter.DirectoryOk(dirPath)
 
 		if dirPath == "/" {
 			if rootSummary != nil {
@@ -1382,12 +1145,12 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		if err := backupCtx.fileidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
+		if err := sourceCtx.fileidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
 			return nil, nil, err
 		}
 	}
 
-	rootcsum, err := persistIndex(snap, backupCtx.fileidx, resources.RT_VFS_BTREE,
+	rootcsum, err := persistIndex(snap, sourceCtx.fileidx, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
 			return snap.repository.ComputeMAC(data), nil
 		})
@@ -1395,7 +1158,7 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	xattrcsum, err := persistMACIndex(snap, backupCtx.indexes[0].xattridx,
+	xattrcsum, err := persistMACIndex(snap, sourceCtx.indexes.xattridx,
 		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, resources.RT_XATTR_ENTRY)
 	if err != nil {
 		return nil, nil, err
@@ -1410,10 +1173,10 @@ func (snap *Builder) persistVFS(backupCtx *BackupContext) (*header.VFS, *vfs.Sum
 	return vfsHeader, rootSummary, nil
 }
 
-func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, error) {
-	backupCtx.emitter.Info("snapshot.index.start", map[string]any{})
-	defer backupCtx.emitter.Info("snapshot.index.end", map[string]any{})
-	ctmac, err := persistIndex(snap, backupCtx.indexes[0].ctidx,
+func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, error) {
+	snap.emitter.Info("snapshot.index.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
+	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
@@ -1421,7 +1184,7 @@ func (snap *Builder) persistIndexes(backupCtx *BackupContext) ([]header.Index, e
 		return nil, err
 	}
 
-	dirpackmac, err := persistIndex(snap, backupCtx.indexes[0].dirpackidx,
+	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"time"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
@@ -127,7 +126,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 	return results, nil
 }
 
-func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRefresher func(objects.MAC, bool) error) error {
+func (src *Snapshot) Synchronize(dst *Builder) error {
 	if src.Header.Identity.Identifier != uuid.Nil {
 		data, err := src.repository.GetBlobBytes(resources.RT_SIGNATURE, src.Header.Identifier)
 		if err != nil {
@@ -172,42 +171,28 @@ func (src *Snapshot) Synchronize(dst *Builder, commit, checkpoint bool, stateRef
 	dst.Header.Tags = src.Header.Tags
 	dst.Header.Context = src.Header.Context
 
-	return dst.ingestSync(imp, &BackupOptions{
-		CleanupVFSCache: true,
-		StateRefresher:  stateRefresher,
-		NoCheckpoint:    !checkpoint,
-	}, commit)
+	return dst.ingestSync(imp)
 }
 
-func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commit bool) error {
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-	defer snap.Unlock(done)
-
+func (snap *Builder) ingestSync(imp *syncImporter) error {
 	emitter := snap.Emitter("sync")
 	defer emitter.Close()
 
-	backupCtx, err := snap.prepareBackup(imp, options)
-	for _, bi := range backupCtx.indexes {
-		defer bi.Close(snap.Logger())
+	source, err := NewSource(snap.AppContext(), imp)
+	if err != nil {
+		return err
 	}
 
+	backupCtx, err := snap.prepareSourceContext(source)
+	if backupCtx != nil {
+		defer backupCtx.indexes.Close(snap.Logger())
+	}
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-	backupCtx.emitter = emitter
 
 	defer backupCtx.scanLog.Close()
-
-	/* checkpoint handling */
-	if !options.NoCheckpoint {
-		backupCtx.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState(backupCtx)
-	}
 
 	/* meta store */
 	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
@@ -250,5 +235,5 @@ func (snap *Builder) ingestSync(imp *syncImporter, options *BackupOptions, commi
 		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
-	return snap.Commit(backupCtx, commit)
+	return snap.Commit()
 }

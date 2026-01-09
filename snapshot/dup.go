@@ -1,11 +1,11 @@
 package snapshot
 
-func (snap *Snapshot) Dup() (*Snapshot, error) {
-	newSnapshot, err := snap.Fork()
+func (snap *Snapshot) Dup(builderOptions *BuilderOptions) (*Snapshot, error) {
+	newSnapshot, err := snap.Fork(builderOptions)
 	if err != nil {
 		return nil, err
 	}
-	if err := newSnapshot.Commit(&BackupContext{}, true); err != nil {
+	if err := newSnapshot.Commit(); err != nil {
 		return nil, err
 	}
 
