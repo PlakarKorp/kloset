@@ -171,7 +171,16 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	dst.Header.Tags = src.Header.Tags
 	dst.Header.Context = src.Header.Context
 
-	return dst.ingestSync(imp)
+	if err := dst.ingestSync(imp); err != nil {
+		return err
+	}
+
+	if !dst.builderOptions.NoCommit {
+		return dst.Commit()
+	} else {
+		_, err := dst.PutSnapshot()
+		return err
+	}
 }
 
 func (snap *Builder) ingestSync(imp *syncImporter) error {
@@ -235,5 +244,5 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
-	return snap.Commit()
+	return nil
 }
