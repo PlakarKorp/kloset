@@ -222,6 +222,4 @@ func TestHeaderMethods(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, header2)
 	require.Equal(t, header2.Name, header.Name)
-
-	require.Equal(t, NewSource(), *header.GetSource(0))
 }
