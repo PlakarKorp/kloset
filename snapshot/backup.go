@@ -258,11 +258,6 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 	c := make(chan *connectors.Record)
 	r := make(chan *connectors.Result)
 
-	err := backupCtx.imp.Import(snap.AppContext(), c, r)
-	if err != nil {
-		return err
-	}
-
 	wg := errgroup.Group{}
 	ctx := snap.AppContext()
 
@@ -298,14 +293,22 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		})
 	}
 
-	if err := wg.Wait(); err != nil {
+	errch := make(chan error, 1)
+	go func() {
+		if err := wg.Wait(); err != nil {
+			errch <- err
+		}
+		close(errch)
+		close(r) // signal Import that we're done
+	}()
+
+	err := backupCtx.imp.Import(snap.AppContext(), c, r)
+	if err != nil {
 		return err
 	}
 
-	for range c {
-		// drain the importer channel since we might
-		// have been cancelled while the importer is
-		// trying to still produce some records.
+	if err := <-errch; err != nil {
+		return err
 	}
 
 	// Flush any left over entries.
