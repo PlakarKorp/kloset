@@ -9,7 +9,7 @@ import (
 	"github.com/PlakarKorp/kloset/repository"
 )
 
-const prefetchSize = 20 * 1024 * 1024
+const default_prefetchSize = 4 * 1024 * 1024
 
 type ObjectReader struct {
 	object *objects.Object
@@ -22,15 +22,20 @@ type ObjectReader struct {
 
 	doSeek bool // Flag to invalidate the prefetchBuffer
 
+	prefetchSize     int32
 	prefetchedObjoff int // Keeps track of the chunk position we prefetched up to.
 	prefetchBuffer   bytes.Buffer
 }
 
-func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64) *ObjectReader {
+func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64, prefetchSize int32) *ObjectReader {
+	if prefetchSize <= 0 {
+		prefetchSize = default_prefetchSize
+	}
 	return &ObjectReader{
 		object:         object,
 		repo:           repo,
 		size:           size,
+		prefetchSize:   prefetchSize,
 		prefetchBuffer: bytes.Buffer{},
 	}
 }
@@ -53,7 +58,7 @@ func (or *ObjectReader) prefetch() error {
 		return io.EOF
 	}
 
-	for data, err := range or.repo.GetObjectContent(or.object, or.prefetchedObjoff, prefetchSize) {
+	for data, err := range or.repo.GetObjectContent(or.object, or.prefetchedObjoff, uint32(or.prefetchSize)) {
 		if err != nil {
 			return err
 		}
@@ -227,7 +232,7 @@ func (or *ObjectReader) ReadAt(p []byte, off int64) (int, error) {
 		return 0, io.EOF
 	}
 
-	cr := NewObjectReader(or.repo, or.object, or.size)
+	cr := NewObjectReader(or.repo, or.object, or.size, or.prefetchSize)
 	if _, err := cr.Seek(off, io.SeekStart); err != nil {
 		return 0, err
 	}
