@@ -141,16 +141,16 @@ func (bc *BackupContext) recordXattr(record *connectors.Record, objectMAC object
 	return bc.indexes[0].xattridx.Insert(xattr.ToPath(), serialized)
 }
 
-func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *connectors.Row) bool {
+func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *connectors.Record) bool {
 	var pathname string
 	var isDir bool
 	switch {
-	case record.Record != nil:
-		pathname = record.Record.Pathname
-		isDir = record.Record.FileInfo.IsDir()
 	case record.Error != nil:
-		pathname = record.Error.Pathname
+		pathname = record.Pathname
 		isDir = false
+	default:
+		pathname = record.Pathname
+		isDir = record.FileInfo.IsDir()
 	}
 
 	if pathname == "/" {
@@ -160,15 +160,13 @@ func (snapshot *Builder) skipExcludedPathname(backupCtx *BackupContext, record *
 	return backupCtx.excludes.IsExcluded(pathname, isDir)
 }
 
-func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *connectors.Row, stats *scanStats, chunker *chunkers.Chunker) {
+func (snap *Builder) processRecord(idx int, backupCtx *BackupContext, record *connectors.Record, stats *scanStats, chunker *chunkers.Chunker) {
 	switch {
-	case record.Error != nil:
-		record := record.Error
+	case record.Err != nil:
 		backupCtx.recordError(record.Pathname, record.Err)
 		backupCtx.emitter.PathError(record.Pathname, record.Err)
 
-	case record.Record != nil:
-		record := record.Record
+	default:
 		defer record.Close()
 
 		if backupCtx.noXattr && record.IsXattr {
@@ -257,7 +255,7 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	c := make(chan *connectors.Row)
+	c := make(chan *connectors.Record)
 	r := make(chan *connectors.Result)
 
 	err := backupCtx.imp.Import(snap.AppContext(), c, r)
@@ -288,8 +286,8 @@ func (snap *Builder) importerJob(backupCtx *BackupContext) error {
 					// XXX - TEMPORARY CONVERSION
 
 					if snap.skipExcludedPathname(backupCtx, record) {
-						if record.Record != nil {
-							record.Record.Close()
+						if record.Reader != nil {
+							record.Close()
 						}
 						continue
 					}

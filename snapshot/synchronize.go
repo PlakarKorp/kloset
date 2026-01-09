@@ -41,7 +41,7 @@ func (p *syncImporter) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Row, results <-chan *connectors.Result) error {
+func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
 
 	erriter, err := p.fs.Errors("/")
 	if err != nil {

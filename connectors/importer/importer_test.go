@@ -28,7 +28,7 @@ func (m MockedImporter) Root() string {
 	return ""
 }
 
-func (m MockedImporter) Import(context.Context, chan<- *connectors.Row, <-chan *connectors.Result) error {
+func (m MockedImporter) Import(context.Context, chan<- *connectors.Record, <-chan *connectors.Result) error {
 	return nil
 }
 
@@ -113,10 +113,10 @@ func TestNewScanRecord(t *testing.T) {
 
 	record := connectors.NewRecord(pathname, target, fileinfo, xattr, nil)
 
-	require.Equal(t, pathname, record.Record.Pathname)
-	require.Equal(t, target, record.Record.Target)
-	require.Equal(t, fileinfo, record.Record.FileInfo)
-	require.ElementsMatch(t, xattr, record.Record.ExtendedAttributes)
+	require.Equal(t, pathname, record.Pathname)
+	require.Equal(t, target, record.Target)
+	require.Equal(t, fileinfo, record.FileInfo)
+	require.ElementsMatch(t, xattr, record.ExtendedAttributes)
 }
 
 func TestNewScanXattr(t *testing.T) {
@@ -125,9 +125,9 @@ func TestNewScanXattr(t *testing.T) {
 
 	record := connectors.NewXattr(pathname, xattrname, objects.AttributeExtended, nil)
 
-	require.Equal(t, pathname, record.Record.Pathname)
-	require.Equal(t, xattrname, record.Record.XattrName)
-	require.True(t, record.Record.IsXattr)
+	require.Equal(t, pathname, record.Pathname)
+	require.Equal(t, xattrname, record.XattrName)
+	require.True(t, record.IsXattr)
 }
 
 func TestNewScanError(t *testing.T) {
@@ -136,5 +136,5 @@ func TestNewScanError(t *testing.T) {
 
 	record := connectors.NewError(pathname, err)
 
-	require.Equal(t, pathname, record.Record.Pathname)
+	require.Equal(t, pathname, record.Pathname)
 }
