@@ -46,7 +46,7 @@ type sourceContext struct {
 	fileidx *btree.BTree[string, int, []byte]
 	metaidx *btree.BTree[string, int, []byte]
 
-	indexes *sourceIndexes // Aligned with the number of importers.
+	indexes *sourceIndexes
 
 	scanLog *scanlog.ScanLog
 }
