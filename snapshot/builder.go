@@ -129,8 +129,11 @@ func (snap *Builder) WithVFSCache(vfsCache *vfs.Filesystem) {
 	snap.vfsCache = vfsCache
 }
 
-func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOptions *BuilderOptions) (*Builder, error) {
-	identifier := objects.RandomMAC()
+func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOptions *BuilderOptions, snapId objects.MAC) (*Builder, error) {
+	identifier := snapId
+	if identifier == objects.NilMac {
+		identifier = objects.RandomMAC()
+	}
 
 	snap, err := newBuilder(repo.AppContext(), identifier, builderOptions)
 	if err != nil {
