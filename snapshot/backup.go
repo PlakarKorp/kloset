@@ -60,7 +60,6 @@ type scanStats struct {
 type BuilderOptions struct {
 	Name            string
 	Tags            []string
-	Excludes        []string
 	NoCheckpoint    bool
 	NoCommit        bool
 	NoXattr         bool
