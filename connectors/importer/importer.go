@@ -30,6 +30,7 @@ type Importer interface {
 	Origin() string
 	Type() string
 	Root() string
+	Ping(context.Context) error
 	Import(context.Context, chan<- *connectors.Record, <-chan *connectors.Result) error
 	Close(context.Context) error
 }

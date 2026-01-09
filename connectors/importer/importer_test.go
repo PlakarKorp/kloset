@@ -28,6 +28,10 @@ func (m MockedImporter) Root() string {
 	return ""
 }
 
+func (m MockedImporter) Ping(context.Context) error {
+	return nil
+}
+
 func (m MockedImporter) Import(context.Context, chan<- *connectors.Record, <-chan *connectors.Result) error {
 	return nil
 }

@@ -37,6 +37,10 @@ func (p *syncImporter) Root() string {
 	return p.root
 }
 
+func (p *syncImporter) Ping(ctx context.Context) error {
+	return nil
+}
+
 func (p *syncImporter) Close(ctx context.Context) error {
 	return nil
 }

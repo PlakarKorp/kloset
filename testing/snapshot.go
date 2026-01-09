@@ -8,10 +8,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/stretchr/testify/require"
 )
 
@@ -38,19 +38,17 @@ func NewMockFile(path string, mode os.FileMode, content string) MockFile {
 	}
 }
 
-func (m *MockFile) ScanResult() *importer.ScanResult {
+func (m *MockFile) ScanResult() *connectors.Record {
 	switch {
 	case m.IsDir:
-		return &importer.ScanResult{
-			Record: &importer.ScanRecord{
-				Pathname: m.Path,
-				FileInfo: objects.FileInfo{
-					Lname:      path.Base(m.Path),
-					Lmode:      os.ModeDir | 0755,
-					Lnlink:     1,
-					Lusername:  "flan",
-					Lgroupname: "hacker",
-				},
+		return &connectors.Record{
+			Pathname: m.Path,
+			FileInfo: objects.FileInfo{
+				Lname:      path.Base(m.Path),
+				Lmode:      os.ModeDir | 0755,
+				Lnlink:     1,
+				Lusername:  "flan",
+				Lgroupname: "hacker",
 			},
 		}
 	default:
@@ -62,7 +60,7 @@ func (m *MockFile) ScanResult() *importer.ScanResult {
 			Lusername:  "flan",
 			Lgroupname: "hacker",
 		}
-		return importer.NewScanRecord(m.Path, "", info, nil, func() (io.ReadCloser, error) {
+		return connectors.NewRecord(m.Path, "", info, nil, func() (io.ReadCloser, error) {
 			if m.IsDir {
 				return nil, os.ErrNotExist
 			}
@@ -77,7 +75,7 @@ func (m *MockFile) ScanResult() *importer.ScanResult {
 type testingOptions struct {
 	name     string
 	excludes []string
-	gen      func(chan<- *importer.ScanResult)
+	gen      func(chan<- *connectors.Record)
 }
 
 func newTestingOptions() *testingOptions {
@@ -119,7 +117,7 @@ func GenerateFiles(t *testing.T, files []MockFile) string {
 	return tmpBackupDir
 }
 
-func WithGenerator(gen func(chan<- *importer.ScanResult)) TestingOptions {
+func WithGenerator(gen func(chan<- *connectors.Record)) TestingOptions {
 	return func(o *testingOptions) {
 		o.gen = gen
 	}
@@ -136,7 +134,7 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	require.NoError(t, err)
 	require.NotNil(t, builder)
 
-	imp, err := NewMockImporter(repo.AppContext(), &importer.Options{},
+	imp, err := NewMockImporter(repo.AppContext(), &connectors.Options{},
 		"mock", map[string]string{"location": "mock://place"})
 	require.NoError(t, err)
 	require.NotNil(t, imp)

@@ -14,6 +14,7 @@ type Exporter interface {
 	Origin() string
 	Type() string
 	Root() string
+	Ping(context.Context) error
 	Export(context.Context, <-chan *connectors.Record, chan<- *connectors.Result) error
 	Close(context.Context) error
 }
