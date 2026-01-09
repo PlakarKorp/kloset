@@ -22,13 +22,13 @@ type ObjectReader struct {
 
 	doSeek bool // Flag to invalidate the prefetchBuffer
 
-	prefetchSize     uint32
+	prefetchSize     int32
 	prefetchedObjoff int // Keeps track of the chunk position we prefetched up to.
 	prefetchBuffer   bytes.Buffer
 }
 
-func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64, prefetchSize uint32) *ObjectReader {
-	if prefetchSize == 0 {
+func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64, prefetchSize int32) *ObjectReader {
+	if prefetchSize <= 0 {
 		prefetchSize = default_prefetchSize
 	}
 	return &ObjectReader{
@@ -58,7 +58,7 @@ func (or *ObjectReader) prefetch() error {
 		return io.EOF
 	}
 
-	for data, err := range or.repo.GetObjectContent(or.object, or.prefetchedObjoff, or.prefetchSize) {
+	for data, err := range or.repo.GetObjectContent(or.object, or.prefetchedObjoff, uint32(or.prefetchSize)) {
 		if err != nil {
 			return err
 		}

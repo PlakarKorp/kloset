@@ -183,7 +183,7 @@ func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
 	return &vfile{
 		entry: e,
 		repo:  fs.repo,
-		rd:    NewObjectReader(fs.repo, e.ResolvedObject, e.Size(), 0),
+		rd:    NewObjectReader(fs.repo, e.ResolvedObject, e.Size(), -1),
 	}, nil
 }
 
@@ -265,7 +265,7 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		size += int64(c.Length)
 	}
 
-	rd := NewObjectReader(fsc.repo, obj, size, 0)
+	rd := NewObjectReader(fsc.repo, obj, size, -1)
 	return func(yield func(*Entry, error) bool) {
 		for {
 			_, siz, err := readDirPackHdr(rd)
@@ -340,7 +340,7 @@ func (e *Entry) Xattr(fsc *Filesystem, xattrName string) (io.ReadSeeker, error) 
 		return nil, err
 	}
 
-	return NewObjectReader(fsc.repo, xattr.ResolvedObject, xattr.Size, 0), nil
+	return NewObjectReader(fsc.repo, xattr.ResolvedObject, xattr.Size, -1), nil
 }
 
 // FileEntry implements fs.File, FSEntry and ReadSeeker

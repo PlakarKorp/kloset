@@ -93,7 +93,7 @@ func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, e
 			}
 			results <- importer.NewScanXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
 				func() (io.ReadCloser, error) {
-					return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size, 0)), nil
+					return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size, -1)), nil
 				})
 		}
 		if err := xattriter.Err(); err != nil {
