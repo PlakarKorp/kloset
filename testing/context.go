@@ -33,8 +33,8 @@ func GenerateContext(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer) *
 	// create a repository
 	ctx.MaxConcurrency = 1
 	if bufout != nil && buferr != nil {
-		ctx.Stdout = bufout
-		ctx.Stderr = buferr
+		// ctx.Stdout = bufout
+		// ctx.Stderr = buferr
 	}
 	cache := caching.NewManager(pebble.Constructor(tmpCacheDir))
 	ctx.SetCache(cache)

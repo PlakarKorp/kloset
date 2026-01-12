@@ -78,10 +78,6 @@ type Options struct {
 	CWD             string
 	MaxConcurrency  int
 	Excludes        []string
-
-	Stdin  io.Reader `msgpack:"-"`
-	Stdout io.Writer `msgpack:"-"`
-	Stderr io.Writer `msgpack:"-"`
 }
 
 type ImporterFn func(context.Context, *Options, string, map[string]string) (Importer, error)
