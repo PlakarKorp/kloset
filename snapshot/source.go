@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/PlakarKorp/kloset/exclude"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/importer"
 )
@@ -26,13 +27,14 @@ type Source struct {
 	origin string
 	typ    string
 	root   string
+	flags  location.Flags
 
 	excludes *exclude.RuleSet
 
 	failure error
 }
 
-func NewSource(ctx context.Context, imp importer.Importer) (*Source, error) {
+func NewSource(ctx context.Context, imp importer.Importer, flags location.Flags) (*Source, error) {
 	origin, err := imp.Origin(ctx)
 	if err != nil {
 		return nil, err
@@ -54,6 +56,7 @@ func NewSource(ctx context.Context, imp importer.Importer) (*Source, error) {
 		origin:    origin,
 		typ:       typ,
 		root:      root,
+		flags:     flags,
 		excludes:  exclude.NewRuleSet(),
 	}
 
@@ -85,10 +88,7 @@ func (s *Source) AddImporter(ctx context.Context, imp importer.Importer) error {
 		return err
 	}
 
-	if s.root != root {
-		return fmt.Errorf("mismatched root when adding importer %q expected %q", root, s.root)
-	}
-
+	fmt.Printf("Adding importer with %s\n", root)
 	s.importers = append(s.importers, &importerWrapper{root, imp})
 	return nil
 }
@@ -104,6 +104,14 @@ func (s *Source) GetHeader() header.Source {
 	hSource.Importer.Directory = s.root
 
 	return hSource
+}
+
+func (s *Source) GetExcludes() *exclude.RuleSet {
+	return s.excludes
+}
+
+func (s *Source) GetFlags() location.Flags {
+	return s.flags
 }
 
 func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
@@ -122,6 +130,7 @@ func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
 	wDedup := make([]*importerWrapper, 0)
 	for _, p := range w {
 		foundPrefix := false
+		fmt.Printf("Going over %s\n", p.root)
 		for _, m := range wDedup {
 			if strings.HasPrefix(p.root, m.root) {
 				foundPrefix = true
@@ -133,6 +142,8 @@ func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
 			paths = append(paths, p.root)
 		}
 	}
+
+	fmt.Printf("dedup'ed %+v\n", wDedup)
 
 	//s.root = commonPathPrefixSlice(paths)
 
