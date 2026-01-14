@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sort"
+	"slices"
 	"strings"
 
 	"github.com/PlakarKorp/kloset/exclude"
@@ -73,8 +73,8 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 		is = append(is, &importerWrapper{root, imp})
 	}
 
-	sort.Slice(is, func(i, j int) bool {
-		return is[i].root < is[j].root
+	slices.SortFunc(is, func(a, b *importerWrapper) int {
+		return strings.Compare(a.root, b.root)
 	})
 
 	// Dedup common paths and shadowed paths eg:
@@ -144,24 +144,26 @@ func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
 		defer close(results)
 
 		for _, w := range s.importers {
-			iter, err := w.imp.Scan(s.ctx)
+			importerChan, err := w.imp.Scan(s.ctx)
 			if err != nil {
 				s.failure = err
 				return
 			}
 
-			i := 0
-			for rec := range iter {
-				if i%1000 == 0 {
-					if s.ctx.Err() != nil {
-						s.failure = err
-						return
+		innerloop:
+			for {
+				select {
+				case <-s.ctx.Done():
+					s.failure = s.ctx.Err()
+					return
+				case rec, ok := <-importerChan:
+					if !ok {
+						break innerloop
 					}
+					results <- rec
 				}
-				results <- rec
 			}
 		}
-
 	}()
 
 	return results, nil
