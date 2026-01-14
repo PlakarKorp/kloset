@@ -3,7 +3,7 @@ package snapshot
 import (
 	"context"
 	"fmt"
-	"path/filepath"
+	"path"
 	"slices"
 	"strings"
 
@@ -69,6 +69,8 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 		if err != nil {
 			return nil, err
 		}
+
+		root = path.Clean(root)
 
 		is = append(is, &importerWrapper{root, imp})
 	}
@@ -185,11 +187,8 @@ func commonPathPrefixSlice(paths []string) string {
 }
 
 func commonPathPrefix(a, b string) string {
-	a = filepath.Clean(a)
-	b = filepath.Clean(b)
-
-	as := splitPath(a)
-	bs := splitPath(b)
+	as := strings.Split(strings.Trim(a, "/"), "/")
+	bs := strings.Split(strings.Trim(b, "/"), "/")
 
 	n := 0
 	for n < len(as) && n < len(bs) && as[n] == bs[n] {
@@ -199,21 +198,5 @@ func commonPathPrefix(a, b string) string {
 	if n == 0 {
 		return ""
 	}
-	return "/" + filepath.Join(as[:n]...)
-}
-
-func splitPath(p string) []string {
-	vol := filepath.VolumeName(p) // "C:" on Windows, "" elsewhere
-	rest := strings.TrimPrefix(p, vol)
-	rest = strings.Trim(rest, string(filepath.Separator))
-
-	parts := []string{}
-	if vol != "" {
-		parts = append(parts, vol)
-	}
-	if rest == "" {
-		return parts
-	}
-	parts = append(parts, strings.Split(rest, string(filepath.Separator))...)
-	return parts
+	return "/" + path.Join(as[:n]...)
 }
