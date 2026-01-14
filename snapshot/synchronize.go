@@ -187,7 +187,7 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	emitter := snap.Emitter("sync")
 	defer emitter.Close()
 
-	source, err := NewSource(snap.AppContext(), imp, 0)
+	source, err := NewSource(snap.AppContext(), 0, imp)
 	if err != nil {
 		return err
 	}

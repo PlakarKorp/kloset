@@ -34,63 +34,71 @@ type Source struct {
 	failure error
 }
 
-func NewSource(ctx context.Context, imp importer.Importer, flags location.Flags) (*Source, error) {
-	origin, err := imp.Origin(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	typ, err := imp.Type(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	root, err := imp.Root(ctx)
-	if err != nil {
-		return nil, err
-	}
-
+func NewSource(ctx context.Context, flags location.Flags, importers ...importer.Importer) (*Source, error) {
 	s := &Source{
-		ctx:       ctx,
-		importers: make([]*importerWrapper, 0, 1),
-		origin:    origin,
-		typ:       typ,
-		root:      root,
-		flags:     flags,
-		excludes:  exclude.NewRuleSet(),
+		ctx:      ctx,
+		flags:    flags,
+		excludes: exclude.NewRuleSet(),
 	}
 
-	s.importers = append(s.importers, &importerWrapper{root, imp})
+	var is []*importerWrapper
+	for i, imp := range importers {
+		origin, err := imp.Origin(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if i == 0 {
+			s.origin = origin
+		} else if s.origin != origin {
+			return nil, fmt.Errorf("mismatched origin when adding importer %q expected %q", origin, s.origin)
+		}
+
+		typ, err := imp.Type(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		if i == 0 {
+			s.typ = typ
+		} else if s.typ != typ {
+			return nil, fmt.Errorf("mismatched type when adding importer %q expected %q", typ, s.typ)
+		}
+
+		root, err := imp.Root(ctx)
+		if err != nil {
+			return nil, err
+		}
+
+		is = append(is, &importerWrapper{root, imp})
+	}
+
+	sort.Slice(is, func(i, j int) bool {
+		return is[i].root < is[j].root
+	})
+
+	// Dedup common paths and shadowed paths eg:
+	// /etc/foo, /etc would be one /etc import.
+	paths := []string{}
+	for _, p := range is {
+		foundPrefix := false
+		for _, m := range s.importers {
+			if strings.HasPrefix(p.root, m.root) {
+				foundPrefix = true
+				break
+			}
+		}
+		if !foundPrefix {
+			s.importers = append(s.importers, p)
+			paths = append(paths, p.root)
+		}
+	}
+
+	// Now that everything is dedup'ed find the common root prefix eg:
+	// /etc/bar, /etc/baz would have /etc as the common root.
+	s.root = commonPathPrefixSlice(paths)
+
 	return s, nil
-}
-
-func (s *Source) AddImporter(ctx context.Context, imp importer.Importer) error {
-	origin, err := imp.Origin(ctx)
-	if err != nil {
-		return err
-	}
-
-	if s.origin != origin {
-		return fmt.Errorf("mismatched origin when adding importer %q expected %q", origin, s.origin)
-	}
-
-	typ, err := imp.Type(ctx)
-	if err != nil {
-		return err
-	}
-
-	if s.typ != typ {
-		return fmt.Errorf("mismatched typ when adding importer %q expected %q", typ, s.typ)
-	}
-
-	root, err := imp.Root(ctx)
-	if err != nil {
-		return err
-	}
-
-	fmt.Printf("Adding importer with %s\n", root)
-	s.importers = append(s.importers, &importerWrapper{root, imp})
-	return nil
 }
 
 func (s *Source) SetExcludes(excludes []string) error {
@@ -110,7 +118,19 @@ func (s *Source) GetExcludes() *exclude.RuleSet {
 	return s.excludes
 }
 
-func (s *Source) GetFlags() location.Flags {
+func (s *Source) Origin() string {
+	return s.origin
+}
+
+func (s *Source) Type() string {
+	return s.typ
+}
+
+func (s *Source) Root() string {
+	return s.root
+}
+
+func (s *Source) Flags() location.Flags {
 	return s.flags
 }
 
@@ -120,37 +140,10 @@ func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
 	}
 
 	results := make(chan *importer.ScanResult, 1000)
-
-	w := s.importers
-	sort.Slice(w, func(i, j int) bool {
-		return w[i].root < w[j].root
-	})
-
-	paths := []string{}
-	wDedup := make([]*importerWrapper, 0)
-	for _, p := range w {
-		foundPrefix := false
-		fmt.Printf("Going over %s\n", p.root)
-		for _, m := range wDedup {
-			if strings.HasPrefix(p.root, m.root) {
-				foundPrefix = true
-				break
-			}
-		}
-		if !foundPrefix {
-			wDedup = append(wDedup, p)
-			paths = append(paths, p.root)
-		}
-	}
-
-	fmt.Printf("dedup'ed %+v\n", wDedup)
-
-	//s.root = commonPathPrefixSlice(paths)
-
 	go func() {
 		defer close(results)
 
-		for _, w := range wDedup {
+		for _, w := range s.importers {
 			iter, err := w.imp.Scan(s.ctx)
 			if err != nil {
 				s.failure = err
@@ -176,14 +169,14 @@ func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
 
 func commonPathPrefixSlice(paths []string) string {
 	if len(paths) == 0 {
-		return ""
+		return "/"
 	}
 
 	prefix := paths[0]
 	for _, p := range paths[1:] {
 		prefix = commonPathPrefix(prefix, p)
 		if prefix == "" {
-			return ""
+			return "/"
 		}
 	}
 	return prefix
@@ -192,9 +185,6 @@ func commonPathPrefixSlice(paths []string) string {
 func commonPathPrefix(a, b string) string {
 	a = filepath.Clean(a)
 	b = filepath.Clean(b)
-
-	// Windows ?
-	// a = strings.ToLower(a); b = strings.ToLower(b)
 
 	as := splitPath(a)
 	bs := splitPath(b)
@@ -207,7 +197,7 @@ func commonPathPrefix(a, b string) string {
 	if n == 0 {
 		return ""
 	}
-	return filepath.Join(as[:n]...)
+	return "/" + filepath.Join(as[:n]...)
 }
 
 func splitPath(p string) []string {
