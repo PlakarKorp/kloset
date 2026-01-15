@@ -20,6 +20,9 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	emitter := snap.Emitter("restore")
 	defer emitter.Close()
 
+	// these are wrong and need to be actually computed from the
+	// entry that we're about to walk.  keeping for now for
+	// simplicity.
 	fileCount := snap.Header.GetSource(0).Summary.Directory.Files + snap.Header.GetSource(0).Summary.Below.Files
 	dirCount := snap.Header.GetSource(0).Summary.Directory.Directories + snap.Header.GetSource(0).Summary.Below.Directories - uint64(len(strings.Split(pathname, "/"))-2)
 	symlinkCount := snap.Header.GetSource(0).Summary.Directory.Symlinks + snap.Header.GetSource(0).Summary.Below.Symlinks
