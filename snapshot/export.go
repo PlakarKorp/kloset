@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"io"
+	"path"
 	"strings"
 
 	"github.com/PlakarKorp/kloset/connectors"
@@ -15,7 +16,7 @@ type ExportOptions struct {
 	ForceCompletion bool
 }
 
-func (snap *Snapshot) Export(exp exporter.Exporter, base string, pathname string, opts *ExportOptions) error {
+func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *ExportOptions) error {
 	emitter := snap.Emitter("restore")
 	defer emitter.Close()
 
@@ -29,6 +30,20 @@ func (snap *Snapshot) Export(exp exporter.Exporter, base string, pathname string
 	pvfs, err := snap.Filesystem()
 	if err != nil {
 		return err
+	}
+
+	entry, err := pvfs.GetEntry(pathname)
+	if err != nil {
+		return err
+	}
+	pathname = entry.Path()
+
+	tostrip := pathname
+	if !entry.IsDir() {
+		tostrip = path.Dir(tostrip)
+		if tostrip == "/" {
+			tostrip = ""
+		}
 	}
 
 	records := make(chan *connectors.Record, snap.AppContext().MaxConcurrency)
@@ -54,13 +69,20 @@ func (snap *Snapshot) Export(exp exporter.Exporter, base string, pathname string
 
 	go func() {
 		i := 0
-		pvfs.WalkDir("/", func(entrypath string, e *vfs.Entry, err error) error {
+		pvfs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 			if i%1000 == 0 {
 				if err := snap.AppContext().Err(); err != nil {
 					return err
 				}
 			}
 			i++
+
+			// simulate a chroot: strip the parent path from the entry path
+			entrypath = strings.TrimPrefix(entrypath, tostrip)
+			if entrypath == "" {
+				entrypath = "/"
+			}
+
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)
 			} else if e.FileInfo.Mode().IsRegular() {

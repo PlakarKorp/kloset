@@ -44,8 +44,7 @@ func TestExport(t *testing.T) {
 	}
 	require.NotEmpty(t, filepath)
 
-	root := exporterInstance.Root()
-	err = snap.Export(exporterInstance, root, filepath, opts)
+	err = snap.Export(exporterInstance, filepath, opts)
 	require.NoError(t, err)
 
 	mockExporter, ok := exporterInstance.(*ptesting.MockExporter)
