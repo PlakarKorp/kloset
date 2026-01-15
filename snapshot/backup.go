@@ -17,11 +17,13 @@ import (
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/connectors/importer"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/scanlog"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/gabriel-vasile/mimetype"
@@ -113,7 +115,7 @@ func (sourceCtx *sourceContext) recordError(path string, err error) error {
 	return sourceCtx.indexes.erridx.Insert(path, serialized)
 }
 
-func (sourceCtx *sourceContext) recordXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) error {
+func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
@@ -123,87 +125,76 @@ func (sourceCtx *sourceContext) recordXattr(record *importer.ScanRecord, objectM
 	return sourceCtx.indexes.xattridx.Insert(xattr.ToPath(), serialized)
 }
 
-func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *importer.ScanResult) bool {
-	var pathname string
+func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *connectors.Record) bool {
 	var isDir bool
-	switch {
-	case record.Record != nil:
-		pathname = record.Record.Pathname
-		isDir = record.Record.FileInfo.IsDir()
-	case record.Error != nil:
-		pathname = record.Error.Pathname
-		isDir = false
+	if record.Err == nil {
+		isDir = record.FileInfo.IsDir()
 	}
 
-	if pathname == "/" {
+	if record.Pathname == "/" {
 		return false
 	}
 
-	return sourceCtx.source.excludes.IsExcluded(pathname, isDir)
+	return sourceCtx.source.excludes.IsExcluded(record.Pathname, isDir)
 }
 
-func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *importer.ScanResult, stats *scanStats, chunker *chunkers.Chunker) {
-	switch {
-	case record.Error != nil:
-		record := record.Error
+func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, stats *scanStats, chunker *chunkers.Chunker) {
+	if record.Err != nil {
 		sourceCtx.recordError(record.Pathname, record.Err)
 		snap.emitter.PathError(record.Pathname, record.Err)
+		return
+	}
 
-	case record.Record != nil:
-		record := record.Record
-		defer record.Close()
+	if snap.builderOptions.NoXattr && record.IsXattr {
+		return
+	}
 
-		if snap.builderOptions.NoXattr && record.IsXattr {
-			return
-		}
+	snap.emitter.Path(record.Pathname)
 
-		snap.emitter.Path(record.Pathname)
+	// XXX: Remove this when we introduce the Location object.
+	repoLocation, err := snap.repository.Location()
+	if err != nil {
+		sourceCtx.recordError(record.Pathname, err)
+		snap.emitter.FileError(record.Pathname, err)
+		return
+	}
 
-		// XXX: Remove this when we introduce the Location object.
-		repoLocation, err := snap.repository.Location()
-		if err != nil {
+	repoLocation = strings.TrimPrefix(repoLocation, "fs://")
+	repoLocation = strings.TrimPrefix(repoLocation, "ptar://")
+	if record.Pathname == repoLocation || strings.HasPrefix(record.Pathname, repoLocation+"/") {
+		snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
+		return
+	}
+
+	if record.FileInfo.Mode().IsDir() {
+		atomic.AddUint64(&stats.ndirs, +1)
+		entry := vfs.NewEntry(path.Dir(record.Pathname), record)
+		if err := sourceCtx.batchRecordEntry(entry); err != nil {
 			sourceCtx.recordError(record.Pathname, err)
-			snap.emitter.FileError(record.Pathname, err)
-			return
 		}
+		return
+	}
 
-		repoLocation = strings.TrimPrefix(repoLocation, "fs://")
-		repoLocation = strings.TrimPrefix(repoLocation, "ptar://")
-		if record.Pathname == repoLocation || strings.HasPrefix(record.Pathname, repoLocation+"/") {
-			snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
-			return
-		}
+	snap.emitter.File(record.Pathname)
 
-		if record.FileInfo.Mode().IsDir() {
-			atomic.AddUint64(&stats.ndirs, +1)
-			entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-			if err := sourceCtx.batchRecordEntry(entry); err != nil {
-				sourceCtx.recordError(record.Pathname, err)
-			}
-			return
-		}
+	if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
+		snap.emitter.FileError(record.Pathname, err)
+		sourceCtx.recordError(record.Pathname, err)
+	} else {
+		snap.emitter.FileOk(record.Pathname)
+	}
 
-		snap.emitter.File(record.Pathname)
+	if record.IsXattr {
+		return
+	}
 
-		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
-			snap.emitter.FileError(record.Pathname, err)
-			sourceCtx.recordError(record.Pathname, err)
-		} else {
-			snap.emitter.FileOk(record.Pathname)
-		}
-
-		if record.IsXattr {
-			return
-		}
-
-		atomic.AddUint64(&stats.nfiles, +1)
-		if record.FileInfo.Mode().IsRegular() {
-			atomic.AddUint64(&stats.size, uint64(record.FileInfo.Size()))
-		}
+	atomic.AddUint64(&stats.nfiles, +1)
+	if record.FileInfo.Mode().IsRegular() {
+		atomic.AddUint64(&stats.size, uint64(record.FileInfo.Size()))
 	}
 }
 
-func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
+func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -214,17 +205,20 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 		ckers = append(ckers, cker)
 	}
 
-	scanner, err := sourceCtx.source.GetScanner()
-	if err != nil {
-		return err
+	var (
+		size    = snap.appContext.MaxConcurrency
+		records = make(chan *connectors.Record, size)
+		errch   = make(chan error, 1)
+
+		wg  = errgroup.Group{}
+		ctx = snap.AppContext()
+	)
+
+	var results chan *connectors.Result
+	if (imp.Flags() & location.FLAG_NEEDACK) != 0 {
+		results = make(chan *connectors.Result, size)
 	}
 
-	wg := errgroup.Group{}
-	ctx := snap.AppContext()
-
-	snap.emitter.Info("snapshot.import.start", map[string]any{})
-
-	var stats scanStats
 	for i, cker := range ckers {
 		ck := cker
 		idx := i
@@ -234,46 +228,51 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 				case <-ctx.Done():
 					return ctx.Err()
 
-				case record, ok := <-scanner:
+				case record, ok := <-records:
 					if !ok {
 						return nil
 					}
 
-					if snap.skipExcludedPathname(sourceCtx, record) {
-						if record.Record != nil {
-							record.Record.Close()
-						}
-						continue
+					if !snap.skipExcludedPathname(sourceCtx, record) {
+						snap.processRecord(idx, sourceCtx, record, stats, ck)
 					}
 
-					snap.processRecord(idx, sourceCtx, record, &stats, ck)
+					if results != nil {
+						results <- record.Ok()
+					} else {
+						record.Close()
+					}
 				}
 			}
 		})
 	}
 
-	if err := wg.Wait(); err != nil {
+	// wait asynchronously for the workers because we need to
+	// close results to signal Import() that we're done.
+	go func() {
+		if err := wg.Wait(); err != nil {
+			errch <- err
+		}
+		close(errch)
+		if results != nil {
+			close(results)
+		}
+	}()
+
+	importerErr := imp.Import(ctx, records, results)
+	if results != nil {
+		for range results {
+			// drain the results channel so that we unblock the
+			// workers.
+		}
+	}
+	if importerErr != nil {
+		return importerErr
+	}
+
+	if err := <-errch; err != nil {
 		return err
 	}
-
-	for range scanner {
-		// drain the importer channel since we might
-		// have been cancelled while the importer is
-		// trying to still produce some records.
-	}
-
-	// Flush any left over entries.
-	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
-		return err
-	}
-
-	sourceCtx.vfsEntBatch = nil
-
-	snap.emitter.Info("snapshot.import.done", map[string]any{
-		"nfiles": stats.nfiles,
-		"ndirs":  stats.ndirs,
-		"size":   stats.size,
-	})
 
 	return nil
 }
@@ -306,11 +305,28 @@ func (snap *Builder) Backup(source *Source) error {
 		return err
 	}
 
-	/* importer */
-	if err := snap.importerJob(sourceCtx); err != nil {
-		snap.repository.PackerManager.Wait()
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
+
+	var stats scanStats
+	for _, imp := range sourceCtx.source.Importers() {
+		if err := snap.importerJob(imp, sourceCtx, &stats); err != nil {
+			snap.repository.PackerManager.Wait()
+			return err
+		}
+	}
+
+	snap.emitter.Info("snapshot.import.done", map[string]any{
+		"nfiles": stats.nfiles,
+		"ndirs":  stats.ndirs,
+		"size":   stats.size,
+	})
+
+	// Flush any left over entries.
+	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
 		return err
 	}
+
+	sourceCtx.vfsEntBatch = nil
 
 	/* tree builders */
 	vfsHeader, rootSummary, indexes, err := snap.persistTrees(sourceCtx)
@@ -643,7 +659,7 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 	return sourceCtx, nil
 }
 
-func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *importer.ScanRecord) (*objects.CachedPath, error) {
+func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.Record) (*objects.CachedPath, error) {
 	if sourceCtx.vfsCache == nil {
 		return nil, nil
 	}
@@ -694,7 +710,7 @@ type contentMeta struct {
 	ContentType string
 }
 
-func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *importer.ScanRecord) (*contentMeta, error) {
+func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *connectors.Record) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
 		return &contentMeta{
 			ContentType: "application/x-not-regular-file",
@@ -734,7 +750,7 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}, nil
 }
 
-func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *objects.CachedPath, record *importer.ScanRecord) error {
+func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *objects.CachedPath, record *connectors.Record) error {
 	if meta.ContentType == "" {
 		return fmt.Errorf("content type cannot be empty!")
 	}
@@ -804,7 +820,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	return sourceCtx.batchRecordEntry(fileEntry)
 }
 
-func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record *importer.ScanRecord, chunker *chunkers.Chunker) error {
+func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
 	cachedPath, err := snap.checkVFSCache(sourceCtx, record)
 	if err != nil {
 		snap.Logger().Warn("VFS CACHE: %v", err)
@@ -976,7 +992,7 @@ func (snap *Builder) relinkNodesRecursive(sourceCtx *sourceContext, pathname str
 	parent := path.Dir(pathname)
 
 	if item == nil {
-		dirEntry := vfs.NewEntry(parent, &importer.ScanRecord{
+		dirEntry := vfs.NewEntry(parent, &connectors.Record{
 			Pathname: pathname,
 			FileInfo: objects.FileInfo{
 				Lname:    path.Base(pathname),

@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
@@ -15,20 +16,18 @@ import (
 
 type MockedImporter struct{}
 
-func (m MockedImporter) Origin(ctx context.Context) (string, error) {
-	return "", nil
+func (m MockedImporter) Origin() string        { return "" }
+func (m MockedImporter) Type() string          { return "" }
+func (m MockedImporter) Root() string          { return "" }
+func (m MockedImporter) Flags() location.Flags { return 0 }
+
+func (m MockedImporter) Ping(context.Context) error {
+	return nil
 }
 
-func (m MockedImporter) Type(ctx context.Context) (string, error) {
-	return "", nil
-}
-
-func (m MockedImporter) Root(ctx context.Context) (string, error) {
-	return "", nil
-}
-
-func (m MockedImporter) Scan(ctx context.Context) (<-chan *ScanResult, error) {
-	return nil, nil
+func (m MockedImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
+	close(records)
+	return nil
 }
 
 func (m MockedImporter) NewReader(string) (io.ReadCloser, error) {
@@ -46,10 +45,10 @@ func (m MockedImporter) Close(ctx context.Context) error {
 func TestBackends(t *testing.T) {
 
 	// Setup: Register some backends
-	Register("local1", 0, func(appCtx context.Context, opts *Options, name string, config map[string]string) (Importer, error) {
+	Register("local1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
 		return nil, nil
 	})
-	Register("remote1", 0, func(appCtx context.Context, opts *Options, name string, config map[string]string) (Importer, error) {
+	Register("remote1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
 		return nil, nil
 	})
 
@@ -63,13 +62,13 @@ func TestBackends(t *testing.T) {
 
 func TestNewImporter(t *testing.T) {
 	// Setup: Register some backends
-	Register("fs", location.FLAG_LOCALFS, func(appCtx context.Context, opts *Options, name string, config map[string]string) (Importer, error) {
+	Register("fs", location.FLAG_LOCALFS, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
 		return MockedImporter{}, nil
 	})
-	Register("s3", 0, func(appCtx context.Context, opts *Options, name string, config map[string]string) (Importer, error) {
+	Register("s3", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
 		return MockedImporter{}, nil
 	})
-	Register("ftp", 0, func(appCtx context.Context, opts *Options, name string, config map[string]string) (Importer, error) {
+	Register("ftp", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
 		return MockedImporter{}, nil
 	})
 
@@ -110,30 +109,30 @@ func TestNewScanRecord(t *testing.T) {
 	fileinfo := objects.NewFileInfo("file", 300000, 0644, now, 1, 2, 3, 4, 5)
 	xattr := []string{"attr1", "attr2"}
 
-	record := NewScanRecord(pathname, target, fileinfo, xattr, nil)
+	record := connectors.NewRecord(pathname, target, fileinfo, xattr, nil)
 
-	require.Equal(t, pathname, record.Record.Pathname)
-	require.Equal(t, target, record.Record.Target)
-	require.Equal(t, fileinfo, record.Record.FileInfo)
-	require.ElementsMatch(t, xattr, record.Record.ExtendedAttributes)
+	require.Equal(t, pathname, record.Pathname)
+	require.Equal(t, target, record.Target)
+	require.Equal(t, fileinfo, record.FileInfo)
+	require.ElementsMatch(t, xattr, record.ExtendedAttributes)
 }
 
 func TestNewScanXattr(t *testing.T) {
 	pathname := "/path/to/file"
 	xattrname := "foo/bar"
 
-	record := NewScanXattr(pathname, xattrname, objects.AttributeExtended, nil)
+	record := connectors.NewXattr(pathname, xattrname, objects.AttributeExtended, nil)
 
-	require.Equal(t, pathname, record.Record.Pathname)
-	require.Equal(t, xattrname, record.Record.XattrName)
-	require.True(t, record.Record.IsXattr)
+	require.Equal(t, pathname, record.Pathname)
+	require.Equal(t, xattrname, record.XattrName)
+	require.True(t, record.IsXattr)
 }
 
 func TestNewScanError(t *testing.T) {
 	pathname := "/path/to/file"
 	err := fmt.Errorf("some error")
 
-	record := NewScanError(pathname, err)
+	record := connectors.NewError(pathname, err)
 
-	require.Equal(t, pathname, record.Error.Pathname)
+	require.Equal(t, pathname, record.Pathname)
 }

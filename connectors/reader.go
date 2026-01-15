@@ -1,4 +1,4 @@
-package importer
+package connectors
 
 import "io"
 

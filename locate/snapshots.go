@@ -1,5 +1,3 @@
-// package locate
-
 package locate
 
 import (

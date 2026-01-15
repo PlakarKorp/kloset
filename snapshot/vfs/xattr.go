@@ -2,9 +2,9 @@ package vfs
 
 import (
 	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/vmihailenco/msgpack/v5"
 )
@@ -31,7 +31,7 @@ type Xattr struct {
 	ResolvedObject *objects.Object `msgpack:"-" json:"object,omitempty"`
 }
 
-func NewXattr(record *importer.ScanRecord, objectMAC objects.MAC, size int64) *Xattr {
+func NewXattr(record *connectors.Record, objectMAC objects.MAC, size int64) *Xattr {
 	return &Xattr{
 		Version: versioning.FromString(VFS_XATTR_VERSION),
 		Path:    record.Pathname,

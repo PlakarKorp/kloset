@@ -13,6 +13,7 @@ const (
 	FLAG_LOCALFS Flags = 1 << iota // all: dealing with a file (or dir) on the local fs
 	FLAG_FILE                      // storage: kloset is in a single file
 	FLAG_STREAM                    // importer: cannot call Scan() more than once
+	FLAG_NEEDACK                   // importer: cares about acknowledgments in Import()
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")
@@ -118,6 +119,8 @@ func ParseFlag(name string) (Flags, error) {
 		return FLAG_FILE, nil
 	case "stream":
 		return FLAG_STREAM, nil
+	case "needack":
+		return FLAG_NEEDACK, nil
 	default:
 		return 0, ErrUnknownFlag
 	}
