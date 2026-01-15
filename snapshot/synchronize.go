@@ -7,123 +7,108 @@ import (
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/google/uuid"
 )
 
 // dummy importer
 type syncImporter struct {
-	root    string
-	origin  string
-	typ     string
-	fs      *vfs.Filesystem
-	src     *Snapshot
-	failure error
+	root   string
+	origin string
+	typ    string
+	fs     *vfs.Filesystem
+	src    *Snapshot
 }
 
-func (p *syncImporter) Origin(ctx context.Context) (string, error) {
-	return p.origin, nil
-}
+func (p *syncImporter) Origin() string        { return p.origin }
+func (p *syncImporter) Type() string          { return p.typ }
+func (p *syncImporter) Root() string          { return p.root }
+func (p *syncImporter) Flags() location.Flags { return 0 }
 
-func (p *syncImporter) Type(ctx context.Context) (string, error) {
-	return p.typ, nil
-}
-
-func (p *syncImporter) Root(ctx context.Context) (string, error) {
-	return p.root, nil
+func (p *syncImporter) Ping(ctx context.Context) error {
+	return nil
 }
 
 func (p *syncImporter) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *syncImporter) Scan(ctx context.Context) (<-chan *importer.ScanResult, error) {
+func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
+	defer close(records)
 
 	erriter, err := p.fs.Errors("/")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	_, _, xattrtree := p.fs.BTrees()
 	xattriter, err := xattrtree.ScanFrom("/")
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	results := make(chan *importer.ScanResult, 1000)
-
-	go func() {
-		defer close(results)
-
-		i := 0
-		for erritem, err := range erriter {
-			if i%1024 == 0 {
-				if ctx.Err() != nil {
-					p.failure = ctx.Err()
-					return
-				}
-			}
-			i++
-			if err != nil {
-				p.failure = err
-				return
-			}
-			results <- importer.NewScanError(erritem.Name, fmt.Errorf("%s", erritem.Error))
-		}
-
-		i = 0
-		for xattriter.Next() {
-			if i%1024 == 0 {
-				if ctx.Err() != nil {
-					p.failure = ctx.Err()
-					return
-				}
-			}
-			i++
-
-			_, xattrmac := xattriter.Current()
-			xattr, err := p.fs.ResolveXattr(xattrmac)
-			if err != nil {
-				p.failure = err
-				return
-			}
-			results <- importer.NewScanXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
-				func() (io.ReadCloser, error) {
-					return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size, -1)), nil
-				})
-		}
-		if err := xattriter.Err(); err != nil {
-			p.failure = err
-			return
-		}
-
-		i = 0
-		if err := p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
-			if err != nil {
+	i := 0
+	for erritem, err := range erriter {
+		if i%1024 == 0 {
+			if err := ctx.Err(); err != nil {
 				return err
 			}
-
-			if i%1024 == 0 {
-				if ctx.Err() != nil {
-					return ctx.Err()
-				}
-			}
-			i++
-
-			results <- importer.NewScanRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
-				func() (io.ReadCloser, error) {
-					return p.fs.Open(path)
-				})
-			return nil
-		}); err != nil {
-			p.failure = err
 		}
-	}()
+		i++
+		if err != nil {
+			return err
+		}
+		records <- connectors.NewError(erritem.Name, fmt.Errorf("%s", erritem.Error))
+	}
 
-	return results, nil
+	i = 0
+	for xattriter.Next() {
+		if i%1024 == 0 {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+		}
+		i++
+
+		_, xattrmac := xattriter.Current()
+		xattr, err := p.fs.ResolveXattr(xattrmac)
+		if err != nil {
+			return err
+		}
+		records <- connectors.NewXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
+			func() (io.ReadCloser, error) {
+				return io.NopCloser(vfs.NewObjectReader(p.src.repository, xattr.ResolvedObject, xattr.Size, -1)), nil
+			})
+	}
+	if err := xattriter.Err(); err != nil {
+		return err
+	}
+
+	i = 0
+	err = p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if i%1024 == 0 {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+		}
+		i++
+
+		records <- connectors.NewRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
+			func() (io.ReadCloser, error) {
+				return p.fs.Open(path)
+			})
+		return nil
+	})
+
+	return err
 }
 
 func (src *Snapshot) Synchronize(dst *Builder) error {
@@ -216,7 +201,7 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	}
 
 	/* importer */
-	if err := snap.importerJob(backupCtx); err != nil {
+	if err := snap.importerJob(imp, backupCtx); err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
@@ -226,11 +211,6 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
-	}
-
-	if imp.failure != nil {
-		snap.repository.PackerManager.Wait()
-		return imp.failure
 	}
 
 	snap.Header.GetSource(0).VFS = *vfsHeader

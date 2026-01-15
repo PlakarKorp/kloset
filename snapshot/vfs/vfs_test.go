@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
@@ -163,22 +163,22 @@ func generateSnapshot(t *testing.T) (*repository.Repository, *snapshot.Snapshot)
 		// 	ptesting.NewMockDir("subdir"),
 		// 	ptesting.NewMockFile("subdir/dummy.txt", 0644, "hello"),
 		// }
-		nil, ptesting.WithGenerator(func(ch chan<- *importer.ScanResult) {
-			ch <- importer.NewScanRecord("/", "", objects.FileInfo{
+		nil, ptesting.WithGenerator(func(ch chan<- *connectors.Record) {
+			ch <- connectors.NewRecord("/", "", objects.FileInfo{
 				Lname: "/",
 				Lmode: os.ModeDir | 0755,
 			}, nil, nil)
-			ch <- importer.NewScanRecord("/subdir", "", objects.FileInfo{
+			ch <- connectors.NewRecord("/subdir", "", objects.FileInfo{
 				Lname: "subdir",
 				Lmode: os.ModeDir | 0755,
 			}, nil, nil)
-			ch <- importer.NewScanRecord("/subdir/dummy.txt", "", objects.FileInfo{
+			ch <- connectors.NewRecord("/subdir/dummy.txt", "", objects.FileInfo{
 				Lname: "dummy.txt",
 				Lmode: 0644,
 			}, nil, func() (io.ReadCloser, error) {
 				return io.NopCloser(strings.NewReader("hello")), nil
 			})
-			ch <- importer.NewScanRecord("/subdir/big", "", objects.FileInfo{
+			ch <- connectors.NewRecord("/subdir/big", "", objects.FileInfo{
 				Lname: "big",
 				Lmode: 0644,
 			}, nil, func() (io.ReadCloser, error) {
@@ -187,7 +187,6 @@ func generateSnapshot(t *testing.T) (*repository.Repository, *snapshot.Snapshot)
 					n:   10 * 1024 * 1024,
 				}, nil
 			})
-			close(ch)
 		}),
 	)
 	return repo, snap

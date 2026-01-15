@@ -7,22 +7,16 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/PlakarKorp/kloset/connectors/importer"
 	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/snapshot/header"
-	"github.com/PlakarKorp/kloset/snapshot/importer"
 )
-
-type importerWrapper struct {
-	root string
-	imp  importer.Importer
-}
 
 type Source struct {
 	ctx context.Context
 
-	// Once Importer.Root() is ctx free get rid of this little shim.
-	importers []*importerWrapper
+	importers []importer.Importer
 
 	origin string
 	typ    string
@@ -41,42 +35,31 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 		excludes: exclude.NewRuleSet(),
 	}
 
-	var is []*importerWrapper
+	var is []importer.Importer
 	for i, imp := range importers {
-		origin, err := imp.Origin(ctx)
-		if err != nil {
-			return nil, err
-		}
+		var (
+			origin = imp.Origin()
+			typ    = imp.Type()
+			flags  = imp.Flags()
+		)
 
 		if i == 0 {
 			s.origin = origin
+			s.typ = typ
+			s.flags = flags
 		} else if s.origin != origin {
 			return nil, fmt.Errorf("mismatched origin when adding importer %q expected %q", origin, s.origin)
-		}
-
-		typ, err := imp.Type(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		if i == 0 {
-			s.typ = typ
 		} else if s.typ != typ {
 			return nil, fmt.Errorf("mismatched type when adding importer %q expected %q", typ, s.typ)
+		} else if s.flags != flags {
+			return nil, fmt.Errorf("mismatched flags when adding importer %q expected %q", flags, s.flags)
 		}
 
-		root, err := imp.Root(ctx)
-		if err != nil {
-			return nil, err
-		}
-
-		root = path.Clean(root)
-
-		is = append(is, &importerWrapper{root, imp})
+		is = append(is, imp)
 	}
 
-	slices.SortFunc(is, func(a, b *importerWrapper) int {
-		return strings.Compare(a.root, b.root)
+	slices.SortFunc(is, func(a, b importer.Importer) int {
+		return strings.Compare(a.Root(), b.Root())
 	})
 
 	// Dedup common paths and shadowed paths eg:
@@ -85,14 +68,14 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 	for _, p := range is {
 		foundPrefix := false
 		for _, m := range s.importers {
-			if strings.HasPrefix(p.root, m.root) {
+			if strings.HasPrefix(p.Root(), m.Root()) {
 				foundPrefix = true
 				break
 			}
 		}
 		if !foundPrefix {
 			s.importers = append(s.importers, p)
-			paths = append(paths, p.root)
+			paths = append(paths, p.Root())
 		}
 	}
 
@@ -136,39 +119,8 @@ func (s *Source) Flags() location.Flags {
 	return s.flags
 }
 
-func (s *Source) GetScanner() (<-chan *importer.ScanResult, error) {
-	if len(s.importers) == 1 {
-		return s.importers[0].imp.Scan(s.ctx)
-	}
-
-	results := make(chan *importer.ScanResult, 1000)
-	go func() {
-		defer close(results)
-
-		for _, w := range s.importers {
-			importerChan, err := w.imp.Scan(s.ctx)
-			if err != nil {
-				s.failure = err
-				return
-			}
-
-		innerloop:
-			for {
-				select {
-				case <-s.ctx.Done():
-					s.failure = s.ctx.Err()
-					return
-				case rec, ok := <-importerChan:
-					if !ok {
-						break innerloop
-					}
-					results <- rec
-				}
-			}
-		}
-	}()
-
-	return results, nil
+func (s *Source) Importers() []importer.Importer {
+	return s.importers
 }
 
 func commonPathPrefixSlice(paths []string) string {

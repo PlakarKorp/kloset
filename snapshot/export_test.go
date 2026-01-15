@@ -2,18 +2,17 @@ package snapshot_test
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors/exporter"
 	"github.com/PlakarKorp/kloset/snapshot"
-	"github.com/PlakarKorp/kloset/snapshot/exporter"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
 
-func TestRestore(t *testing.T) {
+func TestExport(t *testing.T) {
 	_, snap := generateSnapshot(t)
 	defer snap.Close()
 
@@ -29,7 +28,7 @@ func TestRestore(t *testing.T) {
 	require.NoError(t, err)
 	defer exporterInstance.Close(ctx)
 
-	opts := &snapshot.RestoreOptions{
+	opts := &snapshot.ExportOptions{
 		Strip: snap.Header.GetSource(0).Importer.Directory,
 	}
 
@@ -45,9 +44,8 @@ func TestRestore(t *testing.T) {
 	}
 	require.NotEmpty(t, filepath)
 
-	root, err := exporterInstance.Root(ctx)
-	require.NoError(t, err)
-	err = snap.Restore(exporterInstance, root, filepath, opts)
+	root := exporterInstance.Root()
+	err = snap.Export(exporterInstance, root, filepath, opts)
 	require.NoError(t, err)
 
 	mockExporter, ok := exporterInstance.(*ptesting.MockExporter)
@@ -56,7 +54,7 @@ func TestRestore(t *testing.T) {
 	files := mockExporter.Files()
 	require.Equal(t, 1, len(files))
 
-	contents, ok := files[fmt.Sprintf("%s/dummy.txt", root)]
+	contents, ok := files["/dummy.txt"]
 	require.True(t, ok)
 	require.Equal(t, "hello", string(contents))
 }

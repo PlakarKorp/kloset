@@ -5,8 +5,9 @@ import (
 	"context"
 	"io"
 
-	"github.com/PlakarKorp/kloset/objects"
-	"github.com/PlakarKorp/kloset/snapshot/exporter"
+	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/connectors/exporter"
+	"github.com/PlakarKorp/kloset/location"
 )
 
 type MockExporter struct {
@@ -18,7 +19,7 @@ func init() {
 	exporter.Register("mock", 0, NewMockExporter)
 }
 
-func NewMockExporter(appCtx context.Context, opt *exporter.Options, name string, config map[string]string) (exporter.Exporter, error) {
+func NewMockExporter(appCtx context.Context, opt *connectors.Options, name string, config map[string]string) (exporter.Exporter, error) {
 	rootDir := config["location"]
 	if len(rootDir) > 7 && rootDir[:7] == "mock://" {
 		rootDir = rootDir[7:]
@@ -30,32 +31,37 @@ func NewMockExporter(appCtx context.Context, opt *exporter.Options, name string,
 	}, nil
 }
 
-func (e *MockExporter) Root(ctx context.Context) (string, error) {
-	return e.rootDir, nil
-}
+func (e *MockExporter) Origin() string        { return e.rootDir }
+func (e *MockExporter) Type() string          { return e.rootDir }
+func (e *MockExporter) Root() string          { return e.rootDir }
+func (p *MockExporter) Flags() location.Flags { return 0 }
 
-func (e *MockExporter) CreateDirectory(ctx context.Context, pathname string) error {
-	return nil
-}
+func (e *MockExporter) Export(ctx context.Context, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
+	for record := range records {
+		pathname := record.Pathname
+		if len(pathname) > 5 && pathname[:5] == "mock:" {
+			pathname = pathname[5:]
+		}
 
-func (e *MockExporter) StoreFile(ctx context.Context, pathname string, fp io.Reader, size int64) error {
-	if len(pathname) > 5 && pathname[:5] == "mock:" {
-		pathname = pathname[5:]
+		if record.Err != nil || !record.FileInfo.Mode().IsRegular() {
+			results <- record.Ok()
+			continue
+		}
+
+		writer := bytes.NewBuffer(nil)
+		_, err := io.Copy(writer, record.Reader)
+		if err != nil {
+			return err
+		}
+		e.files[pathname] = writer.Bytes()
+
+		results <- record.Ok()
 	}
-	writer := bytes.NewBuffer(nil)
-	_, err := io.Copy(writer, fp)
-	if err != nil {
-		return err
-	}
-	e.files[pathname] = writer.Bytes()
+
 	return nil
 }
 
-func (e *MockExporter) CreateLink(ctx context.Context, oldname string, newname string, ltype exporter.LinkType) error {
-	return nil
-}
-
-func (e *MockExporter) SetPermissions(ctx context.Context, pathname string, fileinfo *objects.FileInfo) error {
+func (e *MockExporter) Ping(ctx context.Context) error {
 	return nil
 }
 
