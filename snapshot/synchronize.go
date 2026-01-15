@@ -201,10 +201,19 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	}
 
 	/* importer */
-	if err := snap.importerJob(imp, backupCtx); err != nil {
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
+
+	var stats scanStats
+	if err := snap.importerJob(imp, backupCtx, &stats); err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
+
+	snap.emitter.Info("snapshot.import.done", map[string]any{
+		"nfiles": stats.nfiles,
+		"ndirs":  stats.ndirs,
+		"size":   stats.size,
+	})
 
 	/* tree builders */
 	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)

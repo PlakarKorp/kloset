@@ -194,7 +194,7 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 	}
 }
 
-func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext) error {
+func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -219,9 +219,6 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 		results = make(chan *connectors.Result, size)
 	}
 
-	snap.emitter.Info("snapshot.import.start", map[string]any{})
-
-	var stats scanStats
 	for i, cker := range ckers {
 		ck := cker
 		idx := i
@@ -237,7 +234,7 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 					}
 
 					if !snap.skipExcludedPathname(sourceCtx, record) {
-						snap.processRecord(idx, sourceCtx, record, &stats, ck)
+						snap.processRecord(idx, sourceCtx, record, stats, ck)
 					}
 
 					if results != nil {
@@ -277,12 +274,6 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 		return err
 	}
 
-	snap.emitter.Info("snapshot.import.done", map[string]any{
-		"nfiles": stats.nfiles,
-		"ndirs":  stats.ndirs,
-		"size":   stats.size,
-	})
-
 	return nil
 }
 
@@ -314,12 +305,21 @@ func (snap *Builder) Backup(source *Source) error {
 		return err
 	}
 
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
+
+	var stats scanStats
 	for _, imp := range sourceCtx.source.Importers() {
-		if err := snap.importerJob(imp, sourceCtx); err != nil {
+		if err := snap.importerJob(imp, sourceCtx, &stats); err != nil {
 			snap.repository.PackerManager.Wait()
 			return err
 		}
 	}
+
+	snap.emitter.Info("snapshot.import.done", map[string]any{
+		"nfiles": stats.nfiles,
+		"ndirs":  stats.ndirs,
+		"size":   stats.size,
+	})
 
 	// Flush any left over entries.
 	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
