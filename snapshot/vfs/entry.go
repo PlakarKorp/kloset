@@ -135,6 +135,36 @@ func (e *Entry) ToBytes() ([]byte, error) {
 	return msgpack.Marshal(e)
 }
 
+func (e *Entry) GetContentType() string {
+	if e.ContentType != "" {
+		return e.ContentType
+	}
+	if e.ResolvedObject == nil {
+		return ""
+	}
+	return e.ResolvedObject.ContentType
+}
+
+func (e *Entry) GetEntropy() float64 {
+	if e.Entropy != 0.0 {
+		return e.Entropy
+	}
+	if e.ResolvedObject == nil {
+		return 0.0
+	}
+	return e.ResolvedObject.Entropy
+}
+
+func (e *Entry) GetChunks() uint64 {
+	if e.Chunks != 0 {
+		return e.Chunks
+	}
+	if e.ResolvedObject == nil {
+		return 0
+	}
+	return uint64(len(e.ResolvedObject.Chunks))
+}
+
 func (e *Entry) AddClassification(analyzer string, classes []string) {
 	e.Classifications = append(e.Classifications, Classification{
 		Analyzer: analyzer,

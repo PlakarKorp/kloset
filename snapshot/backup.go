@@ -696,9 +696,9 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 		MAC:         entry.MAC,
 		ObjectMAC:   entry.Object,
 		FileInfo:    entry.FileInfo,
-		Chunks:      entry.Chunks,
-		Entropy:     entry.Entropy,
-		ContentType: entry.ContentType,
+		Chunks:      entry.GetChunks(),
+		Entropy:     entry.GetEntropy(),
+		ContentType: entry.GetContentType(),
 	}, nil
 }
 

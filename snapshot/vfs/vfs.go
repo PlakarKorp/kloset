@@ -542,7 +542,7 @@ func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, err
 		}
 
 		// resolve object to extract content-type, nchunks and entropy
-		if entry.ContentType == "" && entry.HasObject() {
+		if entry.GetContentType() == "" && entry.HasObject() {
 			rd, err := fsc.repo.GetBlob(resources.RT_OBJECT, entry.Object)
 			if err != nil {
 				return nil, err
