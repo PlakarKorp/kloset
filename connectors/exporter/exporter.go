@@ -42,15 +42,15 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewExporter(ctx *kcontext.KContext, opts *connectors.Options, config map[string]string) (Exporter, location.Flags, error) {
+func NewExporter(ctx *kcontext.KContext, opts *connectors.Options, config map[string]string) (Exporter, error) {
 	loc, ok := config["location"]
 	if !ok {
-		return nil, 0, fmt.Errorf("missing location")
+		return nil, fmt.Errorf("missing location")
 	}
 
 	proto, loc, backend, flags, ok := backends.Lookup(loc)
 	if !ok {
-		return nil, 0, fmt.Errorf("unsupported exporter protocol")
+		return nil, fmt.Errorf("unsupported exporter protocol")
 	}
 
 	if flags&location.FLAG_LOCALFS != 0 && !filepath.IsAbs(loc) {
@@ -60,7 +60,7 @@ func NewExporter(ctx *kcontext.KContext, opts *connectors.Options, config map[st
 
 	exporter, err := backend(ctx, opts, proto, config)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	return exporter, flags, nil
+	return exporter, nil
 }

@@ -58,15 +58,15 @@ func Backends() []string {
 	return backends.Names()
 }
 
-func NewImporter(ctx *kcontext.KContext, opts *connectors.Options, config map[string]string) (Importer, location.Flags, error) {
+func NewImporter(ctx *kcontext.KContext, opts *connectors.Options, config map[string]string) (Importer, error) {
 	loc, ok := config["location"]
 	if !ok {
-		return nil, 0, fmt.Errorf("missing location")
+		return nil, fmt.Errorf("missing location")
 	}
 
 	proto, loc, backend, flags, ok := backends.Lookup(loc)
 	if !ok {
-		return nil, 0, fmt.Errorf("unsupported importer protocol")
+		return nil, fmt.Errorf("unsupported importer protocol")
 	}
 
 	if flags&location.FLAG_LOCALFS != 0 && !filepath.IsAbs(loc) {
@@ -76,7 +76,7 @@ func NewImporter(ctx *kcontext.KContext, opts *connectors.Options, config map[st
 
 	importer, err := backend(ctx, opts, proto, config)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	return importer, flags, nil
+	return importer, nil
 }
