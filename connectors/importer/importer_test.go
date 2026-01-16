@@ -88,7 +88,7 @@ func TestNewImporter(t *testing.T) {
 		t.Run(test.location, func(t *testing.T) {
 			appCtx := kcontext.NewKContext()
 
-			importer, _, err := NewImporter(appCtx, nil, map[string]string{"location": test.location})
+			importer, err := NewImporter(appCtx, nil, map[string]string{"location": test.location})
 
 			if test.expectedError != "" {
 				require.Error(t, err)
