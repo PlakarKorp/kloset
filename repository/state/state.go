@@ -42,10 +42,10 @@ type EntryType uint8
 
 const (
 	ET_METADATA      EntryType = 1
-	ET_LOCATIONS               = 2
-	ET_DELETED                 = 3
-	ET_PACKFILE                = 4
-	ET_CONFIGURATION           = 5
+	ET_LOCATIONS     EntryType = 2
+	ET_DELETED       EntryType = 3
+	ET_PACKFILE      EntryType = 4
+	ET_CONFIGURATION EntryType = 5
 )
 
 type Metadata struct {
