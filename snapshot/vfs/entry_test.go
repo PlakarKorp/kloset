@@ -32,8 +32,8 @@ func TestVfile(t *testing.T) {
 	require.NotNil(t, entry)
 	require.Equal(t, "dummy.txt", entry.Name())
 
-	require.Equal(t, "text/plain; charset=utf-8", entry.ContentType())
-	require.Equal(t, float64(1.9219280948873625), entry.Entropy())
+	require.Equal(t, "text/plain; charset=utf-8", entry.ContentType)
+	require.Equal(t, float64(1.9219280948873625), entry.Entropy)
 
 	entry.AddClassification("foo", []string{"bar"})
 
