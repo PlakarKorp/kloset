@@ -161,7 +161,7 @@ func visitfiles(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq
 				continue
 			}
 
-			if !matchmime(opts.Mimes, entry.ContentType()) {
+			if !matchmime(opts.Mimes, entry.GetContentType()) {
 				continue
 			}
 

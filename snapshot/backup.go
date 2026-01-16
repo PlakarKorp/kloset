@@ -668,7 +668,7 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 		return nil, nil
 	}
 
-	entry, err := sourceCtx.vfsCache.GetEntryNoFollow(record.Pathname)
+	entry, err := sourceCtx.vfsCache.GetEntryForBackup(record.Pathname)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, nil
@@ -696,9 +696,9 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 		MAC:         entry.MAC,
 		ObjectMAC:   entry.Object,
 		FileInfo:    entry.FileInfo,
-		Chunks:      uint64(len(entry.ResolvedObject.Chunks)),
-		Entropy:     entry.ResolvedObject.Entropy,
-		ContentType: entry.ResolvedObject.ContentType,
+		Chunks:      entry.GetChunks(),
+		Entropy:     entry.GetEntropy(),
+		ContentType: entry.GetContentType(),
 	}, nil
 }
 
@@ -773,7 +773,15 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 		if err != nil {
 			return err
 		}
+		fileEntry.Chunks = cachedPath.Chunks
+		fileEntry.ContentType = cachedPath.ContentType
+		fileEntry.Entropy = cachedPath.Entropy
 	} else {
+
+		fileEntry.Chunks = meta.Chunks
+		fileEntry.ContentType = meta.ContentType
+		fileEntry.Entropy = meta.Entropy
+
 		serialized, err := fileEntry.ToBytes()
 		if err != nil {
 			return err
