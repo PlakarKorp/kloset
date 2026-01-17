@@ -29,6 +29,7 @@ const (
 	RT_XATTR_ENTRY Type = 18
 	RT_BTREE_ROOT  Type = 19
 	RT_BTREE_NODE  Type = 20
+	RT_SUMMARY     Type = 21
 
 	// Type is a uint32 but we can't set it a value > 255 as state v1
 	// assume it's a uint8
@@ -56,6 +57,7 @@ func Types() []Type {
 		RT_XATTR_ENTRY,
 		RT_BTREE_ROOT,
 		RT_BTREE_NODE,
+		RT_SUMMARY,
 		RT_RANDOM,
 	}
 }
@@ -100,6 +102,8 @@ func (r Type) String() string {
 		return "btree-root"
 	case RT_BTREE_NODE:
 		return "btree-node"
+	case RT_SUMMARY:
+		return "summary"
 	case RT_RANDOM:
 		return "random"
 	default:
@@ -147,6 +151,8 @@ func FromString(typ string) (Type, error) {
 		return RT_BTREE_ROOT, nil
 	case "btree-node":
 		return RT_BTREE_NODE, nil
+	case "summary":
+		return RT_SUMMARY, nil
 	case "random":
 		return RT_RANDOM, nil
 	default:

@@ -5,8 +5,16 @@ import (
 	"os"
 	"strings"
 
+	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/vmihailenco/msgpack/v5"
 )
+
+const VFS_SUMMARY_VERSION = "1.0.0"
+
+func init() {
+	versioning.Register(resources.RT_SUMMARY, versioning.FromString(VFS_SUMMARY_VERSION))
+}
 
 type FileSummary struct {
 	Size        uint64      `msgpack:"size" json:"size"`

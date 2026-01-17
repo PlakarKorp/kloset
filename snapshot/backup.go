@@ -31,6 +31,7 @@ import (
 )
 
 type sourceIndexes struct {
+	summaryidx *btree.BTree[string, int, []byte]
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
@@ -46,7 +47,6 @@ type sourceContext struct {
 	vfsEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
-	metaidx *btree.BTree[string, int, []byte]
 
 	indexes *sourceIndexes
 
@@ -292,18 +292,6 @@ func (snap *Builder) Backup(source *Source) error {
 	}
 
 	defer sourceCtx.scanLog.Close()
-
-	/* meta store */
-	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
-	if err != nil {
-		return err
-	}
-	defer metastore.Close()
-
-	sourceCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
-	if err != nil {
-		return err
-	}
 
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 
@@ -564,6 +552,12 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 func (bi *sourceIndexes) Close(log *logging.Logger) {
 	// We need to protect those behind nil checks because we might be cleaning
 	// up a half initialized backupIndex.
+	if bi.summaryidx != nil {
+		if err := bi.summaryidx.Close(); err != nil {
+			log.Warn("Failed to close summary btree: %s", err)
+		}
+	}
+
 	if bi.erridx != nil {
 		if err := bi.erridx.Close(); err != nil {
 			log.Warn("Failed to close index btree: %s", err)
@@ -598,6 +592,11 @@ func (snap *Builder) tmpCacheDir() string {
 func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	bi := &sourceIndexes{}
 
+	summarystore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "summary")
+	if err != nil {
+		return nil, err
+	}
+
 	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
 	if err != nil {
 		return nil, err
@@ -615,6 +614,10 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 
 	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
 	if err != nil {
+		return nil, err
+	}
+
+	if bi.summaryidx, err = btree.New(summarystore, vfs.PathCmp, 50); err != nil {
 		return nil, err
 	}
 
@@ -761,17 +764,12 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	}
 
 	var fileEntryMAC objects.MAC
-	var serializedCachedPath []byte
 	var err error
 
 	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
 		fileEntryMAC = cachedPath.MAC
 		if fileEntry.Object == (objects.MAC{}) && cachedPath.ObjectMAC != (objects.MAC{}) {
 			fileEntry.Object = cachedPath.ObjectMAC
-		}
-		serializedCachedPath, err = cachedPath.Serialize()
-		if err != nil {
-			return err
 		}
 	} else {
 		serialized, err := fileEntry.ToBytes()
@@ -790,23 +788,29 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 				return err
 			}
 		}
-
-		cp := &objects.CachedPath{
-			MAC:         fileEntryMAC,
-			ObjectMAC:   fileEntry.Object,
-			FileInfo:    fileEntry.FileInfo,
-			Chunks:      meta.Chunks,
-			Entropy:     meta.Entropy,
-			ContentType: meta.ContentType,
-		}
-
-		serializedCachedPath, err = cp.Serialize()
-		if err != nil {
-			return err
-		}
 	}
 
-	if err := sourceCtx.metaidx.Insert(record.Pathname, serializedCachedPath); err != nil && err != btree.ErrExists {
+	fileSummary := &vfs.FileSummary{
+		Size:        uint64(meta.Size),
+		Chunks:      meta.Chunks,
+		Mode:        record.FileInfo.Mode(),
+		ModTime:     record.FileInfo.ModTime().Unix(),
+		ContentType: meta.ContentType,
+		Entropy:     meta.Entropy,
+	}
+	if meta.ObjectMAC != (objects.MAC{}) {
+		fileSummary.Objects++
+	}
+	sum := &vfs.Summary{}
+	sum.UpdateWithFileSummary(fileSummary)
+	sum.UpdateAverages()
+
+	b, err := sum.ToBytes()
+	if err != nil {
+		return err
+	}
+
+	if err := sourceCtx.indexes.summaryidx.Insert(record.Pathname, b); err != nil && err != btree.ErrExists {
 		return err
 	}
 
@@ -871,7 +875,7 @@ type chunkifyResult struct {
 	err error
 }
 
-func (sourceCtx *sourceContext) processFile(dirEntry *vfs.Entry, bytes []byte, path string) error {
+func (sourceCtx *sourceContext) processFile(summary *vfs.Summary, bytes []byte, path string) error {
 	// bytes is a slice that will be reused in the next iteration,
 	// swapping below our feet, so make a copy out of it
 	dupBytes := make([]byte, len(bytes))
@@ -881,38 +885,25 @@ func (sourceCtx *sourceContext) processFile(dirEntry *vfs.Entry, bytes []byte, p
 		return err
 	}
 
-	data, found, err := sourceCtx.metaidx.Find(path)
+	val, found, err := sourceCtx.indexes.summaryidx.Find(path)
 	if err != nil {
 		return err
 	}
 	if !found {
-		return fmt.Errorf("path %q not found in the meta index", path)
+		return fmt.Errorf("path %q not found in the summary index", path)
 	}
-
-	cachedPath, err := objects.NewCachedPathFromBytes(data)
+	fileSum, err := vfs.SummaryFromBytes(val)
 	if err != nil {
 		return err
 	}
 
-	fileSummary := &vfs.FileSummary{
-		Size:        uint64(cachedPath.FileInfo.Size()),
-		Chunks:      cachedPath.Chunks,
-		Mode:        cachedPath.FileInfo.Mode(),
-		ModTime:     cachedPath.FileInfo.ModTime().Unix(),
-		ContentType: cachedPath.ContentType,
-		Entropy:     cachedPath.Entropy,
-	}
-	if cachedPath.ObjectMAC != (objects.MAC{}) {
-		fileSummary.Objects++
-	}
-
-	dirEntry.Summary.Directory.Children++
-	dirEntry.Summary.UpdateWithFileSummary(fileSummary)
+	summary.Directory.Children++
+	summary.UpdateBelow(fileSum)
 
 	return nil
 }
 
-func (sourceCtx *sourceContext) processChildren(builder *Builder, dirEntry *vfs.Entry, w io.Writer, parent string) error {
+func (sourceCtx *sourceContext) processChildren(builder *Builder, summary *vfs.Summary, w io.Writer, parent string) error {
 	if parent != "/" {
 		parent = strings.TrimRight(parent, "/")
 	}
@@ -920,7 +911,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, dirEntry *vfs.
 	for e := range sourceCtx.scanLog.ListDirectPathnames(parent, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
-			err := sourceCtx.processFile(dirEntry, e.Payload, e.Path)
+			err := sourceCtx.processFile(summary, e.Payload, e.Path)
 			if err != nil {
 				return err
 			}
@@ -928,7 +919,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, dirEntry *vfs.
 				return err
 			}
 		case scanlog.KindDirectory:
-			val, found, err := sourceCtx.fileidx.Find(e.Path)
+			val, found, err := sourceCtx.indexes.summaryidx.Find(e.Path)
 			if err != nil {
 				return err
 			}
@@ -936,14 +927,14 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, dirEntry *vfs.
 				return fmt.Errorf("missing summary for directory %q", e.Path)
 			}
 
-			childDirEntry, err := vfs.EntryFromBytes(val)
+			childSummary, err := vfs.SummaryFromBytes(val)
 			if err != nil {
 				return err
 			}
 
-			dirEntry.Summary.Directory.Children++
-			dirEntry.Summary.Directory.Directories++
-			dirEntry.Summary.UpdateBelow(childDirEntry.Summary)
+			summary.Directory.Children++
+			summary.Directory.Directories++
+			summary.UpdateBelow(childSummary)
 
 			if err := writeFrame(builder, w, TypeVFSDirectory, val); err != nil {
 				return err
@@ -1107,7 +1098,8 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 			prefix += "/"
 		}
 
-		if err := sourceCtx.processChildren(snap, dirEntry, pw, prefix); err != nil {
+		summary := &vfs.Summary{}
+		if err := sourceCtx.processChildren(snap, summary, pw, prefix); err != nil {
 			pw.CloseWithError(err)
 			return nil, nil, err
 		}
@@ -1124,18 +1116,32 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 			if strings.Contains(path[len(prefix):], "/") {
 				break
 			}
-			dirEntry.Summary.Below.Errors++
+			summary.Below.Errors++
 		}
 		if err := erriter.Err(); err != nil {
 			return nil, nil, err
 		}
 
-		dirEntry.Summary.UpdateAverages()
+		summary.UpdateAverages()
+		//dirEntry.Summary = summary
 
 		pw.Close()
 		res := <-resCh
 		if res.err != nil {
 			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
+		}
+
+		serializedSummary, err := summary.ToBytes()
+		if err != nil {
+			return nil, nil, err
+		}
+
+		if err := snap.repository.PutBlobIfNotExists(resources.RT_SUMMARY, snap.repository.ComputeMAC(serializedSummary), serializedSummary); err != nil {
+			return nil, nil, err
+		}
+
+		if err := sourceCtx.indexes.summaryidx.Insert(dirPath, serializedSummary); err != nil && err != btree.ErrExists {
+			return nil, nil, err
 		}
 
 		if err := sourceCtx.indexes.dirpackidx.Insert(dirPath, res.mac); err != nil {
@@ -1148,7 +1154,7 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 			if rootSummary != nil {
 				return nil, nil, fmt.Errorf("importer yield a double root!")
 			}
-			rootSummary = dirEntry.Summary
+			rootSummary = summary
 		}
 
 		serialized, err := dirEntry.ToBytes()
@@ -1208,6 +1214,14 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 		return nil, err
 	}
 
+	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
+			return snap.repository.ComputeMAC(data), nil
+		})
+	if err != nil {
+		return nil, err
+	}
+
 	return []header.Index{
 		{
 			Name:  "content-type",
@@ -1218,6 +1232,11 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 			Name:  "dirpack",
 			Type:  "btree",
 			Value: dirpackmac,
+		},
+		{
+			Name:  "summaries",
+			Type:  "btree",
+			Value: summariesmac,
 		},
 	}, nil
 }
