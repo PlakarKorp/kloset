@@ -498,7 +498,7 @@ func (fsc *Filesystem) getEntryNoFollow(entrypath string) (*Entry, error) {
 func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, error) {
 	objectMac, found, err := fsc.dirpack.Find(parentPath)
 	if err != nil {
-		return nil, fs.ErrInvalid
+		return nil, err
 	}
 	if !found {
 		return nil, fs.ErrNotExist
