@@ -959,27 +959,25 @@ func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, p
 	return nil
 }
 
-func (sourceCtx *sourceContext) processChildren(builder *Builder, pathname string) (*vfs.Summary, error) {
-	var summary *vfs.Summary
+func (sourceCtx *sourceContext) processSummaries(builder *Builder, directories []string) (*vfs.Summary, error) {
+	var rootSummary *vfs.Summary
 
-	g, _ := errgroup.WithContext(builder.AppContext())
-	g.Go(func() error {
-		s, err := sourceCtx.aggregateSummaries(builder, pathname)
+	for _, directory := range directories {
+		summary, err := sourceCtx.aggregateSummaries(builder, directory)
 		if err != nil {
-			return err
+			return nil, err
 		}
-		summary = s
-		return nil
-	})
-
-	g.Go(func() error {
-		return sourceCtx.aggregateDirpacks(builder, pathname)
-	})
-
-	if err := g.Wait(); err != nil {
-		return nil, err
+		if directory == "/" {
+			if rootSummary != nil {
+				return nil, fmt.Errorf("importer yield a double root!")
+			}
+			rootSummary = summary
+		}
 	}
-	return summary, nil
+	if rootSummary == nil {
+		return nil, fmt.Errorf("failed to summarize root !")
+	}
+	return rootSummary, nil
 }
 
 func (sourceCtx *sourceContext) aggregateSummaries(builder *Builder, pathname string) (*vfs.Summary, error) {
@@ -1037,6 +1035,16 @@ func (sourceCtx *sourceContext) aggregateSummaries(builder *Builder, pathname st
 	}
 
 	return currentSummary, nil
+}
+
+func (sourceCtx *sourceContext) processDirpacks(builder *Builder, directories []string) error {
+	for _, directory := range directories {
+		err := sourceCtx.aggregateDirpacks(builder, directory)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (sourceCtx *sourceContext) aggregateDirpacks(builder *Builder, pathname string) error {
@@ -1178,36 +1186,37 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 
 	// stabilize order of vfsidx inserts early so we can unlock concurrency later
 	// on a 1.000.000 korpus, this takes roughly 2s
-	dirPaths := make([]string, 0)
+	directories := make([]string, 0)
 	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
 		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
 			return nil, err
 		}
 		if e.Kind == scanlog.KindDirectory {
-			dirPaths = append(dirPaths, e.Path)
+			directories = append(directories, e.Path)
 		}
 	}
 
 	var rootSummary *vfs.Summary
-	for _, pathname := range dirPaths {
-		if err := snap.AppContext().Err(); err != nil {
-			return nil, err
-		}
 
-		if summary, err := sourceCtx.processChildren(snap, pathname); err != nil {
-			return nil, err
-		} else {
-			if pathname == "/" {
-				if rootSummary != nil {
-					return nil, fmt.Errorf("importer yield a double root!")
-				}
-				rootSummary = summary
-			}
+	g, _ := errgroup.WithContext(snap.AppContext())
+
+	g.Go(func() error {
+		summary, err := sourceCtx.processSummaries(snap, directories)
+		if err != nil {
+			return err
 		}
+		rootSummary = summary
+		return nil
+	})
+
+	g.Go(func() error {
+		return sourceCtx.processDirpacks(snap, directories)
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
-	if rootSummary == nil {
-		return nil, fmt.Errorf("failed to summarize root !")
-	}
+
 	return rootSummary, nil
 }
 
