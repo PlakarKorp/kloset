@@ -41,6 +41,9 @@ type Entry struct {
 	SymlinkTarget  string          `msgpack:"symlink_target,omitempty" json:"symlink_target,omitempty"`
 	Object         objects.MAC     `msgpack:"object,omitempty" json:"-"` // nil for !regular files
 	ResolvedObject *objects.Object `msgpack:"-" json:"object,omitempty"` // This the true object, resolved when opening the entry. Beware we serialize it as "Object" only for json to not break API compat'
+	ContentType    string          `msgpack:"content_type,omitempty" json:"content_type,omitempty"`
+	Entropy        float64         `msgpack:"entropy,omitempty" json:"entropy,omitempty"`
+	Chunks         uint64          `msgpack:"chunks,omitempty" json:"chunks,omitempty"`
 
 	// /etc/passwd -> resolve datastreamms -/.
 	// /etc/passwd:stream
@@ -132,18 +135,34 @@ func (e *Entry) ToBytes() ([]byte, error) {
 	return msgpack.Marshal(e)
 }
 
-func (e *Entry) ContentType() string {
+func (e *Entry) GetContentType() string {
+	if e.ContentType != "" {
+		return e.ContentType
+	}
 	if e.ResolvedObject == nil {
 		return ""
 	}
 	return e.ResolvedObject.ContentType
 }
 
-func (e *Entry) Entropy() float64 {
+func (e *Entry) GetEntropy() float64 {
+	if e.Entropy != 0.0 {
+		return e.Entropy
+	}
+	if e.ResolvedObject == nil {
+		return 0.0
+	}
+	return e.ResolvedObject.Entropy
+}
+
+func (e *Entry) GetChunks() uint64 {
+	if e.Chunks != 0 {
+		return e.Chunks
+	}
 	if e.ResolvedObject == nil {
 		return 0
 	}
-	return e.ResolvedObject.Entropy
+	return uint64(len(e.ResolvedObject.Chunks))
 }
 
 func (e *Entry) AddClassification(analyzer string, classes []string) {

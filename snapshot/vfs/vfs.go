@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"errors"
 	"io"
 	"io/fs"
 	"iter"
@@ -8,7 +9,10 @@ import (
 	"path"
 	"strings"
 
+	"golang.org/x/sync/singleflight"
+
 	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/caching/lru"
 	"github.com/PlakarKorp/kloset/iterator"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -44,11 +48,13 @@ type CustomMetadata struct {
 }
 
 type Filesystem struct {
-	tree    *btree.BTree[string, objects.MAC, objects.MAC]
-	xattrs  *btree.BTree[string, objects.MAC, objects.MAC]
-	errors  *btree.BTree[string, objects.MAC, objects.MAC]
-	dirpack *btree.BTree[string, objects.MAC, objects.MAC]
-	repo    *repository.Repository
+	tree         *btree.BTree[string, objects.MAC, objects.MAC]
+	xattrs       *btree.BTree[string, objects.MAC, objects.MAC]
+	errors       *btree.BTree[string, objects.MAC, objects.MAC]
+	dirpack      *btree.BTree[string, objects.MAC, objects.MAC]
+	repo         *repository.Repository
+	dirpackCache *lru.Cache[string, map[string]*Entry]
+	dirpackSF    singleflight.Group
 }
 
 func PathCmp(a, b string) int {
@@ -121,6 +127,17 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 		dirpack: dirpackidx,
 		repo:    repo,
 	}
+
+	return fs, nil
+}
+
+// XXX - until we do refacto to remove object resolve from ResolveEntry, ONLY CALL IN SUBCOMMAND BACKUP
+func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
+	fs, err := NewFilesystem(repo, root, xattrs, errors, dirpackidx)
+	if err != nil {
+		return nil, err
+	}
+	fs.dirpackCache = lru.New[string, map[string]*Entry](256, nil)
 
 	return fs, nil
 }
@@ -323,6 +340,14 @@ func (fsc *Filesystem) Pathnames() iter.Seq2[string, error] {
 }
 
 func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
+	return fsc.getEntry(entrypath, true)
+}
+
+func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
+	return fsc.getEntry(entrypath, false)
+}
+
+func (fsc *Filesystem) getEntry(entrypath string, follow bool) (*Entry, error) {
 	if !strings.HasPrefix(entrypath, "/") {
 		entrypath = "/" + entrypath
 	}
@@ -332,6 +357,61 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 		return nil, fs.ErrInvalid
 	}
 
+	if follow {
+		return fsc.getEntryFollow(entrypath)
+	}
+	return fsc.getEntryNoFollow(entrypath)
+}
+
+// XXX - until we do refacto to remove object resolve from ResolveEntry
+func (fsc *Filesystem) GetEntryForBackup(entrypath string) (*Entry, error) {
+	return fsc.getEntryForBackup(entrypath)
+}
+
+func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
+	if !strings.HasPrefix(entrypath, "/") {
+		entrypath = "/" + entrypath
+	}
+
+	entrypath = path.Clean(entrypath)
+	if !path.IsAbs(entrypath) {
+		return nil, fs.ErrInvalid
+	}
+
+	if fsc.dirpack == nil || fsc.dirpackCache == nil {
+		return fsc.getEntryNoFollow(entrypath)
+	}
+
+	parentPath := path.Dir(entrypath)
+	base := path.Base(entrypath)
+
+	/*
+		if m, exists := fsc.dirpackCache.Get(parentPath); exists {
+			if entry, ok := m[base]; ok {
+				return entry, nil
+			}
+			return nil, fs.ErrNotExist
+		}
+	*/
+
+	v, err, _ := fsc.dirpackSF.Do(parentPath, func() (any, error) {
+		if m, exists := fsc.dirpackCache.Get(parentPath); exists {
+			return m, nil
+		}
+		return fsc.loadDirpackMap(parentPath)
+	})
+	if err != nil {
+		return nil, err
+	}
+	m := v.(map[string]*Entry)
+
+	if entry, ok := m[base]; ok {
+		return entry, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func (fsc *Filesystem) getEntryFollow(entrypath string) (*Entry, error) {
 	csum, found, err := fsc.tree.Find(entrypath)
 	if err != nil {
 		return nil, err
@@ -398,16 +478,7 @@ func (fsc *Filesystem) GetEntry(entrypath string) (*Entry, error) {
 	return entry, nil
 }
 
-func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
-	if !strings.HasPrefix(entrypath, "/") {
-		entrypath = "/" + entrypath
-	}
-
-	entrypath = path.Clean(entrypath)
-	if !path.IsAbs(entrypath) {
-		return nil, fs.ErrInvalid
-	}
-
+func (fsc *Filesystem) getEntryNoFollow(entrypath string) (*Entry, error) {
 	csum, found, err := fsc.tree.Find(entrypath)
 	if err != nil {
 		return nil, err
@@ -422,6 +493,82 @@ func (fsc *Filesystem) GetEntryNoFollow(entrypath string) (*Entry, error) {
 	}
 
 	return entry, nil
+}
+
+func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, error) {
+	objectMac, found, err := fsc.dirpack.Find(parentPath)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fs.ErrNotExist
+	}
+
+	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, err := objects.NewObjectFromBytes(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	var size int64
+	for _, c := range obj.Chunks {
+		size += int64(c.Length)
+	}
+
+	//rd := NewObjectReader(fsc.repo, obj, size, -1)
+	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
+
+	cache := make(map[string]*Entry)
+	for {
+		_, siz, err := readDirPackHdr(rd)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				break
+			}
+			return nil, err
+		}
+
+		var entry Entry
+		lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
+		if err := msgpack.NewDecoder(lrd).Decode(&entry); err != nil {
+			return nil, err
+		}
+		if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
+			return nil, err
+		}
+
+		// resolve object to extract content-type, nchunks and entropy
+		if entry.GetContentType() == "" && entry.HasObject() {
+			rd, err := fsc.repo.GetBlob(resources.RT_OBJECT, entry.Object)
+			if err != nil {
+				return nil, err
+			}
+
+			bytes, err := io.ReadAll(rd)
+			if err != nil {
+				return nil, err
+			}
+
+			obj, err := objects.NewObjectFromBytes(bytes)
+			if err != nil {
+				return nil, err
+			}
+
+			entry.ContentType = obj.ContentType
+			entry.Entropy = obj.Entropy
+			entry.Chunks = uint64(len(obj.Chunks))
+		}
+
+		cache[entry.Name()] = &entry
+	}
+
+	_ = fsc.dirpackCache.Put(parentPath, cache)
+
+	return cache, nil
 }
 
 func (fsc *Filesystem) Children(path string) (iter.Seq2[*Entry, error], error) {
