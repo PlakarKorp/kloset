@@ -1236,7 +1236,7 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 			Value: dirpackmac,
 		},
 		{
-			Name:  "summaries",
+			Name:  "summary",
 			Type:  "btree",
 			Value: summariesmac,
 		},

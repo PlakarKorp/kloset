@@ -75,12 +75,12 @@ func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, objects.MAC],
 	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
 }
 
-func (snap *Snapshot) SummariesIdxRoot() (objects.MAC, bool) {
-	return snap.getidx("summaries", "btree")
+func (snap *Snapshot) SummaryIdxRoot() (objects.MAC, bool) {
+	return snap.getidx("summary", "btree")
 }
 
-func (snap *Snapshot) SummariesIdx() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
-	mac, found := snap.SummariesIdxRoot()
+func (snap *Snapshot) SummaryIdx() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
+	mac, found := snap.SummaryIdxRoot()
 	if !found {
 		return nil, nil
 	}
