@@ -31,6 +31,7 @@ import (
 )
 
 type sourceIndexes struct {
+	summaryidx *btree.BTree[string, int, []byte]
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
@@ -564,9 +565,15 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 func (bi *sourceIndexes) Close(log *logging.Logger) {
 	// We need to protect those behind nil checks because we might be cleaning
 	// up a half initialized backupIndex.
+	if bi.summaryidx != nil {
+		if err := bi.summaryidx.Close(); err != nil {
+			log.Warn("Failed to close summary btree: %s", err)
+		}
+	}
+
 	if bi.erridx != nil {
 		if err := bi.erridx.Close(); err != nil {
-			log.Warn("Failed to close index btree: %s", err)
+			log.Warn("Failed to close error btree: %s", err)
 		}
 	}
 
@@ -598,6 +605,11 @@ func (snap *Builder) tmpCacheDir() string {
 func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	bi := &sourceIndexes{}
 
+	summarystore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "summary")
+	if err != nil {
+		return nil, err
+	}
+
 	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
 	if err != nil {
 		return nil, err
@@ -615,6 +627,10 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 
 	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
 	if err != nil {
+		return nil, err
+	}
+
+	if bi.summaryidx, err = btree.New(summarystore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
