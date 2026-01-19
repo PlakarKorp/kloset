@@ -983,10 +983,6 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, pathname strin
 }
 
 func (sourceCtx *sourceContext) aggregateSummaries(builder *Builder, pathname string) (*vfs.Summary, error) {
-	if pathname != "/" {
-		pathname = strings.TrimRight(pathname, "/")
-	}
-
 	currentSummary := &vfs.Summary{}
 
 	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
@@ -1044,10 +1040,6 @@ func (sourceCtx *sourceContext) aggregateSummaries(builder *Builder, pathname st
 }
 
 func (sourceCtx *sourceContext) aggregateDirpacks(builder *Builder, pathname string) error {
-	if pathname != "/" {
-		pathname = strings.TrimRight(pathname, "/")
-	}
-
 	chunker, err := builder.repository.Chunker(nil)
 	if err != nil {
 		return err
