@@ -74,3 +74,25 @@ func (snap *Snapshot) DirPack() (*btree.BTree[string, objects.MAC, objects.MAC],
 	}
 	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
 }
+
+func (snap *Snapshot) SummaryIdxRoot() (objects.MAC, bool) {
+	return snap.getidx("summary", "btree")
+}
+
+func (snap *Snapshot) SummaryIdx() (*btree.BTree[string, objects.MAC, objects.MAC], error) {
+	mac, found := snap.SummaryIdxRoot()
+	if !found {
+		return nil, nil
+	}
+
+	d, err := snap.repository.GetBlobBytes(resources.RT_BTREE_ROOT, mac)
+	if err != nil {
+		return nil, err
+	}
+
+	store := SnapshotStore[string, objects.MAC]{
+		blobtype:   resources.RT_BTREE_NODE,
+		snapReader: snap,
+	}
+	return btree.Deserialize(bytes.NewReader(d), &store, strings.Compare)
+}

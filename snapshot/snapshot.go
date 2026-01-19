@@ -154,7 +154,7 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 
 	// Sanity check, first let's verify that we know about everything in this
 	// snapshot otherwise we abort.
-	expected := []string{"content-type", "dirpack"}
+	expected := []string{"content-type", "dirpack", "summary"}
 	for idx := range snap.ListIndexes() {
 		if !slices.Contains(expected, idx) {
 			return nil, fmt.Errorf("Unexpected index %s found, snapshot might have been created with a more recent version.", idx)
@@ -306,6 +306,34 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 						if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
 							return
 						}
+					}
+				}
+			}
+		}
+
+		summary, err := snap.SummaryIdx()
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
+				return
+			}
+		}
+
+		if summary != nil {
+			summaryRoot, _ := snap.SummaryIdxRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, summaryRoot)) {
+				return
+			}
+
+			indexIter := dirpack.IterDFS()
+			for indexIter.Next() {
+				mac, node := indexIter.Current()
+				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
+
+				for _, summaryItem := range node.Values {
+					if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_SUMMARY, summaryItem)) {
+						return
 					}
 				}
 			}

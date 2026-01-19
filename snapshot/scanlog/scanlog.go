@@ -25,6 +25,7 @@ type batchRec struct {
 	kind    EntryKind
 	path    string
 	payload []byte
+	summary []byte
 }
 
 type ScanLog struct {
@@ -58,6 +59,7 @@ func createSchema(db *sqlite.SQLiteCache) error {
 		path    TEXT    NOT NULL,
 		parent  TEXT    NOT NULL,
 		payload BLOB    NOT NULL,
+		summary BLOB,
 		PRIMARY KEY (kind, path)
 	) WITHOUT ROWID;
 
@@ -74,19 +76,24 @@ func (s *ScanLog) Close() error {
 }
 
 func (s *ScanLog) PutDirectory(p string, payload []byte) error {
-	return s.put(KindDirectory, p, payload)
+	return s.put(KindDirectory, p, payload, nil)
 }
 
-func (s *ScanLog) PutFile(p string, payload []byte) error {
-	return s.put(KindFile, p, payload)
+func (s *ScanLog) PutFile(p string, payload []byte, summary []byte) error {
+	return s.put(KindFile, p, payload, summary)
 }
 
-func (s *ScanLog) put(kind EntryKind, p string, payload []byte) error {
+func (s *ScanLog) put(kind EntryKind, p string, payload []byte, summary []byte) error {
 	parent := path.Dir(p)
-	stored := s.db.Encode(payload)
+	storedPayload := s.db.Encode(payload)
+	storedSummary := summary
+	if storedSummary != nil {
+		storedSummary = s.db.Encode(summary)
+	}
+
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO entries (kind, path, parent, payload) VALUES (?, ?, ?, ?)`,
-		int(kind), p, parent, stored,
+		`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`,
+		int(kind), p, parent, storedPayload, storedSummary,
 	)
 	return err
 }
@@ -124,20 +131,24 @@ func (s *ScanLog) NewBatch() *ScanBatch {
 }
 
 func (b *ScanBatch) PutDirectory(p string, payload []byte) error {
-	return b.put(KindDirectory, p, payload)
+	return b.put(KindDirectory, p, payload, nil)
 }
 
-func (b *ScanBatch) PutFile(p string, payload []byte) error {
-	return b.put(KindFile, p, payload)
+func (b *ScanBatch) PutFile(p string, payload []byte, summary []byte) error {
+	return b.put(KindFile, p, payload, summary)
 }
 
-func (b *ScanBatch) put(kind EntryKind, p string, payload []byte) error {
-	stored := b.db.Encode(payload)
-
+func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte) error {
+	storedPayload := b.db.Encode(payload)
+	storedSummary := summary
+	if summary != nil {
+		storedSummary = b.db.Encode(summary)
+	}
 	b.recs = append(b.recs, batchRec{
 		kind:    kind,
 		path:    p,
-		payload: stored,
+		payload: storedPayload,
+		summary: storedSummary,
 	})
 	return nil
 }
@@ -156,7 +167,7 @@ func (b *ScanBatch) Commit() error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, payload) VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -165,7 +176,7 @@ func (b *ScanBatch) Commit() error {
 
 	for _, rec := range b.recs {
 		parent := path.Dir(rec.path)
-		if _, err := stmt.Exec(int(rec.kind), rec.path, parent, rec.payload); err != nil {
+		if _, err := stmt.Exec(int(rec.kind), rec.path, parent, rec.payload, rec.summary); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -183,6 +194,7 @@ type Entry struct {
 	Kind    EntryKind
 	Path    string
 	Payload []byte
+	Summary []byte
 }
 
 func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
@@ -252,7 +264,7 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 		}
 
 		query := `
-		SELECT kind, path, payload
+		SELECT kind, path, payload, summary
 		FROM entries
 		WHERE parent = ? AND parent != path
 		`
@@ -269,20 +281,30 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 		for rows.Next() {
 			var k int
 			var p string
-			var stored []byte
-			if err := rows.Scan(&k, &p, &stored); err != nil {
+			var storedPayload []byte
+			var storedSummary []byte
+			if err := rows.Scan(&k, &p, &storedPayload, &storedSummary); err != nil {
 				return
 			}
 
-			payload, err := s.db.Decode(stored)
+			payload, err := s.db.Decode(storedPayload)
 			if err != nil {
 				return
+			}
+
+			var summary []byte
+			if storedSummary != nil {
+				summary, err = s.db.Decode(storedSummary)
+				if err != nil {
+					return
+				}
 			}
 
 			if !yield(Entry{
 				Kind:    EntryKind(k),
 				Path:    p,
 				Payload: payload,
+				Summary: summary,
 			}) {
 				return
 			}
