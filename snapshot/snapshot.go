@@ -324,7 +324,7 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				return
 			}
 
-			indexIter := dirpack.IterDFS()
+			indexIter := summary.IterDFS()
 			for indexIter.Next() {
 				mac, node := indexIter.Current()
 				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
