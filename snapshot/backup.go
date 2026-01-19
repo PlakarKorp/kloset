@@ -890,13 +890,13 @@ type chunkifyResult struct {
 	err error
 }
 
-func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, bytes []byte, path string, serializedSummary []byte) error {
+func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, pathname string, serializedEntry []byte, serializedSummary []byte) error {
 	// bytes is a slice that will be reused in the next iteration,
 	// swapping below our feet, so make a copy out of it
-	dupBytes := make([]byte, len(bytes))
-	copy(dupBytes, bytes)
+	dupBytes := make([]byte, len(serializedEntry))
+	copy(dupBytes, serializedEntry)
 
-	if err := sourceCtx.indexes.vfsidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
+	if err := sourceCtx.indexes.vfsidx.Insert(pathname, dupBytes); err != nil && err != btree.ErrExists {
 		return err
 	}
 
@@ -911,7 +911,16 @@ func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, bytes 
 	return nil
 }
 
-func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string) error {
+func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string, serializedEntry []byte) error {
+	// bytes is a slice that will be reused in the next iteration,
+	// swapping below our feet, so make a copy out of it
+	dupBytes := make([]byte, len(serializedEntry))
+	copy(dupBytes, serializedEntry)
+
+	if err := sourceCtx.indexes.vfsidx.Insert(pathname, dupBytes); err != nil && err != btree.ErrExists {
+		return err
+	}
+
 	val, found, err := sourceCtx.indexes.summaryidx.Find(pathname)
 	if err != nil {
 		return err
@@ -938,7 +947,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary
 	for e := range sourceCtx.scanLog.ListDirectPathnames(parent, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
-			err := sourceCtx.summarizeFile(currentSummary, e.Payload, e.Path, e.Summary)
+			err := sourceCtx.summarizeFile(currentSummary, e.Path, e.Payload, e.Summary)
 			if err != nil {
 				return err
 			}
@@ -946,7 +955,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary
 				return err
 			}
 		case scanlog.KindDirectory:
-			err := sourceCtx.summarizeDirectory(currentSummary, e.Path)
+			err := sourceCtx.summarizeDirectory(currentSummary, e.Path, e.Payload)
 			if err != nil {
 				return err
 			}
@@ -1142,24 +1151,24 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 
 		snap.emitter.DirectoryOk(dirPath)
 
-		if dirPath == "/" {
-			if rootSummary != nil {
-				return nil, fmt.Errorf("importer yield a double root!")
-			}
-			rootSummary = summary
-		}
-
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
 			return nil, err
 		}
 
-		mac := snap.repository.ComputeMAC(serialized)
-		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
-			return nil, err
+		if dirPath == "/" {
+			if rootSummary != nil {
+				return nil, fmt.Errorf("importer yield a double root!")
+			}
+			rootSummary = summary
+
+			if err := sourceCtx.indexes.vfsidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
+				return nil, err
+			}
 		}
 
-		if err := sourceCtx.indexes.vfsidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
+		mac := snap.repository.ComputeMAC(serialized)
+		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
 			return nil, err
 		}
 	}
