@@ -959,16 +959,12 @@ func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, p
 	return nil
 }
 
-func (sourceCtx *sourceContext) processChildren(builder *Builder, parent string) (*vfs.Summary, error) {
-	if parent != "/" {
-		parent = strings.TrimRight(parent, "/")
-	}
-
+func (sourceCtx *sourceContext) processChildren(builder *Builder, pathname string) (*vfs.Summary, error) {
 	var summary *vfs.Summary
 
 	g, _ := errgroup.WithContext(builder.AppContext())
 	g.Go(func() error {
-		s, err := sourceCtx.aggregateSummaries(builder, parent)
+		s, err := sourceCtx.aggregateSummaries(builder, pathname)
 		if err != nil {
 			return err
 		}
@@ -977,7 +973,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, parent string)
 	})
 
 	g.Go(func() error {
-		return sourceCtx.aggregateDirpacks(builder, parent)
+		return sourceCtx.aggregateDirpacks(builder, pathname)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -1202,28 +1198,20 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 
 	var rootSummary *vfs.Summary
 	for _, pathname := range dirPaths {
-		dirPath := pathname
-
 		if err := snap.AppContext().Err(); err != nil {
 			return nil, err
-		}
-
-		prefix := dirPath
-		if prefix != "/" {
-			prefix += "/"
 		}
 
 		if summary, err := sourceCtx.processChildren(snap, pathname); err != nil {
 			return nil, err
 		} else {
-			if dirPath == "/" {
+			if pathname == "/" {
 				if rootSummary != nil {
 					return nil, fmt.Errorf("importer yield a double root!")
 				}
 				rootSummary = summary
 			}
 		}
-
 	}
 	if rootSummary == nil {
 		return nil, fmt.Errorf("failed to summarize root !")
