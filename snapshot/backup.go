@@ -1145,6 +1145,10 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		if err := sourceCtx.indexes.summaryidx.Insert(dirPath, serializedSummary); err != nil {
 			return nil, nil, err
 		}
+		summaryMAC := snap.repository.ComputeMAC(serializedSummary)
+		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary); err != nil {
+			return nil, nil, err
+		}
 
 		//dirEntry.Summary = summary
 
@@ -1209,14 +1213,6 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 	snap.emitter.Info("snapshot.index.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 
-	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
-			return snap.repository.ComputeMAC(data), nil
-		})
-	if err != nil {
-		return nil, err
-	}
-
 	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
@@ -1228,6 +1224,14 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
+		})
+	if err != nil {
+		return nil, err
+	}
+
+	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
+			return snap.repository.ComputeMAC(data), nil
 		})
 	if err != nil {
 		return nil, err

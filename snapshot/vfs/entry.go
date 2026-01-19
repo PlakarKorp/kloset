@@ -118,10 +118,6 @@ func NewEntry(parentPath string, record *connectors.Record) *Entry {
 		ParentPath:         parentPath,
 	}
 
-	if record.FileInfo.Mode().IsDir() {
-		entry.Summary = &Summary{}
-	}
-
 	return entry
 }
 
