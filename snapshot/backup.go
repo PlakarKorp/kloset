@@ -959,35 +959,138 @@ func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, p
 	return nil
 }
 
-func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary *vfs.Summary, w io.Writer, parent string) error {
+func (sourceCtx *sourceContext) processChildren(builder *Builder, parent string) (*vfs.Summary, error) {
 	if parent != "/" {
 		parent = strings.TrimRight(parent, "/")
 	}
 
-	for e := range sourceCtx.scanLog.ListDirectPathnames(parent, false) {
+	summary, err := sourceCtx.aggregateSummaries(builder, parent)
+	if err != nil {
+		return nil, err
+	}
+
+	err = sourceCtx.aggregateDirpacks(builder, parent)
+	if err != nil {
+		return nil, err
+	}
+
+	return summary, nil
+}
+
+func (sourceCtx *sourceContext) aggregateSummaries(builder *Builder, pathname string) (*vfs.Summary, error) {
+	if pathname != "/" {
+		pathname = strings.TrimRight(pathname, "/")
+	}
+
+	currentSummary := &vfs.Summary{}
+
+	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
 			err := sourceCtx.summarizeFile(currentSummary, e.Summary)
 			if err != nil {
-				return err
-			}
-			if err := writeFrame(builder, w, TypeVFSFile, e.Payload); err != nil {
-				return err
+				return nil, err
 			}
 		case scanlog.KindDirectory:
 			err := sourceCtx.summarizeDirectory(currentSummary, e.Path)
 			if err != nil {
+				return nil, err
+			}
+		default:
+			return nil, fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+		}
+
+	}
+
+	erriter, err := sourceCtx.indexes.erridx.ScanFrom(pathname)
+	if err != nil {
+		return nil, err
+	}
+	for erriter.Next() {
+		path, _ := erriter.Current()
+		if !strings.HasPrefix(path, pathname) {
+			break
+		}
+		if strings.Contains(path[len(pathname):], "/") {
+			break
+		}
+		currentSummary.Below.Errors++
+	}
+	if err := erriter.Err(); err != nil {
+		return nil, err
+	}
+
+	currentSummary.UpdateAverages()
+
+	serializedSummary, err := currentSummary.ToBytes()
+	if err != nil {
+		return nil, err
+	}
+
+	if err := sourceCtx.indexes.summaryidx.Insert(pathname, serializedSummary); err != nil {
+		return nil, err
+	}
+	summaryMAC := builder.repository.ComputeMAC(serializedSummary)
+	if err := builder.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary); err != nil {
+		return nil, err
+	}
+
+	return currentSummary, nil
+}
+
+func (sourceCtx *sourceContext) aggregateDirpacks(builder *Builder, pathname string) error {
+	if pathname != "/" {
+		pathname = strings.TrimRight(pathname, "/")
+	}
+
+	chunker, err := builder.repository.Chunker(nil)
+	if err != nil {
+		return err
+	}
+
+	pr, pw := io.Pipe()
+	resCh := make(chan chunkifyResult, 1)
+
+	go func() {
+		mac, err := builder.chunkifyDirpack(chunker, pr)
+		resCh <- chunkifyResult{mac: mac, err: err}
+	}()
+
+	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
+		if err := builder.AppContext().Err(); err != nil {
+			pw.CloseWithError(err)
+			return err
+		}
+		switch e.Kind {
+		case scanlog.KindFile:
+			if err := writeFrame(builder, pw, TypeVFSFile, e.Payload); err != nil {
+				pw.CloseWithError(err)
 				return err
 			}
-			if err := writeFrame(builder, w, TypeVFSDirectory, e.Payload); err != nil {
+		case scanlog.KindDirectory:
+			if err := writeFrame(builder, pw, TypeVFSDirectory, e.Payload); err != nil {
+				pw.CloseWithError(err)
 				return err
 			}
 
 		default:
-			return fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+			err := fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+			pw.CloseWithError(err)
+			return err
 		}
 
 	}
+
+	pw.Close()
+	res := <-resCh
+	if res.err != nil {
+		return fmt.Errorf("chunkify failed for %s: %w", pathname, res.err)
+	}
+
+	if err := sourceCtx.indexes.dirpackidx.Insert(pathname, res.mac); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -1083,11 +1186,6 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 		}
 	}
 
-	chunker, err := snap.repository.Chunker(nil)
-	if err != nil {
-		return nil, err
-	}
-
 	var rootSummary *vfs.Summary
 
 	dirPaths := make([]string, 0)
@@ -1102,81 +1200,26 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 			return nil, err
 		}
 
-		pr, pw := io.Pipe()
-		resCh := make(chan chunkifyResult, 1)
-
-		go func() {
-			mac, err := snap.chunkifyDirpack(chunker, pr)
-			resCh <- chunkifyResult{mac: mac, err: err}
-		}()
-
 		prefix := dirPath
 		if prefix != "/" {
 			prefix += "/"
 		}
 
-		summary := &vfs.Summary{}
-
-		if err := sourceCtx.processChildren(snap, summary, pw, prefix); err != nil {
-			pw.CloseWithError(err)
+		if summary, err := sourceCtx.processChildren(snap, prefix); err != nil {
 			return nil, err
-		}
-
-		erriter, err := sourceCtx.indexes.erridx.ScanFrom(prefix)
-		if err != nil {
-			return nil, err
-		}
-		for erriter.Next() {
-			path, _ := erriter.Current()
-			if !strings.HasPrefix(path, prefix) {
-				break
+		} else {
+			if dirPath == "/" {
+				if rootSummary != nil {
+					return nil, fmt.Errorf("importer yield a double root!")
+				}
+				rootSummary = summary
 			}
-			if strings.Contains(path[len(prefix):], "/") {
-				break
-			}
-			summary.Below.Errors++
-		}
-		if err := erriter.Err(); err != nil {
-			return nil, err
 		}
 
-		summary.UpdateAverages()
-
-		serializedSummary, err := summary.ToBytes()
-		if err != nil {
-			return nil, err
-		}
-
-		if err := sourceCtx.indexes.summaryidx.Insert(dirPath, serializedSummary); err != nil {
-			return nil, err
-		}
-		summaryMAC := snap.repository.ComputeMAC(serializedSummary)
-		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary); err != nil {
-			return nil, err
-		}
-
-		//dirEntry.Summary = summary
-
-		pw.Close()
-		res := <-resCh
-		if res.err != nil {
-			return nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
-		}
-
-		if err := sourceCtx.indexes.dirpackidx.Insert(dirPath, res.mac); err != nil {
-			return nil, err
-		}
-
-		snap.emitter.DirectoryOk(dirPath)
-
-		if dirPath == "/" {
-			if rootSummary != nil {
-				return nil, fmt.Errorf("importer yield a double root!")
-			}
-			rootSummary = summary
-		}
 	}
-
+	if rootSummary == nil {
+		return nil, fmt.Errorf("failed to summarize root !")
+	}
 	return rootSummary, nil
 }
 
