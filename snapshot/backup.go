@@ -931,113 +931,183 @@ type chunkifyResult struct {
 	err error
 }
 
-func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, serializedSummary []byte) error {
-	fileSummary, err := vfs.FileSummaryFromBytes(serializedSummary)
-	if err != nil {
-		return err
-	}
-
-	parentSummary.Directory.Children++
-	parentSummary.UpdateWithFileSummary(fileSummary)
-
-	return nil
+type summaryResult struct {
+	summary    *vfs.Summary
+	serialized []byte
 }
 
-func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string) error {
-	val, found, err := sourceCtx.indexes.summaryidx.Find(pathname)
-	if err != nil {
-		return err
+func dirDepth(p string) int {
+	if p == "/" {
+		return 0
 	}
-	if !found {
-		return fmt.Errorf("path %q not found in the summary index", pathname)
-	}
-
-	currentSummary, err := vfs.SummaryFromBytes(val)
-	if err != nil {
-		return err
-	}
-	parentSummary.Directory.Children++
-	parentSummary.Directory.Directories++
-	parentSummary.UpdateBelow(currentSummary)
-	return nil
+	p = strings.TrimSuffix(p, "/")
+	return strings.Count(p, "/")
 }
 
-func (sourceCtx *sourceContext) processSummaries(builder *Builder, directories []string) (*vfs.Summary, error) {
-	var rootSummary *vfs.Summary
-
-	for _, directory := range directories {
-		summary, err := sourceCtx.aggregateSummaries(builder, directory)
-		if err != nil {
-			return nil, err
-		}
-		if directory == "/" {
-			if rootSummary != nil {
-				return nil, fmt.Errorf("importer yield a double root!")
-			}
-			rootSummary = summary
-		}
-	}
-	if rootSummary == nil {
-		return nil, fmt.Errorf("failed to summarize root !")
-	}
-	return rootSummary, nil
-}
-
-func (sourceCtx *sourceContext) aggregateSummaries(builder *Builder, pathname string) (*vfs.Summary, error) {
+func (sourceCtx *sourceContext) computeSummary(pathname string) (*vfs.Summary, []byte, error) {
 	currentSummary := &vfs.Summary{}
 
 	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
-			err := sourceCtx.summarizeFile(currentSummary, e.Summary)
+			fileSummary, err := vfs.FileSummaryFromBytes(e.Summary)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-		case scanlog.KindDirectory:
-			err := sourceCtx.summarizeDirectory(currentSummary, e.Path)
-			if err != nil {
-				return nil, err
-			}
-		default:
-			return nil, fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
-		}
+			currentSummary.Directory.Children++
+			currentSummary.UpdateWithFileSummary(fileSummary)
 
+		case scanlog.KindDirectory:
+			val, found, err := sourceCtx.indexes.summaryidx.Find(e.Path)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !found {
+				return nil, nil, fmt.Errorf("path %q not found in the summary index", pathname)
+			}
+
+			childSummary, err := vfs.SummaryFromBytes(val)
+			if err != nil {
+				return nil, nil, err
+			}
+			currentSummary.Directory.Children++
+			currentSummary.Directory.Directories++
+			currentSummary.UpdateBelow(childSummary)
+
+		default:
+			return nil, nil, fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+		}
 	}
 
 	erriter, err := sourceCtx.indexes.erridx.ScanFrom(pathname)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for erriter.Next() {
-		path, _ := erriter.Current()
-		if !strings.HasPrefix(path, pathname) {
+		p, _ := erriter.Current()
+		if !strings.HasPrefix(p, pathname) {
 			break
 		}
-		if strings.Contains(path[len(pathname):], "/") {
+		if strings.Contains(p[len(pathname):], "/") {
 			break
 		}
 		currentSummary.Below.Errors++
 	}
 	if err := erriter.Err(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	currentSummary.UpdateAverages()
 
-	serializedSummary, err := currentSummary.ToBytes()
+	serialized, err := currentSummary.ToBytes()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	if err := sourceCtx.indexes.summaryidx.Insert(pathname, serializedSummary); err != nil {
-		return nil, err
-	}
-	summaryMAC := builder.repository.ComputeMAC(serializedSummary)
-	if err := builder.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary); err != nil {
-		return nil, err
+	return currentSummary, serialized, nil
+}
+
+func (sourceCtx *sourceContext) processSummaries(builder *Builder, directories []string) (*vfs.Summary, error) {
+	type directoryRequest struct {
+		directory string
+		idx       int
 	}
 
-	return currentSummary, nil
+	n := len(directories)
+	if n == 0 {
+		return nil, fmt.Errorf("failed to summarize root !")
+	}
+
+	// Bucket indices by depth (preserving original idx order inside each bucket)
+	maxDepth := 0
+	depthBuckets := make(map[int][]int, 64)
+	for idx, dir := range directories {
+		dep := dirDepth(dir)
+		depthBuckets[dep] = append(depthBuckets[dep], idx)
+		if dep > maxDepth {
+			maxDepth = dep
+		}
+	}
+
+	results := make([]summaryResult, n)
+	var rootSummary *vfs.Summary
+
+	for dep := maxDepth; dep >= 0; dep-- {
+		idxs := depthBuckets[dep]
+		if len(idxs) == 0 {
+			continue
+		}
+
+		directoriesChan := make(chan directoryRequest, builder.AppContext().MaxConcurrency*8)
+
+		g, ctx := errgroup.WithContext(builder.AppContext())
+
+		// emit only this depth’s jobs, in original order
+		g.Go(func() error {
+			defer close(directoriesChan)
+			for _, idx := range idxs {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case directoriesChan <- directoryRequest{directory: directories[idx], idx: idx}:
+				}
+			}
+			return nil
+		})
+
+		// compute summaries concurrently, store by idx
+		for range builder.AppContext().MaxConcurrency * 4 {
+			g.Go(func() error {
+				for {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case req, ok := <-directoriesChan:
+						if !ok {
+							return nil
+						}
+						s, serialized, err := sourceCtx.computeSummary(req.directory)
+						if err != nil {
+							return err
+						}
+						// lock-free
+						results[req.idx] = summaryResult{summary: s, serialized: serialized}
+					}
+				}
+			})
+		}
+
+		// wait til all goroutines for this depth are done
+		if err := g.Wait(); err != nil {
+			return nil, err
+		}
+
+		// commit at this depth in original order (idx ascending within bucket)
+		for _, idx := range idxs {
+			dir := directories[idx]
+
+			if err := sourceCtx.indexes.summaryidx.Insert(dir, results[idx].serialized); err != nil {
+				return nil, err
+			}
+
+			summaryMAC := builder.repository.ComputeMAC(results[idx].serialized)
+			if err := builder.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, results[idx].serialized); err != nil {
+				return nil, err
+			}
+
+			if dir == "/" {
+				if rootSummary != nil {
+					return nil, fmt.Errorf("importer yield a double root!")
+				}
+				rootSummary = results[idx].summary
+			}
+		}
+	}
+
+	if rootSummary == nil {
+		return nil, fmt.Errorf("failed to summarize root !")
+	}
+	return rootSummary, nil
 }
 
 func (sourceCtx *sourceContext) processDirpacks(builder *Builder, directories []string) error {
