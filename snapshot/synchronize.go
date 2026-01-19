@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/PlakarKorp/kloset/btree"
-	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
@@ -187,18 +185,6 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	}
 
 	defer backupCtx.scanLog.Close()
-
-	/* meta store */
-	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
-	if err != nil {
-		return err
-	}
-	defer metastore.Close()
-
-	backupCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
-	if err != nil {
-		return err
-	}
 
 	/* importer */
 	snap.emitter.Info("snapshot.import.start", map[string]any{})

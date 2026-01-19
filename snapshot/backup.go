@@ -47,7 +47,6 @@ type sourceContext struct {
 	vfsEntLock  sync.Mutex
 
 	fileidx *btree.BTree[string, int, []byte]
-	metaidx *btree.BTree[string, int, []byte]
 
 	indexes *sourceIndexes
 
@@ -293,18 +292,6 @@ func (snap *Builder) Backup(source *Source) error {
 	}
 
 	defer sourceCtx.scanLog.Close()
-
-	/* meta store */
-	metastore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "metaidx")
-	if err != nil {
-		return err
-	}
-	defer metastore.Close()
-
-	sourceCtx.metaidx, err = btree.New(metastore, vfs.PathCmp, 50)
-	if err != nil {
-		return err
-	}
 
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 
