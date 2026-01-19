@@ -964,16 +964,25 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, parent string)
 		parent = strings.TrimRight(parent, "/")
 	}
 
-	summary, err := sourceCtx.aggregateSummaries(builder, parent)
-	if err != nil {
+	var summary *vfs.Summary
+
+	g, _ := errgroup.WithContext(builder.AppContext())
+	g.Go(func() error {
+		s, err := sourceCtx.aggregateSummaries(builder, parent)
+		if err != nil {
+			return err
+		}
+		summary = s
+		return nil
+	})
+
+	g.Go(func() error {
+		return sourceCtx.aggregateDirpacks(builder, parent)
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
-
-	err = sourceCtx.aggregateDirpacks(builder, parent)
-	if err != nil {
-		return nil, err
-	}
-
 	return summary, nil
 }
 
@@ -1174,6 +1183,7 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 }
 
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
+	// XXX - can we find a smart way to relink in the next loop ?
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
 	}
@@ -1203,7 +1213,7 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 			prefix += "/"
 		}
 
-		if summary, err := sourceCtx.processChildren(snap, prefix); err != nil {
+		if summary, err := sourceCtx.processChildren(snap, pathname); err != nil {
 			return nil, err
 		} else {
 			if dirPath == "/" {
@@ -1225,83 +1235,121 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
+	// must be done first
 	rootSummary, err := snap.buildVFS(sourceCtx)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
-		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
-			return snap.repository.ComputeMAC(data), nil
-		})
-	if err != nil {
+	// can be concurrent
+	var (
+		rootcsum  objects.MAC
+		errcsum   objects.MAC
+		xattrcsum objects.MAC
+	)
+
+	g, _ := errgroup.WithContext(snap.AppContext())
+
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.vfsidx,
+			resources.RT_VFS_BTREE, resources.RT_VFS_NODE,
+			func(data []byte) (objects.MAC, error) { return snap.repository.ComputeMAC(data), nil },
+		)
+		if err != nil {
+			return err
+		}
+		rootcsum = m
+		return nil
+	})
+
+	g.Go(func() error {
+		m, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
+			resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY,
+		)
+		if err != nil {
+			return err
+		}
+		errcsum = m
+		return nil
+	})
+
+	g.Go(func() error {
+		m, err := persistMACIndex(snap, sourceCtx.indexes.xattridx,
+			resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, resources.RT_XATTR_ENTRY,
+		)
+		if err != nil {
+			return err
+		}
+		xattrcsum = m
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, nil, err
 	}
 
-	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
-		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	xattrcsum, err := persistMACIndex(snap, sourceCtx.indexes.xattridx,
-		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, resources.RT_XATTR_ENTRY)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	vfsHeader := &header.VFS{
+	return &header.VFS{
 		Root:   rootcsum,
 		Xattrs: xattrcsum,
 		Errors: errcsum,
-	}
-
-	return vfsHeader, rootSummary, nil
+	}, rootSummary, nil
 }
 
 func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, error) {
 	snap.emitter.Info("snapshot.index.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 
-	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, err
-	}
+	var (
+		ctmac        objects.MAC
+		dirpackmac   objects.MAC
+		summariesmac objects.MAC
+	)
 
-	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, err
-	}
+	g, _ := errgroup.WithContext(snap.AppContext())
 
-	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
-			return snap.repository.ComputeMAC(data), nil
-		})
-	if err != nil {
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.ctidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE,
+			func(mac objects.MAC) (objects.MAC, error) { return mac, nil },
+		)
+		if err != nil {
+			return err
+		}
+		ctmac = m
+		return nil
+	})
+
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE,
+			func(mac objects.MAC) (objects.MAC, error) { return mac, nil },
+		)
+		if err != nil {
+			return err
+		}
+		dirpackmac = m
+		return nil
+	})
+
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE,
+			func(data []byte) (objects.MAC, error) { return snap.repository.ComputeMAC(data), nil },
+		)
+		if err != nil {
+			return err
+		}
+		summariesmac = m
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 
 	return []header.Index{
-		{
-			Name:  "content-type",
-			Type:  "btree",
-			Value: ctmac,
-		},
-		{
-			Name:  "dirpack",
-			Type:  "btree",
-			Value: dirpackmac,
-		},
-		{
-			Name:  "summary",
-			Type:  "btree",
-			Value: summariesmac,
-		},
+		{Name: "content-type", Type: "btree", Value: ctmac},
+		{Name: "dirpack", Type: "btree", Value: dirpackmac},
+		{Name: "summary", Type: "btree", Value: summariesmac},
 	}, nil
 }
