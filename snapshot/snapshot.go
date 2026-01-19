@@ -311,6 +311,34 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
+		summary, err := snap.SummaryIdx()
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
+				return
+			}
+		}
+
+		if summary != nil {
+			summaryRoot, _ := snap.SummaryIdxRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, summaryRoot)) {
+				return
+			}
+
+			indexIter := dirpack.IterDFS()
+			for indexIter.Next() {
+				mac, node := indexIter.Current()
+				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
+
+				for _, summaryItem := range node.Values {
+					if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_SUMMARY, summaryItem)) {
+						return
+					}
+				}
+			}
+		}
+
 	}, nil
 }
 
