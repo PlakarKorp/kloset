@@ -112,7 +112,7 @@ func (sourceCtx *sourceContext) recordError(path string, err error) error {
 		return err
 	}
 
-	return sourceCtx.indexes.erridx.Insert(path, serialized)
+	return sourceCtx.scanLog.PutError(path, serialized)
 }
 
 func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
@@ -979,22 +979,8 @@ func (sourceCtx *sourceContext) computeSummary(pathname string) (*vfs.Summary, [
 		}
 	}
 
-	erriter, err := sourceCtx.indexes.erridx.ScanFrom(pathname)
-	if err != nil {
-		return nil, nil, err
-	}
-	for erriter.Next() {
-		p, _ := erriter.Current()
-		if !strings.HasPrefix(p, pathname) {
-			break
-		}
-		if strings.Contains(p[len(pathname):], "/") {
-			break
-		}
+	for range sourceCtx.scanLog.ListDirectErrors(pathname, false) {
 		currentSummary.Below.Errors++
-	}
-	if err := erriter.Err(); err != nil {
-		return nil, nil, err
 	}
 
 	currentSummary.UpdateAverages()
@@ -1348,9 +1334,22 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	return rootSummary, nil
 }
 
+func (sourceCtx *sourceContext) buildErrorIndex() error {
+	for e := range sourceCtx.scanLog.ListErrorsFrom("/") {
+		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+			return err
+		}
+	}
+	return nil
+}
+
 func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
+
+	if err := sourceCtx.buildErrorIndex(); err != nil {
+		return nil, nil, err
+	}
 
 	// must be done first
 	rootSummary, err := snap.buildVFS(sourceCtx)
