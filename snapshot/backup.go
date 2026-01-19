@@ -167,9 +167,11 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 
 	if record.FileInfo.Mode().IsDir() {
 		atomic.AddUint64(&stats.ndirs, +1)
-		entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-		if err := sourceCtx.batchRecordEntry(entry, nil); err != nil {
+		if err := snap.processDirectoryRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.DirectoryError(record.Pathname, err)
 			sourceCtx.recordError(record.Pathname, err)
+		} else {
+			snap.emitter.DirectoryOk(record.Pathname)
 		}
 		return
 	}
@@ -703,7 +705,7 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 	}
 	record.FileInfo = entry.FileInfo
 
-	if record.FileInfo.Mode()&os.ModeSymlink != 0 {
+	if record.FileInfo.Mode()&os.ModeSymlink != 0 || record.FileInfo.IsDir() {
 		return &objects.CachedPath{
 			MAC:      entry.MAC,
 			FileInfo: entry.FileInfo,
@@ -839,6 +841,34 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	return sourceCtx.batchRecordEntry(fileEntry, serializedSummary)
 }
 
+func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cachedPath *objects.CachedPath, record *connectors.Record) error {
+	dirEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
+	var dirEntryMAC objects.MAC
+
+	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+		dirEntryMAC = cachedPath.MAC
+	} else {
+		serialized, err := dirEntry.ToBytes()
+		if err != nil {
+			return err
+		}
+
+		dirEntryMAC = snap.repository.ComputeMAC(serialized)
+
+		if snap.vfsCache == nil || record.IsXattr {
+			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized); err != nil {
+				return err
+			}
+		} else {
+			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized); err != nil {
+				return err
+			}
+		}
+	}
+
+	return sourceCtx.batchRecordEntry(dirEntry, nil)
+}
+
 func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
 	cachedPath, err := snap.checkVFSCache(sourceCtx, record)
 	if err != nil {
@@ -855,6 +885,14 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	}
 
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
+}
+
+func (snap *Builder) processDirectoryRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
+	cachedPath, err := snap.checkVFSCache(sourceCtx, record)
+	if err != nil {
+		snap.Logger().Warn("VFS CACHE: %v", err)
+	}
+	return snap.writeDirectoryEntry(idx, sourceCtx, cachedPath, record)
 }
 
 func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
@@ -1165,11 +1203,6 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 			if err := sourceCtx.indexes.vfsidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
 				return nil, err
 			}
-		}
-
-		mac := snap.repository.ComputeMAC(serialized)
-		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
-			return nil, err
 		}
 	}
 
