@@ -3,10 +3,12 @@ package scanlog
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"iter"
 	"path"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
+	"github.com/PlakarKorp/kloset/objects"
 )
 
 type EntryKind int
@@ -17,8 +19,11 @@ const (
 )
 
 type ScanBatch struct {
-	db   *sqlite.SQLiteCache
-	recs []batchRec
+	db        *sqlite.SQLiteCache
+	recs      []batchRec // entries
+	errorRecs []macRec   // errors
+	xattrRecs []macRec   // xattrs
+
 }
 
 type batchRec struct {
@@ -26,6 +31,12 @@ type batchRec struct {
 	path    string
 	payload []byte
 	summary []byte
+}
+
+type macRec struct {
+	path   string
+	parent string
+	mac    objects.MAC
 }
 
 type ScanLog struct {
@@ -69,11 +80,20 @@ func createSchema(db *sqlite.SQLiteCache) error {
 	CREATE TABLE IF NOT EXISTS errors (
 		path    TEXT NOT NULL PRIMARY KEY,
 		parent  TEXT NOT NULL,
-		payload BLOB NOT NULL
+		mac     BLOB NOT NULL
 	) WITHOUT ROWID;
 
 	CREATE INDEX IF NOT EXISTS errors_parent_idx
 	ON errors(parent, path);
+
+	CREATE TABLE IF NOT EXISTS xattrs (
+		path    TEXT NOT NULL PRIMARY KEY,
+		parent  TEXT NOT NULL,
+		mac     BLOB NOT NULL
+	) WITHOUT ROWID;
+
+	CREATE INDEX IF NOT EXISTS xattrs_parent_idx
+	ON xattrs(parent, path);
 	`
 
 	_, err := db.Exec(schema)
@@ -147,6 +167,24 @@ func (b *ScanBatch) PutFile(p string, payload []byte, summary []byte) error {
 	return b.put(KindFile, p, payload, summary)
 }
 
+func (b *ScanBatch) PutErrorMAC(p string, mac objects.MAC) error {
+	b.errorRecs = append(b.errorRecs, macRec{
+		path:   p,
+		parent: path.Dir(p),
+		mac:    mac,
+	})
+	return nil
+}
+
+func (b *ScanBatch) PutXattrMAC(p string, mac objects.MAC) error {
+	b.xattrRecs = append(b.xattrRecs, macRec{
+		path:   p,
+		parent: path.Dir(p),
+		mac:    mac,
+	})
+	return nil
+}
+
 func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte) error {
 	storedPayload := b.db.Encode(payload)
 	storedSummary := summary
@@ -163,11 +201,11 @@ func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte
 }
 
 func (b *ScanBatch) Count() uint32 {
-	return uint32(len(b.recs))
+	return uint32(len(b.recs) + len(b.errorRecs) + len(b.xattrRecs))
 }
 
 func (b *ScanBatch) Commit() error {
-	if len(b.recs) == 0 {
+	if len(b.recs) == 0 && len(b.errorRecs) == 0 && len(b.xattrRecs) == 0 {
 		return nil
 	}
 
@@ -176,16 +214,44 @@ func (b *ScanBatch) Commit() error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`)
+	entriesStmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	defer stmt.Close()
+	defer entriesStmt.Close()
+
+	errorsStmt, err := tx.Prepare(`INSERT OR REPLACE INTO errors (path, parent, mac) VALUES (?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer errorsStmt.Close()
+
+	xattrsStmt, err := tx.Prepare(`INSERT OR REPLACE INTO xattrs (path, parent, mac) VALUES (?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer xattrsStmt.Close()
 
 	for _, rec := range b.recs {
 		parent := path.Dir(rec.path)
-		if _, err := stmt.Exec(int(rec.kind), rec.path, parent, rec.payload, rec.summary); err != nil {
+		if _, err := entriesStmt.Exec(int(rec.kind), rec.path, parent, rec.payload, rec.summary); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+
+	for _, rec := range b.errorRecs {
+		if _, err := errorsStmt.Exec(rec.path, rec.parent, rec.mac[:]); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+
+	for _, rec := range b.xattrRecs {
+		if _, err := xattrsStmt.Exec(rec.path, rec.parent, rec.mac[:]); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -196,6 +262,8 @@ func (b *ScanBatch) Commit() error {
 	}
 
 	b.recs = nil
+	b.errorRecs = nil
+	b.xattrRecs = nil
 	return nil
 }
 
@@ -204,11 +272,6 @@ type Entry struct {
 	Path    string
 	Payload []byte
 	Summary []byte
-}
-
-type ErrorEntry struct {
-	Path    string
-	Payload []byte
 }
 
 func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bool) iter.Seq[Entry] {
@@ -353,35 +416,43 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 	}
 }
 
-func (s *ScanLog) PutError(p string, payload []byte) error {
-	parent := path.Dir(p)
-	storedPayload := s.db.Encode(payload)
+type ErrorEntry struct {
+	Path string
+	MAC  objects.MAC
+}
 
+func (s *ScanLog) PutErrorMAC(p string, mac objects.MAC) error {
+	parent := path.Dir(p)
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO errors (path, parent, payload) VALUES (?, ?, ?)`,
-		p, parent, storedPayload,
+		`INSERT OR REPLACE INTO errors (path, parent, mac) VALUES (?, ?, ?)`,
+		p, parent, mac[:],
 	)
 	return err
 }
 
-func (s *ScanLog) GetError(p string) ([]byte, error) {
+func (s *ScanLog) GetErrorMAC(p string) (*objects.MAC, error) {
 	var stored []byte
-	err := s.db.QueryRow(`SELECT payload FROM errors WHERE path = ?`, p).Scan(&stored)
+	err := s.db.QueryRow(`SELECT mac FROM errors WHERE path = ?`, p).Scan(&stored)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-	return s.db.Decode(stored)
+	if len(stored) != len(objects.MAC{}) {
+		return nil, fmt.Errorf("invalid error mac length for %q: %d", p, len(stored))
+	}
+	var mac objects.MAC
+	copy(mac[:], stored)
+	return &mac, nil
 }
 
-func (s *ScanLog) ListErrorsFrom(prefix string) iter.Seq[ErrorEntry] {
+func (s *ScanLog) ListErrorMACsFrom(prefix string) iter.Seq[ErrorEntry] {
 	return func(yield func(ErrorEntry) bool) {
 		hi := prefix + string([]byte{0xFF})
 
 		rows, err := s.db.Query(
-			`SELECT path, payload FROM errors WHERE path >= ? AND path < ? ORDER BY path ASC`,
+			`SELECT path, mac FROM errors WHERE path >= ? AND path < ? ORDER BY path ASC`,
 			prefix, hi,
 		)
 		if err != nil {
@@ -391,22 +462,23 @@ func (s *ScanLog) ListErrorsFrom(prefix string) iter.Seq[ErrorEntry] {
 
 		for rows.Next() {
 			var p string
-			var storedPayload []byte
-			if err := rows.Scan(&p, &storedPayload); err != nil {
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
 				return
 			}
-			payload, err := s.db.Decode(storedPayload)
-			if err != nil {
+			if len(stored) != len(objects.MAC{}) {
 				return
 			}
-			if !yield(ErrorEntry{Path: p, Payload: payload}) {
+			var mac objects.MAC
+			copy(mac[:], stored)
+			if !yield(ErrorEntry{Path: p, MAC: mac}) {
 				return
 			}
 		}
 	}
 }
 
-func (s *ScanLog) ListDirectErrors(parent string, reverse bool) iter.Seq[ErrorEntry] {
+func (s *ScanLog) ListDirectErrorMACs(parent string, reverse bool) iter.Seq[ErrorEntry] {
 	return func(yield func(ErrorEntry) bool) {
 		order := "ASC"
 		if reverse {
@@ -414,7 +486,7 @@ func (s *ScanLog) ListDirectErrors(parent string, reverse bool) iter.Seq[ErrorEn
 		}
 
 		rows, err := s.db.Query(
-			`SELECT path, payload FROM errors WHERE parent = ? AND parent != path ORDER BY path `+order,
+			`SELECT path, mac FROM errors WHERE parent = ? AND parent != path ORDER BY path `+order,
 			parent,
 		)
 		if err != nil {
@@ -424,17 +496,165 @@ func (s *ScanLog) ListDirectErrors(parent string, reverse bool) iter.Seq[ErrorEn
 
 		for rows.Next() {
 			var p string
-			var storedPayload []byte
-			if err := rows.Scan(&p, &storedPayload); err != nil {
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
 				return
 			}
-			payload, err := s.db.Decode(storedPayload)
-			if err != nil {
+			if len(stored) != len(objects.MAC{}) {
 				return
 			}
-			if !yield(ErrorEntry{Path: p, Payload: payload}) {
+			var mac objects.MAC
+			copy(mac[:], stored)
+			if !yield(ErrorEntry{Path: p, MAC: mac}) {
 				return
 			}
 		}
 	}
+}
+
+func (s *ScanLog) CountErrorMACs() (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM errors`,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *ScanLog) CountDirectErrorMACs(parent string) (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM errors WHERE parent = ? AND parent != path`,
+		parent,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+type XattrEntry struct {
+	Path string
+	MAC  objects.MAC
+}
+
+func (s *ScanLog) PutXattrMAC(p string, mac objects.MAC) error {
+	parent := path.Dir(p)
+
+	// store raw 32 bytes (no compression/encode needed)
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO xattrs (path, parent, mac) VALUES (?, ?, ?)`,
+		p, parent, mac[:],
+	)
+	return err
+}
+
+func (s *ScanLog) GetXattrMAC(p string) (*objects.MAC, error) {
+	var stored []byte
+	err := s.db.QueryRow(`SELECT mac FROM xattrs WHERE path = ?`, p).Scan(&stored)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(stored) != len(objects.MAC{}) {
+		return nil, fmt.Errorf("invalid xattr mac length for %q: %d", p, len(stored))
+	}
+
+	var mac objects.MAC
+	copy(mac[:], stored)
+	return &mac, nil
+}
+
+func (s *ScanLog) ListXattrMACsFrom(prefix string) iter.Seq[XattrEntry] {
+	return func(yield func(XattrEntry) bool) {
+		hi := prefix + string([]byte{0xFF})
+
+		rows, err := s.db.Query(
+			`SELECT path, mac FROM xattrs WHERE path >= ? AND path < ? ORDER BY path ASC`,
+			prefix, hi,
+		)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p string
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
+				return
+			}
+			if len(stored) != len(objects.MAC{}) {
+				return
+			}
+			var mac objects.MAC
+			copy(mac[:], stored)
+
+			if !yield(XattrEntry{Path: p, MAC: mac}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) ListDirectXattrMACs(parent string, reverse bool) iter.Seq[XattrEntry] {
+	return func(yield func(XattrEntry) bool) {
+		order := "ASC"
+		if reverse {
+			order = "DESC"
+		}
+
+		rows, err := s.db.Query(
+			`SELECT path, mac FROM xattrs WHERE parent = ? AND parent != path ORDER BY path `+order,
+			parent,
+		)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p string
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
+				return
+			}
+			if len(stored) != len(objects.MAC{}) {
+				return
+			}
+			var mac objects.MAC
+			copy(mac[:], stored)
+
+			if !yield(XattrEntry{Path: p, MAC: mac}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) CountXattrsMACs() (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM xattrs `,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *ScanLog) CountDirectXattrsMACs(parent string) (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM xattrs WHERE parent = ? AND parent != path`,
+		parent,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }

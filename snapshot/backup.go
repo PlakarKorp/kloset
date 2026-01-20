@@ -33,19 +33,26 @@ import (
 type sourceIndexes struct {
 	vfsidx     *btree.BTree[string, int, []byte]
 	summaryidx *btree.BTree[string, int, []byte]
-	erridx     *btree.BTree[string, int, []byte]
-	xattridx   *btree.BTree[string, int, []byte]
+	erridx     *btree.BTree[string, int, objects.MAC]
+	xattridx   *btree.BTree[string, int, objects.MAC]
 	ctidx      *btree.BTree[string, int, objects.MAC]
 	dirpackidx *btree.BTree[string, int, objects.MAC]
 }
 
 type sourceContext struct {
+	snap   *Builder
 	source *Source
 
 	vfsCache *vfs.Filesystem
 
 	vfsEntBatch *scanlog.ScanBatch
 	vfsEntLock  sync.Mutex
+
+	xattrBatch *scanlog.ScanBatch
+	xattrLock  sync.Mutex
+
+	errorsBatch *scanlog.ScanBatch
+	errorsLock  sync.Mutex
 
 	indexes *sourceIndexes
 
@@ -105,23 +112,52 @@ func (sourceCtx *sourceContext) batchRecordEntry(entry *vfs.Entry, serializedSum
 	return nil
 }
 
-func (sourceCtx *sourceContext) recordError(path string, err error) error {
-	entry := vfs.NewErrorItem(path, err.Error())
-	serialized, e := entry.ToBytes()
-	if e != nil {
+func (sourceCtx *sourceContext) batchRecordErrorMAC(p string, mac objects.MAC) error {
+	sourceCtx.errorsLock.Lock()
+	defer sourceCtx.errorsLock.Unlock()
+
+	if err := sourceCtx.errorsBatch.PutErrorMAC(p, mac); err != nil {
 		return err
 	}
 
-	return sourceCtx.scanLog.PutError(path, serialized)
+	if sourceCtx.errorsBatch.Count() >= 1000 {
+		if err := sourceCtx.errorsBatch.Commit(); err != nil {
+			return err
+		}
+		sourceCtx.errorsBatch = sourceCtx.scanLog.NewBatch()
+	}
+	return nil
 }
 
-func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
-	xattr := vfs.NewXattr(record, objectMAC, size)
-	serialized, err := xattr.ToBytes()
-	if err != nil {
+func (sourceCtx *sourceContext) batchRecordXattrMAC(p string, mac objects.MAC) error {
+	sourceCtx.xattrLock.Lock()
+	defer sourceCtx.xattrLock.Unlock()
+
+	if err := sourceCtx.xattrBatch.PutXattrMAC(p, mac); err != nil {
 		return err
 	}
-	return sourceCtx.indexes.xattridx.Insert(xattr.ToPath(), serialized)
+
+	if sourceCtx.xattrBatch.Count() >= 1000 {
+		if err := sourceCtx.xattrBatch.Commit(); err != nil {
+			return err
+		}
+		sourceCtx.xattrBatch = sourceCtx.scanLog.NewBatch()
+	}
+	return nil
+}
+
+func (sourceCtx *sourceContext) recordError(p string, err error) error {
+	entry := vfs.NewErrorItem(p, err.Error())
+	serialized, e := entry.ToBytes()
+	if e != nil {
+		return e
+	}
+
+	errorMAC := sourceCtx.snap.repository.ComputeMAC(serialized)
+	if err := sourceCtx.snap.repository.PutBlobIfNotExists(resources.RT_ERROR_ENTRY, errorMAC, serialized); err != nil {
+		return err
+	}
+	return sourceCtx.batchRecordErrorMAC(p, errorMAC)
 }
 
 func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *connectors.Record) bool {
@@ -298,6 +334,7 @@ func (snap *Builder) Backup(source *Source) error {
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 
 	var stats scanStats
+	t0 := time.Now()
 	for _, imp := range sourceCtx.source.Importers() {
 		if err := snap.importerJob(imp, sourceCtx, &stats); err != nil {
 			snap.repository.PackerManager.Wait()
@@ -316,9 +353,17 @@ func (snap *Builder) Backup(source *Source) error {
 	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
 		return err
 	}
+	if err := sourceCtx.errorsBatch.Commit(); err != nil {
+		return err
+	}
+	if err := sourceCtx.xattrBatch.Commit(); err != nil {
+		return err
+	}
 
 	sourceCtx.vfsEntBatch = nil
-	//fmt.Println("importerJob took", time.Since(t0))
+	sourceCtx.errorsBatch = nil
+	sourceCtx.xattrBatch = nil
+	fmt.Println("importerJob took", time.Since(t0))
 
 	/* tree builders */
 	vfsHeader, rootSummary, indexes, err := snap.persistTrees(sourceCtx)
@@ -612,12 +657,12 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 		return nil, err
 	}
 
-	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
+	errstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "error")
 	if err != nil {
 		return nil, err
 	}
 
-	xattrstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "xattr")
+	xattrstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "xattr")
 	if err != nil {
 		return nil, err
 	}
@@ -667,8 +712,11 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 	}
 
 	sourceCtx := &sourceContext{
+		snap:        snap,
 		source:      source,
 		vfsEntBatch: scanLog.NewBatch(),
+		errorsBatch: scanLog.NewBatch(),
+		xattrBatch:  scanLog.NewBatch(),
 		vfsCache:    snap.vfsCache,
 		scanLog:     scanLog,
 	}
@@ -872,6 +920,20 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 	return sourceCtx.batchRecordEntry(dirEntry, nil)
 }
 
+func (snap *Builder) writeXattrEntry(idx int, sourceCtx *sourceContext, record *connectors.Record, objectMAC objects.MAC, size int64) error {
+	xattr := vfs.NewXattr(record, objectMAC, size)
+	serialized, err := xattr.ToBytes()
+	if err != nil {
+		return err
+	}
+
+	xattrMAC := snap.repository.ComputeMAC(serialized)
+	if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_XATTR_ENTRY, xattrMAC, serialized); err != nil {
+		return err
+	}
+	return sourceCtx.batchRecordXattrMAC(xattr.ToPath(), xattrMAC)
+}
+
 func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
 	cachedPath, err := snap.checkVFSCache(sourceCtx, record)
 	if err != nil {
@@ -884,7 +946,7 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	}
 
 	if record.IsXattr {
-		return sourceCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
+		return snap.writeXattrEntry(idx, sourceCtx, record, meta.ObjectMAC, meta.Size)
 	}
 
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
@@ -900,15 +962,19 @@ func (snap *Builder) processDirectoryRecord(idx int, sourceCtx *sourceContext, r
 
 func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
 
+	t0 := time.Now()
 	vfsHeader, summary, err := snap.persistVFS(sourceCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	fmt.Println("persistVFS took", time.Since(t0))
 
+	t0 = time.Now()
 	indexes, err := snap.persistIndexes(sourceCtx)
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	fmt.Println("persistIndexes took", time.Since(t0))
 
 	return vfsHeader, summary, indexes, nil
 }
@@ -979,9 +1045,11 @@ func (sourceCtx *sourceContext) computeSummary(pathname string) (*vfs.Summary, [
 		}
 	}
 
-	for range sourceCtx.scanLog.ListDirectErrors(pathname, false) {
-		currentSummary.Below.Errors++
+	errorsCount, err := sourceCtx.scanLog.CountDirectErrorMACs(pathname)
+	if err != nil {
+		return nil, nil, err
 	}
+	currentSummary.Below.Errors += errorsCount
 
 	currentSummary.UpdateAverages()
 
@@ -1292,6 +1360,9 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 }
 
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
+	t0 := time.Now()
+	defer func() { fmt.Println("calling buildVFS took", time.Since(t0)) }()
+
 	// XXX - can we find a smart way to relink in the next loop ?
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
@@ -1314,6 +1385,8 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	g, _ := errgroup.WithContext(snap.AppContext())
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() { fmt.Println("calling processSummaries took", time.Since(t0)) }()
 		summary, err := sourceCtx.processSummaries(snap, directories)
 		if err != nil {
 			return err
@@ -1323,8 +1396,10 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	})
 
 	g.Go(func() error {
-		err := sourceCtx.processDirpacks(snap, directories)
-		return err
+		t0 := time.Now()
+		defer func() { fmt.Println("calling processDirpacks took", time.Since(t0)) }()
+
+		return sourceCtx.processDirpacks(snap, directories)
 	})
 
 	if err := g.Wait(); err != nil {
@@ -1335,8 +1410,23 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 }
 
 func (sourceCtx *sourceContext) buildErrorIndex() error {
-	for e := range sourceCtx.scanLog.ListErrorsFrom("/") {
-		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+	t0 := time.Now()
+	defer func() { fmt.Println("calling buildErrorIndex took", time.Since(t0)) }()
+
+	for e := range sourceCtx.scanLog.ListErrorMACsFrom("/") {
+		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sourceCtx *sourceContext) buildXattrIndex() error {
+	t0 := time.Now()
+	defer func() { fmt.Println("calling buildXattrIndex took", time.Since(t0)) }()
+
+	for e := range sourceCtx.scanLog.ListXattrMACsFrom("/") {
+		if err := sourceCtx.indexes.xattridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
 	}
@@ -1346,10 +1436,6 @@ func (sourceCtx *sourceContext) buildErrorIndex() error {
 func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
-
-	if err := sourceCtx.buildErrorIndex(); err != nil {
-		return nil, nil, err
-	}
 
 	// must be done first
 	rootSummary, err := snap.buildVFS(sourceCtx)
@@ -1367,6 +1453,9 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 	g, _ := errgroup.WithContext(snap.AppContext())
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() { fmt.Println("persisting vfsidx took", time.Since(t0)) }()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.vfsidx,
 			resources.RT_VFS_BTREE, resources.RT_VFS_NODE,
 			func(data []byte) (objects.MAC, error) { return snap.repository.ComputeMAC(data), nil },
@@ -1379,8 +1468,15 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 	})
 
 	g.Go(func() error {
-		m, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
-			resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY,
+		t0 := time.Now()
+		defer func() { fmt.Println("persisting erridx took", time.Since(t0)) }()
+
+		if err := sourceCtx.buildErrorIndex(); err != nil {
+			return err
+		}
+		m, err := persistIndex(snap, sourceCtx.indexes.erridx,
+			resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE,
+			func(mac objects.MAC) (objects.MAC, error) { return mac, nil },
 		)
 		if err != nil {
 			return err
@@ -1390,8 +1486,15 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 	})
 
 	g.Go(func() error {
-		m, err := persistMACIndex(snap, sourceCtx.indexes.xattridx,
-			resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, resources.RT_XATTR_ENTRY,
+		t0 := time.Now()
+		defer func() { fmt.Println("persisting xattr took", time.Since(t0)) }()
+
+		if err := sourceCtx.buildXattrIndex(); err != nil {
+			return err
+		}
+		m, err := persistIndex(snap, sourceCtx.indexes.xattridx,
+			resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE,
+			func(mac objects.MAC) (objects.MAC, error) { return mac, nil },
 		)
 		if err != nil {
 			return err
@@ -1424,6 +1527,9 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 	g, _ := errgroup.WithContext(snap.AppContext())
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() { fmt.Println("persisting ctidx took", time.Since(t0)) }()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.ctidx,
 			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE,
 			func(mac objects.MAC) (objects.MAC, error) { return mac, nil },
@@ -1436,6 +1542,9 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 	})
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() { fmt.Println("persisting dirpackidx took", time.Since(t0)) }()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
 			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE,
 			func(mac objects.MAC) (objects.MAC, error) { return mac, nil },
@@ -1448,6 +1557,9 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 	})
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() { fmt.Println("persisting summaryidx took", time.Since(t0)) }()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
 			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE,
 			func(data []byte) (objects.MAC, error) { return snap.repository.ComputeMAC(data), nil },
