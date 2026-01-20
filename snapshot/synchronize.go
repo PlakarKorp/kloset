@@ -202,7 +202,7 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	})
 
 	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
+	vfsHeader, rootSummary, indexes, err := snap.persistVFS(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
