@@ -209,6 +209,53 @@ func (e *Emitter) ChunkOk(chunk objects.MAC) {
 
 /////
 
+func (e *Emitter) PathCached(path string) {
+	e.emit("path.cached", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) DirectoryCached(path string, fileinfo objects.FileInfo) {
+	e.emit("directory.cached", Info, map[string]any{
+		"path":     path,
+		"fileinfo": fileinfo,
+	})
+}
+
+func (e *Emitter) FileCached(path string, fileinfo objects.FileInfo) {
+	e.emit("file.cached", Info, map[string]any{
+		"path":     path,
+		"fileinfo": fileinfo,
+	})
+}
+
+func (e *Emitter) XattrCached(path string, size int64) {
+	e.emit("xattr.cached", Info, map[string]any{
+		"path": path,
+		"size": size,
+	})
+}
+
+func (e *Emitter) SymlinkCached(path string) {
+	e.emit("symlink.cached", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) ObjectCached(object objects.MAC) {
+	e.emit("object.cached", Info, map[string]any{
+		"mac": object,
+	})
+}
+
+func (e *Emitter) ChunkCached(chunk objects.MAC) {
+	e.emit("chunk.cached", Info, map[string]any{
+		"mac": chunk,
+	})
+}
+
+/////
+
 func (e *Emitter) PathError(path string, err error) {
 	e.emit("path.error", Error, map[string]any{
 		"path":  path,

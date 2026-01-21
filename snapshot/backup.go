@@ -165,6 +165,7 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 	}
 
 	if record.IsXattr {
+		panic("what ?")
 		atomic.AddUint64(&stats.nxattrs, +1)
 		snap.emitter.Xattr(record.Pathname)
 		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
@@ -228,14 +229,14 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 						return nil
 					}
 
+					if snap.builderOptions.NoXattr && record.IsXattr {
+						break
+					}
+
 					if record.Err != nil {
 						snap.emitter.Path(record.Pathname)
 						snap.emitter.PathError(record.Pathname, record.Err)
 						sourceCtx.recordError(record.Pathname, record.Err)
-						break
-					}
-
-					if snap.builderOptions.NoXattr && record.IsXattr {
 						break
 					}
 
@@ -707,13 +708,17 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 	}
 	record.FileInfo = entry.FileInfo
 
+	snap.emitter.PathCached(record.Pathname)
+
 	if record.FileInfo.Mode()&os.ModeSymlink != 0 {
+		snap.emitter.SymlinkCached(record.Pathname)
 		return &objects.CachedPath{
 			MAC:      entry.MAC,
 			FileInfo: entry.FileInfo,
 		}, nil
 	}
 
+	snap.emitter.FileCached(record.Pathname, entry.FileInfo)
 	return &objects.CachedPath{
 		MAC:         entry.MAC,
 		ObjectMAC:   entry.Object,
