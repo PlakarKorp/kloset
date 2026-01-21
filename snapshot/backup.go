@@ -56,6 +56,7 @@ type sourceContext struct {
 type scanStats struct {
 	nfiles  uint64
 	ndirs   uint64
+	nlinks  uint64
 	nxattrs uint64
 	size    uint64
 }
@@ -172,6 +173,15 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 			return err
 		} else {
 			snap.emitter.XattrOk(record.Pathname, record.FileInfo.Size())
+		}
+	} else if record.Target != "" {
+		atomic.AddUint64(&stats.nlinks, +1)
+		snap.emitter.Symlink(record.Pathname)
+		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.SymlinkError(record.Pathname, err)
+			return err
+		} else {
+			snap.emitter.SymlinkOk(record.Pathname)
 		}
 	} else {
 		atomic.AddUint64(&stats.nfiles, +1)
