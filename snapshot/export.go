@@ -62,9 +62,9 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				}
 			} else if !ack.Record.IsXattr {
 				if ack.Record.FileInfo.IsDir() {
-					emitter.DirectoryOk(ack.Record.Pathname)
+					emitter.DirectoryOk(ack.Record.Pathname, ack.Record.FileInfo)
 				} else {
-					emitter.FileOk(ack.Record.Pathname)
+					emitter.FileOk(ack.Record.Pathname, ack.Record.FileInfo)
 				}
 			}
 		}

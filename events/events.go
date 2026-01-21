@@ -136,6 +136,12 @@ func (e *Emitter) File(path string) {
 	})
 }
 
+func (e *Emitter) Xattr(path string) {
+	e.emit("xattr", Info, map[string]any{
+		"path": path,
+	})
+}
+
 func (e *Emitter) Symlink(path string) {
 	e.emit("symlink", Info, map[string]any{
 		"path": path,
@@ -162,15 +168,24 @@ func (e *Emitter) PathOk(path string) {
 	})
 }
 
-func (e *Emitter) DirectoryOk(path string) {
+func (e *Emitter) DirectoryOk(path string, fileinfo objects.FileInfo) {
 	e.emit("directory.ok", Info, map[string]any{
-		"path": path,
+		"path":     path,
+		"fileinfo": fileinfo,
 	})
 }
 
-func (e *Emitter) FileOk(path string) {
+func (e *Emitter) FileOk(path string, fileinfo objects.FileInfo) {
 	e.emit("file.ok", Info, map[string]any{
+		"path":     path,
+		"fileinfo": fileinfo,
+	})
+}
+
+func (e *Emitter) XattrOk(path string, size int64) {
+	e.emit("xattr.ok", Info, map[string]any{
 		"path": path,
+		"size": size,
 	})
 }
 
@@ -210,6 +225,13 @@ func (e *Emitter) DirectoryError(path string, err error) {
 
 func (e *Emitter) FileError(path string, err error) {
 	e.emit("file.error", Error, map[string]any{
+		"path":  path,
+		"error": err,
+	})
+}
+
+func (e *Emitter) XattrError(path string, err error) {
+	e.emit("xattr.error", Error, map[string]any{
 		"path":  path,
 		"error": err,
 	})
