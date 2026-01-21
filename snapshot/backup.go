@@ -165,7 +165,6 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 	}
 
 	if record.IsXattr {
-		panic("what ?")
 		atomic.AddUint64(&stats.nxattrs, +1)
 		snap.emitter.Xattr(record.Pathname)
 		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
