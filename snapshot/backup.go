@@ -243,10 +243,8 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 							snap.emitter.Path(record.Pathname)
 							snap.emitter.PathError(record.Pathname, record.Err)
 							sourceCtx.recordError(record.Pathname, record.Err)
-							break
-						}
 
-						if !snap.skipExcludedPathname(sourceCtx, record) {
+						} else if !snap.skipExcludedPathname(sourceCtx, record) {
 							snap.emitter.Path(record.Pathname)
 							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
 								sourceCtx.recordError(record.Pathname, err)
