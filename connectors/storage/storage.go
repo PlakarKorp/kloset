@@ -117,28 +117,37 @@ const (
 	ModeRead  Mode = 1 << 2
 )
 
+type StorageResource uint32
+
+const (
+	StorageResourcePackfile     StorageResource = 1 << 1
+	StorageResourceStatefile    StorageResource = 1 << 2
+	StorageResourceLockfile     StorageResource = 1 << 3
+	StorageResourceECCPackfile  StorageResource = 1 << 4
+	StorageResourceECCStatefile StorageResource = 1 << 5
+)
+
+type Range struct {
+	Offset uint64
+	Length uint32
+}
+
 type Store interface {
-	Create(ctx context.Context, config []byte) error
-	Open(ctx context.Context) ([]byte, error)
-	Location(ctx context.Context) (string, error)
-	Mode(ctx context.Context) (Mode, error)
-	Size(ctx context.Context) (int64, error) // this can be costly, call with caution
+	Create(context.Context, []byte) error
+	Open(context.Context) ([]byte, error)
+	Ping(context.Context) error
 
-	GetStates(ctx context.Context) ([]objects.MAC, error)
-	PutState(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error)
-	GetState(ctx context.Context, mac objects.MAC) (io.ReadCloser, error)
-	DeleteState(ctx context.Context, mac objects.MAC) error
+	Origin() string
+	Type() string
+	Root() string
+	Flags() location.Flags
+	Mode() Mode
+	Size(context.Context) (int64, error) // this can be costly, call with caution
 
-	GetPackfiles(ctx context.Context) ([]objects.MAC, error)
-	PutPackfile(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error)
-	GetPackfile(ctx context.Context, mac objects.MAC) (io.ReadCloser, error)
-	GetPackfileBlob(ctx context.Context, mac objects.MAC, offset uint64, length uint32) (io.ReadCloser, error)
-	DeletePackfile(ctx context.Context, mac objects.MAC) error
-
-	GetLocks(ctx context.Context) ([]objects.MAC, error)
-	PutLock(ctx context.Context, lockID objects.MAC, rd io.Reader) (int64, error)
-	GetLock(ctx context.Context, lockID objects.MAC) (io.ReadCloser, error)
-	DeleteLock(ctx context.Context, lockID objects.MAC) error
+	List(context.Context, StorageResource) ([]objects.MAC, error)
+	Put(context.Context, StorageResource, objects.MAC, io.Reader) (int64, error)
+	Get(context.Context, StorageResource, objects.MAC, *Range) (io.ReadCloser, error)
+	Delete(context.Context, StorageResource, objects.MAC) error
 
 	Close(ctx context.Context) error
 }

@@ -228,11 +228,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 
 	t0 := time.Now()
 
-	target, err := snap.repository.Location()
-	if err != nil {
-		return err
-	}
-
+	target := snap.repository.Origin()
 	rBytesSaved, wBytesSaved := snap.repository.RBytes(), snap.repository.WBytes()
 
 	checkCtx := &checkContext{
