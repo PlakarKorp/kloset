@@ -9,9 +9,9 @@ type Configuration struct {
 
 func NewDefaultConfiguration() *Configuration {
 	return &Configuration{
-		Algorithm:  "FASTCDC",
-		MinSize:    64 * 1024,
+		Algorithm:  "fastcdc-v1.0.0",
+		MinSize:    512 * 1024,
 		NormalSize: 1 * 1024 * 1024,
-		MaxSize:    4 * 1024 * 1024,
+		MaxSize:    8 * 1024 * 1024,
 	}
 }
