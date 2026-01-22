@@ -51,6 +51,6 @@ type Configuration struct {
 
 func NewDefaultConfiguration() *Configuration {
 	return &Configuration{
-		MaxSize: (20 << 10) << 10,
+		MaxSize: (64 << 10) << 10,
 	}
 }
