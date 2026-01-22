@@ -3,10 +3,12 @@ package scanlog
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"iter"
 	"path"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
+	"github.com/PlakarKorp/kloset/objects"
 )
 
 type EntryKind int
@@ -17,23 +19,31 @@ const (
 )
 
 type ScanBatch struct {
-	db   *sqlite.SQLiteCache
-	recs []batchRec
+	db          *sqlite.SQLiteCache
+	recs        []batchRec // entries
+	pathmacRecs []pathmacRec
 }
 
 type batchRec struct {
 	kind    EntryKind
 	path    string
+	mac     objects.MAC
 	payload []byte
 	summary []byte
+}
+
+type pathmacRec struct {
+	path   string
+	parent string
+	mac    objects.MAC
 }
 
 type ScanLog struct {
 	db *sqlite.SQLiteCache
 }
 
-func New(path string) (*ScanLog, error) {
-	db, err := sqlite.New(path, "scanlog", &sqlite.Options{
+func New(path string, name string) (*ScanLog, error) {
+	db, err := sqlite.New(path, name, &sqlite.Options{
 		DeleteOnClose: true,
 		Compressed:    true,
 	})
@@ -58,6 +68,7 @@ func createSchema(db *sqlite.SQLiteCache) error {
 		kind    INTEGER NOT NULL, -- 1 = dir, 2 = file
 		path    TEXT    NOT NULL,
 		parent  TEXT    NOT NULL,
+		mac     BLOB NOT NULL,
 		payload BLOB    NOT NULL,
 		summary BLOB,
 		PRIMARY KEY (kind, path)
@@ -65,6 +76,15 @@ func createSchema(db *sqlite.SQLiteCache) error {
 
 	CREATE INDEX IF NOT EXISTS entries_parent_idx
 	ON entries(parent, kind, path);
+
+	CREATE TABLE IF NOT EXISTS pathmac (
+		path    TEXT NOT NULL PRIMARY KEY,
+		parent  TEXT NOT NULL,
+		mac     BLOB NOT NULL
+	) WITHOUT ROWID;
+
+	CREATE INDEX IF NOT EXISTS pathmac_parent_idx
+	ON pathmac(parent, path);
 	`
 
 	_, err := db.Exec(schema)
@@ -75,15 +95,15 @@ func (s *ScanLog) Close() error {
 	return s.db.Close()
 }
 
-func (s *ScanLog) PutDirectory(p string, payload []byte) error {
-	return s.put(KindDirectory, p, payload, nil)
+func (s *ScanLog) PutDirectory(p string, mac objects.MAC, payload []byte) error {
+	return s.put(KindDirectory, p, mac, payload, nil)
 }
 
-func (s *ScanLog) PutFile(p string, payload []byte, summary []byte) error {
-	return s.put(KindFile, p, payload, summary)
+func (s *ScanLog) PutFile(p string, mac objects.MAC, payload []byte, summary []byte) error {
+	return s.put(KindFile, p, mac, payload, summary)
 }
 
-func (s *ScanLog) put(kind EntryKind, p string, payload []byte, summary []byte) error {
+func (s *ScanLog) put(kind EntryKind, p string, mac objects.MAC, payload []byte, summary []byte) error {
 	parent := path.Dir(p)
 	storedPayload := s.db.Encode(payload)
 	storedSummary := summary
@@ -92,8 +112,8 @@ func (s *ScanLog) put(kind EntryKind, p string, payload []byte, summary []byte) 
 	}
 
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`,
-		int(kind), p, parent, storedPayload, storedSummary,
+		`INSERT OR REPLACE INTO entries (kind, path, parent, mac, payload, summary) VALUES (?, ?, ?, ?, ?, ?)`,
+		int(kind), p, parent, mac[:], storedPayload, storedSummary,
 	)
 	return err
 }
@@ -130,15 +150,24 @@ func (s *ScanLog) NewBatch() *ScanBatch {
 	return &ScanBatch{db: s.db}
 }
 
-func (b *ScanBatch) PutDirectory(p string, payload []byte) error {
-	return b.put(KindDirectory, p, payload, nil)
+func (b *ScanBatch) PutDirectory(p string, mac objects.MAC, payload []byte) error {
+	return b.put(KindDirectory, p, mac, payload, nil)
 }
 
-func (b *ScanBatch) PutFile(p string, payload []byte, summary []byte) error {
-	return b.put(KindFile, p, payload, summary)
+func (b *ScanBatch) PutFile(p string, mac objects.MAC, payload []byte, summary []byte) error {
+	return b.put(KindFile, p, mac, payload, summary)
 }
 
-func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte) error {
+func (b *ScanBatch) PutPathMAC(p string, mac objects.MAC) error {
+	b.pathmacRecs = append(b.pathmacRecs, pathmacRec{
+		path:   p,
+		parent: path.Dir(p),
+		mac:    mac,
+	})
+	return nil
+}
+
+func (b *ScanBatch) put(kind EntryKind, p string, mac objects.MAC, payload []byte, summary []byte) error {
 	storedPayload := b.db.Encode(payload)
 	storedSummary := summary
 	if summary != nil {
@@ -147,6 +176,7 @@ func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte
 	b.recs = append(b.recs, batchRec{
 		kind:    kind,
 		path:    p,
+		mac:     mac,
 		payload: storedPayload,
 		summary: storedSummary,
 	})
@@ -154,11 +184,11 @@ func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte
 }
 
 func (b *ScanBatch) Count() uint32 {
-	return uint32(len(b.recs))
+	return uint32(len(b.recs) + len(b.pathmacRecs))
 }
 
 func (b *ScanBatch) Commit() error {
-	if len(b.recs) == 0 {
+	if len(b.recs) == 0 && len(b.pathmacRecs) == 0 {
 		return nil
 	}
 
@@ -167,16 +197,30 @@ func (b *ScanBatch) Commit() error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`)
+	entriesStmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, mac, payload, summary) VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
 	}
-	defer stmt.Close()
+	defer entriesStmt.Close()
+
+	pathmacStmt, err := tx.Prepare(`INSERT OR REPLACE INTO pathmac (path, parent, mac) VALUES (?, ?, ?)`)
+	if err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	defer pathmacStmt.Close()
 
 	for _, rec := range b.recs {
 		parent := path.Dir(rec.path)
-		if _, err := stmt.Exec(int(rec.kind), rec.path, parent, rec.payload, rec.summary); err != nil {
+		if _, err := entriesStmt.Exec(int(rec.kind), rec.path, parent, rec.mac[:], rec.payload, rec.summary); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+
+	for _, rec := range b.pathmacRecs {
+		if _, err := pathmacStmt.Exec(rec.path, rec.parent, rec.mac[:]); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -187,17 +231,19 @@ func (b *ScanBatch) Commit() error {
 	}
 
 	b.recs = nil
+	b.pathmacRecs = nil
 	return nil
 }
 
 type Entry struct {
 	Kind    EntryKind
 	Path    string
+	MAC     objects.MAC
 	Payload []byte
 	Summary []byte
 }
 
-func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
+func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withMac bool) iter.Seq[Entry] {
 	return func(yield func(Entry) bool) {
 		hi := prefix + string([]byte{0xFF})
 
@@ -206,11 +252,20 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 			order = "DESC"
 		}
 
-		query := `
+		var query string
+		if !withMac {
+			query = `
 		SELECT kind, path
 		FROM entries
 		WHERE path >= ? AND path < ?
 		`
+		} else {
+			query = `
+		SELECT kind, path, mac
+		FROM entries
+		WHERE path >= ? AND path < ?
+		`
+		}
 		args := []any{prefix, hi}
 
 		if kind != 0 {
@@ -229,13 +284,26 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 		for rows.Next() {
 			var kInt int
 			var p string
-			if err := rows.Scan(&kInt, &p); err != nil {
-				return
+			var payload []byte
+			var macStored []byte
+			var mac objects.MAC
+
+			if !withMac {
+				if err := rows.Scan(&kInt, &p); err != nil {
+					return
+				}
+			} else {
+				if err := rows.Scan(&kInt, &p, &macStored); err != nil {
+					return
+				}
+				mac = objects.MAC(macStored)
 			}
 
 			if !yield(Entry{
-				Kind: EntryKind(kInt),
-				Path: p,
+				Kind:    EntryKind(kInt),
+				Path:    p,
+				Payload: payload,
+				MAC:     mac,
 			}) {
 				return
 			}
@@ -244,15 +312,19 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 }
 
 func (s *ScanLog) ListFiles(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindFile, prefix, reverse)
+	return s.list(KindFile, prefix, reverse, false)
 }
 
 func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindDirectory, prefix, reverse)
+	return s.list(KindDirectory, prefix, reverse, false)
 }
 
 func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(0, prefix, reverse)
+	return s.list(0, prefix, reverse, false)
+}
+
+func (s *ScanLog) ListPathnameMAC(prefix string, reverse bool) iter.Seq[Entry] {
+	return s.list(0, prefix, reverse, true)
 }
 
 func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {
@@ -310,4 +382,123 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 			}
 		}
 	}
+}
+
+type PathMacEntry struct {
+	Path string
+	MAC  objects.MAC
+}
+
+func (s *ScanLog) PutPathMAC(p string, mac objects.MAC) error {
+	parent := path.Dir(p)
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO pathmac (path, parent, mac) VALUES (?, ?, ?)`,
+		p, parent, mac[:],
+	)
+	return err
+}
+
+func (s *ScanLog) GetPathMAC(p string) (*objects.MAC, error) {
+	var stored []byte
+	err := s.db.QueryRow(`SELECT mac FROM pathmac WHERE path = ?`, p).Scan(&stored)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if len(stored) != len(objects.MAC{}) {
+		return nil, fmt.Errorf("invalid error mac length for %q: %d", p, len(stored))
+	}
+	var mac objects.MAC
+	copy(mac[:], stored)
+	return &mac, nil
+}
+
+func (s *ScanLog) ListPathMACsFrom(prefix string) iter.Seq[PathMacEntry] {
+	return func(yield func(PathMacEntry) bool) {
+		hi := prefix + string([]byte{0xFF})
+
+		rows, err := s.db.Query(
+			`SELECT path, mac FROM pathmac WHERE path >= ? AND path < ? ORDER BY path ASC`,
+			prefix, hi,
+		)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p string
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
+				return
+			}
+			if len(stored) != len(objects.MAC{}) {
+				return
+			}
+			var mac objects.MAC
+			copy(mac[:], stored)
+			if !yield(PathMacEntry{Path: p, MAC: mac}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) ListDirectPathMACs(parent string, reverse bool) iter.Seq[PathMacEntry] {
+	return func(yield func(PathMacEntry) bool) {
+		order := "ASC"
+		if reverse {
+			order = "DESC"
+		}
+
+		rows, err := s.db.Query(
+			`SELECT path, mac FROM pathmac WHERE parent = ? AND parent != path ORDER BY path `+order,
+			parent,
+		)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p string
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
+				return
+			}
+			if len(stored) != len(objects.MAC{}) {
+				return
+			}
+			var mac objects.MAC
+			copy(mac[:], stored)
+			if !yield(PathMacEntry{Path: p, MAC: mac}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) CountPathMACs() (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM pathmac`,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *ScanLog) CountDirectPathMACs(parent string) (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM pathmac WHERE parent = ? AND parent != path`,
+		parent,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
