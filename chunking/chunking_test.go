@@ -7,7 +7,7 @@ import (
 )
 
 func TestDefaultAlgorithm(t *testing.T) {
-	expected := "FASTCDC"
+	expected := "fastcdc-v1.0.0"
 	result := NewDefaultConfiguration().Algorithm
 
 	if result != expected {
@@ -17,9 +17,9 @@ func TestDefaultAlgorithm(t *testing.T) {
 
 func TestDefaultConfiguration(t *testing.T) {
 	expected := &chunkers.ChunkerOpts{
-		MinSize:    64 * 1024,
+		MinSize:    512 * 1024,
 		NormalSize: 1 * 1024 * 1024,
-		MaxSize:    4 * 1024 * 1024,
+		MaxSize:    8 * 1024 * 1024,
 	}
 
 	result := NewDefaultConfiguration()
