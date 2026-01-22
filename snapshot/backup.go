@@ -252,7 +252,14 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 	go func() {
 		if err := wg.Wait(); err != nil {
 			errch <- err
+
+			// we also need to drain records if we were canceled
+			// otherwise importers may hang if they tried to send
+			// before handling cancellation
+			for range records {
+			}
 		}
+
 		close(errch)
 		if results != nil {
 			close(results)
