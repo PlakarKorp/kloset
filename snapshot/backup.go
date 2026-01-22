@@ -54,9 +54,11 @@ type sourceContext struct {
 }
 
 type scanStats struct {
-	nfiles uint64
-	ndirs  uint64
-	size   uint64
+	nfiles  uint64
+	ndirs   uint64
+	nlinks  uint64
+	nxattrs uint64
+	size    uint64
 }
 
 type BuilderOptions struct {
@@ -138,60 +140,63 @@ func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *
 	return sourceCtx.source.excludes.IsExcluded(record.Pathname, isDir)
 }
 
-func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, stats *scanStats, chunker *chunkers.Chunker) {
-	if record.Err != nil {
-		sourceCtx.recordError(record.Pathname, record.Err)
-		snap.emitter.PathError(record.Pathname, record.Err)
-		return
-	}
-
-	if snap.builderOptions.NoXattr && record.IsXattr {
-		return
-	}
-
-	snap.emitter.Path(record.Pathname)
-
+func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, stats *scanStats, chunker *chunkers.Chunker) error {
 	// XXX: Remove this when we introduce the Location object.
 	repoLocation, err := snap.repository.Location()
 	if err != nil {
-		sourceCtx.recordError(record.Pathname, err)
-		snap.emitter.FileError(record.Pathname, err)
-		return
+		return err
 	}
 
 	repoLocation = strings.TrimPrefix(repoLocation, "fs://")
 	repoLocation = strings.TrimPrefix(repoLocation, "ptar://")
 	if record.Pathname == repoLocation || strings.HasPrefix(record.Pathname, repoLocation+"/") {
 		snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
-		return
+		snap.emitter.PathOk(record.Pathname)
+		return nil
 	}
 
 	if record.FileInfo.Mode().IsDir() {
 		atomic.AddUint64(&stats.ndirs, +1)
 		entry := vfs.NewEntry(path.Dir(record.Pathname), record)
 		if err := sourceCtx.batchRecordEntry(entry, nil); err != nil {
-			sourceCtx.recordError(record.Pathname, err)
+			snap.emitter.DirectoryError(record.Pathname, err)
+			return err
 		}
-		return
-	}
-
-	snap.emitter.File(record.Pathname)
-
-	if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
-		snap.emitter.FileError(record.Pathname, err)
-		sourceCtx.recordError(record.Pathname, err)
-	} else {
-		snap.emitter.FileOk(record.Pathname)
+		return nil
 	}
 
 	if record.IsXattr {
-		return
+		atomic.AddUint64(&stats.nxattrs, +1)
+		snap.emitter.Xattr(record.Pathname)
+		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.XattrError(record.Pathname, err)
+			return err
+		} else {
+			snap.emitter.XattrOk(record.Pathname, record.FileInfo.Size())
+		}
+	} else if record.Target != "" {
+		atomic.AddUint64(&stats.nlinks, +1)
+		snap.emitter.Symlink(record.Pathname)
+		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.SymlinkError(record.Pathname, err)
+			return err
+		} else {
+			snap.emitter.SymlinkOk(record.Pathname)
+		}
+	} else {
+		atomic.AddUint64(&stats.nfiles, +1)
+		snap.emitter.File(record.Pathname)
+		if err := snap.processFileRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.FileError(record.Pathname, err)
+			return err
+		} else {
+			snap.emitter.FileOk(record.Pathname, record.FileInfo)
+			if record.FileInfo.Mode().IsRegular() {
+				atomic.AddUint64(&stats.size, uint64(record.FileInfo.Size()))
+			}
+		}
 	}
-
-	atomic.AddUint64(&stats.nfiles, +1)
-	if record.FileInfo.Mode().IsRegular() {
-		atomic.AddUint64(&stats.size, uint64(record.FileInfo.Size()))
-	}
+	return nil
 }
 
 func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
@@ -233,10 +238,22 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 						return nil
 					}
 
-					if !snap.skipExcludedPathname(sourceCtx, record) {
-						snap.processRecord(idx, sourceCtx, record, stats, ck)
-					}
+					if !snap.builderOptions.NoXattr || !record.IsXattr {
+						if record.Err != nil {
+							snap.emitter.Path(record.Pathname)
+							snap.emitter.PathError(record.Pathname, record.Err)
+							sourceCtx.recordError(record.Pathname, record.Err)
 
+						} else if !snap.skipExcludedPathname(sourceCtx, record) {
+							snap.emitter.Path(record.Pathname)
+							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
+								sourceCtx.recordError(record.Pathname, err)
+								snap.emitter.PathError(record.Pathname, err)
+							} else {
+								snap.emitter.PathOk(record.Pathname)
+							}
+						}
+					}
 					if results != nil {
 						results <- record.Ok()
 					} else {
@@ -695,13 +712,17 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 	}
 	record.FileInfo = entry.FileInfo
 
+	snap.emitter.PathCached(record.Pathname)
+
 	if record.FileInfo.Mode()&os.ModeSymlink != 0 {
+		snap.emitter.SymlinkCached(record.Pathname)
 		return &objects.CachedPath{
 			MAC:      entry.MAC,
 			FileInfo: entry.FileInfo,
 		}, nil
 	}
 
+	snap.emitter.FileCached(record.Pathname, entry.FileInfo)
 	return &objects.CachedPath{
 		MAC:         entry.MAC,
 		ObjectMAC:   entry.Object,
@@ -1077,6 +1098,8 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 	for _, pathname := range dirPaths {
 		dirPath := pathname
 
+		snap.emitter.Directory(dirPath)
+
 		dirBytes, err := sourceCtx.scanLog.GetDirectory(dirPath)
 		if err != nil {
 			return nil, nil, err
@@ -1156,7 +1179,7 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 			return nil, nil, err
 		}
 
-		snap.emitter.DirectoryOk(dirPath)
+		snap.emitter.DirectoryOk(dirPath, dirEntry.FileInfo)
 
 		if dirPath == "/" {
 			if rootSummary != nil {

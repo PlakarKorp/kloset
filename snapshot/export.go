@@ -17,7 +17,7 @@ type ExportOptions struct {
 }
 
 func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *ExportOptions) error {
-	emitter := snap.Emitter("restore")
+	emitter := snap.Emitter("export")
 	defer emitter.Close()
 
 	// these are wrong and need to be actually computed from the
@@ -49,22 +49,26 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		}
 	}
 
-	records := make(chan *connectors.Record, snap.AppContext().MaxConcurrency)
-	results := make(chan *connectors.Result, snap.AppContext().MaxConcurrency)
+	records := make(chan *connectors.Record, snap.AppContext().MaxConcurrency*2)
+	results := make(chan *connectors.Result, snap.AppContext().MaxConcurrency*2)
 
 	go func() {
 		for ack := range results {
 			if ack.Err != nil {
 				if ack.Record.FileInfo.IsDir() {
+					emitter.PathError(ack.Record.Pathname, ack.Err)
 					emitter.DirectoryError(ack.Record.Pathname, ack.Err)
 				} else {
+					emitter.PathError(ack.Record.Pathname, ack.Err)
 					emitter.FileError(ack.Record.Pathname, ack.Err)
 				}
 			} else if !ack.Record.IsXattr {
 				if ack.Record.FileInfo.IsDir() {
-					emitter.DirectoryOk(ack.Record.Pathname)
+					emitter.DirectoryOk(ack.Record.Pathname, ack.Record.FileInfo)
+					emitter.PathOk(ack.Record.Pathname)
 				} else {
-					emitter.FileOk(ack.Record.Pathname)
+					emitter.FileOk(ack.Record.Pathname, ack.Record.FileInfo)
+					emitter.PathOk(ack.Record.Pathname)
 				}
 			}
 		}
@@ -85,6 +89,8 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			if entrypath == "" {
 				entrypath = "/"
 			}
+
+			emitter.Path(entrypath)
 
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)

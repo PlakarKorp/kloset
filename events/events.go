@@ -136,6 +136,12 @@ func (e *Emitter) File(path string) {
 	})
 }
 
+func (e *Emitter) Xattr(path string) {
+	e.emit("xattr", Info, map[string]any{
+		"path": path,
+	})
+}
+
 func (e *Emitter) Symlink(path string) {
 	e.emit("symlink", Info, map[string]any{
 		"path": path,
@@ -162,15 +168,24 @@ func (e *Emitter) PathOk(path string) {
 	})
 }
 
-func (e *Emitter) DirectoryOk(path string) {
+func (e *Emitter) DirectoryOk(path string, fileinfo objects.FileInfo) {
 	e.emit("directory.ok", Info, map[string]any{
-		"path": path,
+		"path":     path,
+		"fileinfo": fileinfo,
 	})
 }
 
-func (e *Emitter) FileOk(path string) {
+func (e *Emitter) FileOk(path string, fileinfo objects.FileInfo) {
 	e.emit("file.ok", Info, map[string]any{
+		"path":     path,
+		"fileinfo": fileinfo,
+	})
+}
+
+func (e *Emitter) XattrOk(path string, size int64) {
+	e.emit("xattr.ok", Info, map[string]any{
 		"path": path,
+		"size": size,
 	})
 }
 
@@ -194,6 +209,53 @@ func (e *Emitter) ChunkOk(chunk objects.MAC) {
 
 /////
 
+func (e *Emitter) PathCached(path string) {
+	e.emit("path.cached", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) DirectoryCached(path string, fileinfo objects.FileInfo) {
+	e.emit("directory.cached", Info, map[string]any{
+		"path":     path,
+		"fileinfo": fileinfo,
+	})
+}
+
+func (e *Emitter) FileCached(path string, fileinfo objects.FileInfo) {
+	e.emit("file.cached", Info, map[string]any{
+		"path":     path,
+		"fileinfo": fileinfo,
+	})
+}
+
+func (e *Emitter) XattrCached(path string, size int64) {
+	e.emit("xattr.cached", Info, map[string]any{
+		"path": path,
+		"size": size,
+	})
+}
+
+func (e *Emitter) SymlinkCached(path string) {
+	e.emit("symlink.cached", Info, map[string]any{
+		"path": path,
+	})
+}
+
+func (e *Emitter) ObjectCached(object objects.MAC) {
+	e.emit("object.cached", Info, map[string]any{
+		"mac": object,
+	})
+}
+
+func (e *Emitter) ChunkCached(chunk objects.MAC) {
+	e.emit("chunk.cached", Info, map[string]any{
+		"mac": chunk,
+	})
+}
+
+/////
+
 func (e *Emitter) PathError(path string, err error) {
 	e.emit("path.error", Error, map[string]any{
 		"path":  path,
@@ -210,6 +272,13 @@ func (e *Emitter) DirectoryError(path string, err error) {
 
 func (e *Emitter) FileError(path string, err error) {
 	e.emit("file.error", Error, map[string]any{
+		"path":  path,
+		"error": err,
+	})
+}
+
+func (e *Emitter) XattrError(path string, err error) {
+	e.emit("xattr.error", Error, map[string]any{
 		"path":  path,
 		"error": err,
 	})

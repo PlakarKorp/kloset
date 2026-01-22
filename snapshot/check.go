@@ -185,7 +185,7 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 
 	if mode.IsDir() {
 		emitter.Directory(entrypath)
-		emitter.DirectoryOk(entrypath)
+		emitter.DirectoryOk(entrypath, e.FileInfo)
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil
 	}
@@ -213,7 +213,7 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 			return err
 		}
 
-		emitter.FileOk(entrypath)
+		emitter.FileOk(entrypath, *e.Stat())
 		checkCtx.size.Add(uint64(e.Stat().Size()))
 		snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(""))
 		return nil

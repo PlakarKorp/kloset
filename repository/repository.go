@@ -447,6 +447,10 @@ func (r *Repository) StorageSize() (int64, error) {
 	return r.storageSize, nil
 }
 
+func (r *Repository) IOStats() *iostat.IOTracker {
+	return r.ioStats
+}
+
 func (r *Repository) RBytes() int64 {
 	return int64(r.ioStats.Read.Stats().TotalBytes)
 }
