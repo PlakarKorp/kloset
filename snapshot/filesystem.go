@@ -3,7 +3,7 @@ package snapshot
 import (
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
-	"github.com/PlakarKorp/kloset/storage"
+	"github.com/PlakarKorp/kloset/connectors/storage"
 )
 
 func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {

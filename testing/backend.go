@@ -10,9 +10,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/header"
-	"github.com/PlakarKorp/kloset/storage"
 )
 
 func init() {

@@ -22,6 +22,7 @@ import (
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/ultracdc"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/compression"
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/hashing"
@@ -32,7 +33,6 @@ import (
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/repository/state"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/storage"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
 )

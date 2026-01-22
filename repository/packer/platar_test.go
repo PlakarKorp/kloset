@@ -11,12 +11,12 @@ import (
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/caching/pebble"
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository/packer"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/storage"
 	"github.com/stretchr/testify/require"
 )
 
