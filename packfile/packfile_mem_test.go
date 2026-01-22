@@ -55,5 +55,5 @@ func TestDefaultConfiguration(t *testing.T) {
 
 	require.Equal(t, c.MinSize, uint64(0))
 	require.Equal(t, c.AvgSize, uint64(0))
-	require.Equal(t, c.MaxSize, uint64(20971520))
+	require.Equal(t, c.MaxSize, uint64(67108864))
 }
