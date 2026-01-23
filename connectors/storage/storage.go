@@ -120,11 +120,11 @@ const (
 type StorageResource uint32
 
 const (
-	StorageResourcePackfile     StorageResource = 1
-	StorageResourceStatefile    StorageResource = 2
-	StorageResourceLockfile     StorageResource = 3
-	StorageResourceECCPackfile  StorageResource = 4
-	StorageResourceECCStatefile StorageResource = 5
+	StorageResourcePackfile    StorageResource = 1
+	StorageResourceState       StorageResource = 2
+	StorageResourceLock        StorageResource = 3
+	StorageResourceECCPackfile StorageResource = 4
+	StorageResourceECCState    StorageResource = 5
 )
 
 type Range struct {

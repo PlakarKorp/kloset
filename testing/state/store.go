@@ -61,7 +61,7 @@ func (s *store) Size(ctx context.Context) (int64, error) {
 
 func (s *store) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
 	switch res {
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		var all []objects.MAC
 		for k := range s.states {
 			all = append(all, k)
@@ -74,7 +74,7 @@ func (s *store) List(ctx context.Context, res storage.StorageResource) ([]object
 
 func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
 	switch res {
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		data, err := io.ReadAll(rd)
 		if err != nil {
 			return 0, err
@@ -89,7 +89,7 @@ func (s *store) Put(ctx context.Context, res storage.StorageResource, mac object
 
 func (s *store) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
 	switch res {
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		return io.NopCloser(bytes.NewReader(s.states[mac])), nil
 	}
 
@@ -98,7 +98,7 @@ func (s *store) Get(ctx context.Context, res storage.StorageResource, mac object
 
 func (s *store) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
 	switch res {
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		panic("!!!")
 	}
 

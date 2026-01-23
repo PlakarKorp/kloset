@@ -145,13 +145,13 @@ func (mb *MockBackend) List(ctx context.Context, res storage.StorageResource) ([
 			ret = append(ret, MAC)
 		}
 		return ret, nil
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		ret := make([]objects.MAC, 0)
 		for MAC := range mb.stateMACs {
 			ret = append(ret, MAC)
 		}
 		return ret, nil
-	case storage.StorageResourceLockfile:
+	case storage.StorageResourceLock:
 		locks := make([]objects.MAC, 0)
 		for lock := range mb.locks {
 			locks = append(locks, lock)
@@ -172,12 +172,12 @@ func (mb *MockBackend) Put(ctx context.Context, res storage.StorageResource, mac
 		io.Copy(&buffer, rd)
 		mb.packfileMACs[mac] = buffer.Bytes()
 		return int64(buffer.Len()), nil
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		var buffer bytes.Buffer
 		io.Copy(&buffer, rd)
 		mb.stateMACs[mac] = buffer.Bytes()
 		return int64(buffer.Len()), nil
-	case storage.StorageResourceLockfile:
+	case storage.StorageResourceLock:
 		var buffer bytes.Buffer
 		io.Copy(&buffer, rd)
 		mb.locks[mac] = buffer.Bytes()
@@ -198,11 +198,11 @@ func (mb *MockBackend) Get(ctx context.Context, res storage.StorageResource, mac
 			return io.NopCloser(io.NewSectionReader(buffer, int64(rg.Offset), int64(rg.Length))), nil
 		}
 
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		var buffer bytes.Buffer
 		buffer.Write(mb.stateMACs[mac])
 		return io.NopCloser(&buffer), nil
-	case storage.StorageResourceLockfile:
+	case storage.StorageResourceLock:
 		return io.NopCloser(bytes.NewReader(mb.locks[mac])), nil
 	}
 
@@ -213,9 +213,9 @@ func (mb *MockBackend) Delete(ctx context.Context, res storage.StorageResource, 
 	switch res {
 	case storage.StorageResourcePackfile:
 		delete(mb.packfileMACs, mac)
-	case storage.StorageResourceStatefile:
+	case storage.StorageResourceState:
 		delete(mb.stateMACs, mac)
-	case storage.StorageResourceLockfile:
+	case storage.StorageResourceLock:
 		delete(mb.locks, mac)
 	default:
 		return errors.ErrUnsupported
