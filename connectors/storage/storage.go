@@ -120,6 +120,7 @@ const (
 type StorageResource uint32
 
 const (
+	StorageResourceUndefined   StorageResource = 0
 	StorageResourcePackfile    StorageResource = 1
 	StorageResourceState       StorageResource = 2
 	StorageResourceLock        StorageResource = 3
