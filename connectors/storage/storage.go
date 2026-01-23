@@ -128,6 +128,25 @@ const (
 	StorageResourceECCState    StorageResource = 5
 )
 
+func (s StorageResource) String() string {
+	switch s {
+	case StorageResourceUndefined:
+		return "undefined"
+	case StorageResourcePackfile:
+		return "packfile"
+	case StorageResourceState:
+		return "state"
+	case StorageResourceLock:
+		return "lock"
+	case StorageResourceECCPackfile:
+		return "ECC packfile"
+	case StorageResourceECCState:
+		return "ECC state"
+	default:
+		return "unknown"
+	}
+}
+
 type Range struct {
 	Offset uint64
 	Length uint32
