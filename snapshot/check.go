@@ -181,8 +181,6 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 		return nil
 	}
 
-	emitter.Path(entrypath)
-
 	if mode.IsDir() {
 		emitter.Directory(entrypath)
 		emitter.DirectoryOk(entrypath, e.FileInfo)
@@ -281,11 +279,16 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 			return err
 		}
 
+		emitter.Path(entrypath)
 		if err := checkEntry(snap, opts, entrypath, e, wg, checkCtx); err != nil {
+			emitter.PathError(entrypath, err)
+
 			// don't stop at the first error; we need to
 			// process all the entries to report all the
 			// findings.
 			failed = true
+		} else {
+			emitter.PathOk(entrypath)
 		}
 
 		adjFiles := fileCount
