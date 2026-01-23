@@ -120,11 +120,11 @@ const (
 type StorageResource uint32
 
 const (
-	StorageResourcePackfile     StorageResource = 1 << 1
-	StorageResourceStatefile    StorageResource = 1 << 2
-	StorageResourceLockfile     StorageResource = 1 << 3
-	StorageResourceECCPackfile  StorageResource = 1 << 4
-	StorageResourceECCStatefile StorageResource = 1 << 5
+	StorageResourcePackfile     StorageResource = 1
+	StorageResourceStatefile    StorageResource = 2
+	StorageResourceLockfile     StorageResource = 3
+	StorageResourceECCPackfile  StorageResource = 4
+	StorageResourceECCStatefile StorageResource = 5
 )
 
 type Range struct {
@@ -142,8 +142,8 @@ type Store interface {
 	Root() string
 	Flags() location.Flags
 	Mode() Mode
-	Size(context.Context) (int64, error) // this can be costly, call with caution
 
+	Size(context.Context) (int64, error) // this can be costly, call with caution
 	List(context.Context, StorageResource) ([]objects.MAC, error)
 	Put(context.Context, StorageResource, objects.MAC, io.Reader) (int64, error)
 	Get(context.Context, StorageResource, objects.MAC, *Range) (io.ReadCloser, error)
