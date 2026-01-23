@@ -3,10 +3,12 @@ package state
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
-	"github.com/PlakarKorp/kloset/storage"
 )
 
 func init() {
@@ -29,80 +31,78 @@ func (s *store) Open(ctx context.Context) ([]byte, error) {
 	return nil, unsupported
 }
 
-func (s *store) Location(ctx context.Context) (string, error) {
-	return "fake", nil
+func (s *store) Ping(ctx context.Context) error {
+	return nil
 }
 
-func (s *store) Mode(ctx context.Context) (storage.Mode, error) {
-	return storage.ModeWrite, nil
+func (s *store) Type() string {
+	return "fakestatebackend"
+}
+
+func (s *store) Root() string {
+	return ""
+}
+
+func (s *store) Mode() storage.Mode {
+	return storage.ModeRead | storage.ModeWrite
+}
+
+func (s *store) Flags() location.Flags {
+	return 0
+}
+
+func (s *store) Origin() string {
+	return "fake"
 }
 
 func (s *store) Size(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
-func (s *store) GetStates(ctx context.Context) ([]objects.MAC, error) {
-	var all []objects.MAC
-	for k := range s.states {
-		all = append(all, k)
-	}
-	return all, nil
-}
-
-func (s *store) PutState(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error) {
-	data, err := io.ReadAll(rd)
-	if err != nil {
-		return 0, err
+func (s *store) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
+	switch res {
+	case storage.StorageResourceState:
+		var all []objects.MAC
+		for k := range s.states {
+			all = append(all, k)
+		}
+		return all, nil
 	}
 
-	s.states[mac] = data
-	return int64(len(data)), nil
+	return nil, errors.ErrUnsupported
 }
 
-func (s *store) GetState(ctx context.Context, mac objects.MAC) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(s.states[mac])), nil
+func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+	switch res {
+	case storage.StorageResourceState:
+		data, err := io.ReadAll(rd)
+		if err != nil {
+			return 0, err
+		}
+
+		s.states[mac] = data
+		return int64(len(data)), nil
+	}
+
+	return -1, errors.ErrUnsupported
 }
 
-func (s *store) DeleteState(ctx context.Context, mac objects.MAC) error {
-	panic("!!!")
+func (s *store) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+	switch res {
+	case storage.StorageResourceState:
+		return io.NopCloser(bytes.NewReader(s.states[mac])), nil
+	}
+
+	return nil, errors.ErrUnsupported
 }
 
-func (s *store) GetPackfiles(ctx context.Context) ([]objects.MAC, error) {
-	return nil, unsupported
-}
+func (s *store) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
+	switch res {
+	case storage.StorageResourceState:
+		panic("!!!")
+	}
 
-func (s *store) PutPackfile(ctx context.Context, mac objects.MAC, rd io.Reader) (int64, error) {
-	return 0, unsupported
-}
-
-func (s *store) GetPackfile(ctx context.Context, mac objects.MAC) (io.ReadCloser, error) {
-	return nil, unsupported
-}
-
-func (s *store) GetPackfileBlob(ctx context.Context, mac objects.MAC, offset uint64, length uint32) (io.ReadCloser, error) {
-	return nil, unsupported
-}
-
-func (s *store) DeletePackfile(ctx context.Context, mac objects.MAC) error {
-	return unsupported
-}
-
-// pretend to be lockless
-
-func (s *store) GetLocks(ctx context.Context) ([]objects.MAC, error) {
-	return nil, nil
-}
-
-func (s *store) PutLock(ctx context.Context, lockID objects.MAC, rd io.Reader) (int64, error) {
-	return 0, nil
-}
-
-func (s *store) GetLock(ctx context.Context, lockID objects.MAC) (io.ReadCloser, error) {
-	return nil, nil
-}
-
-func (s *store) DeleteLock(ctx context.Context, lockID objects.MAC) error {
-	return nil
+	return errors.ErrUnsupported
 }
 
 func (s *store) Close(ctx context.Context) error {

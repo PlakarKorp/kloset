@@ -6,7 +6,6 @@ import (
 	"os"
 	"runtime"
 	"strconv"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -155,16 +154,10 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 }
 
 func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
-
 	identifier := objects.RandomMAC()
 
-	location, err := src.repository.Location()
-	if err != nil {
-		return nil, err
-	}
-
 	var packingStrategy repository.RepositoryType
-	if strings.HasPrefix(location, "ptar:") {
+	if src.repository.Type() == "ptar" {
 		packingStrategy = repository.PtarType
 	} else {
 		packingStrategy = repository.DefaultType
@@ -477,11 +470,7 @@ func (snap *Builder) Commit() error {
 
 	rBytes := snap.repository.RBytes()
 	wBytes := snap.repository.WBytes()
-
-	target, err := snap.repository.Location()
-	if err != nil {
-		return err
-	}
+	target := snap.repository.Origin()
 
 	snap.emitter.Result(target, totalSize, totalErrors, snap.Header.Duration, rBytes, wBytes)
 

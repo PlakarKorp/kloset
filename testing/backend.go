@@ -10,9 +10,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/header"
-	"github.com/PlakarKorp/kloset/storage"
 )
 
 func init() {
@@ -108,102 +109,121 @@ func (mb *MockBackend) Open(ctx context.Context) ([]byte, error) {
 	return mb.configuration, nil
 }
 
-func (mb *MockBackend) Location(ctx context.Context) (string, error) {
-	return mb.location, nil
+func (mb *MockBackend) Ping(ctx context.Context) error {
+	return nil
 }
 
-func (mb *MockBackend) Mode(ctx context.Context) (storage.Mode, error) {
-	return storage.ModeRead | storage.ModeWrite, nil
+func (mb *MockBackend) Type() string {
+	return "mockbackend"
+}
+
+func (mb *MockBackend) Root() string {
+	return mb.location
+}
+
+func (mb *MockBackend) Origin() string {
+	return mb.location
+}
+
+func (mb *MockBackend) Mode() storage.Mode {
+	return storage.ModeRead | storage.ModeWrite
+}
+
+func (mb *MockBackend) Flags() location.Flags {
+	return 0
 }
 
 func (mb *MockBackend) Size(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
-func (mb *MockBackend) GetStates(ctx context.Context) ([]objects.MAC, error) {
-	ret := make([]objects.MAC, 0)
-	for MAC := range mb.stateMACs {
-		ret = append(ret, MAC)
+func (mb *MockBackend) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
+	switch res {
+	case storage.StorageResourcePackfile:
+		ret := make([]objects.MAC, 0)
+		for MAC := range mb.packfileMACs {
+			ret = append(ret, MAC)
+		}
+		return ret, nil
+	case storage.StorageResourceState:
+		ret := make([]objects.MAC, 0)
+		for MAC := range mb.stateMACs {
+			ret = append(ret, MAC)
+		}
+		return ret, nil
+	case storage.StorageResourceLock:
+		locks := make([]objects.MAC, 0)
+		for lock := range mb.locks {
+			locks = append(locks, lock)
+		}
+		return locks, nil
 	}
-	return ret, nil
+
+	return nil, errors.ErrUnsupported
 }
 
-func (mb *MockBackend) PutState(ctx context.Context, MAC objects.MAC, rd io.Reader) (int64, error) {
-	var buffer bytes.Buffer
-	io.Copy(&buffer, rd)
-	mb.stateMACs[MAC] = buffer.Bytes()
-	return int64(buffer.Len()), nil
-}
+func (mb *MockBackend) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+	switch res {
+	case storage.StorageResourcePackfile:
+		mb.packfileMutex.Lock()
+		defer mb.packfileMutex.Unlock()
 
-func (mb *MockBackend) GetState(ctx context.Context, MAC objects.MAC) (io.ReadCloser, error) {
-	var buffer bytes.Buffer
-	buffer.Write(mb.stateMACs[MAC])
-	return io.NopCloser(&buffer), nil
-}
-
-func (mb *MockBackend) DeleteState(ctx context.Context, MAC objects.MAC) error {
-	delete(mb.stateMACs, MAC)
-	return nil
-}
-
-func (mb *MockBackend) GetPackfiles(ctx context.Context) ([]objects.MAC, error) {
-	ret := make([]objects.MAC, 0)
-	for MAC := range mb.packfileMACs {
-		ret = append(ret, MAC)
+		var buffer bytes.Buffer
+		io.Copy(&buffer, rd)
+		mb.packfileMACs[mac] = buffer.Bytes()
+		return int64(buffer.Len()), nil
+	case storage.StorageResourceState:
+		var buffer bytes.Buffer
+		io.Copy(&buffer, rd)
+		mb.stateMACs[mac] = buffer.Bytes()
+		return int64(buffer.Len()), nil
+	case storage.StorageResourceLock:
+		var buffer bytes.Buffer
+		io.Copy(&buffer, rd)
+		mb.locks[mac] = buffer.Bytes()
+		return int64(buffer.Len()), nil
 	}
-	return ret, nil
+
+	return -1, errors.ErrUnsupported
 }
 
-func (mb *MockBackend) PutPackfile(ctx context.Context, MAC objects.MAC, rd io.Reader) (int64, error) {
-	mb.packfileMutex.Lock()
-	defer mb.packfileMutex.Unlock()
+func (mb *MockBackend) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+	switch res {
+	case storage.StorageResourcePackfile:
+		if rg == nil {
+			buffer := bytes.NewReader(mb.packfileMACs[mac])
+			return io.NopCloser(buffer), nil
+		} else {
+			buffer := bytes.NewReader(mb.packfileMACs[mac])
+			return io.NopCloser(io.NewSectionReader(buffer, int64(rg.Offset), int64(rg.Length))), nil
+		}
 
-	var buffer bytes.Buffer
-	io.Copy(&buffer, rd)
-	mb.packfileMACs[MAC] = buffer.Bytes()
-	return int64(buffer.Len()), nil
+	case storage.StorageResourceState:
+		var buffer bytes.Buffer
+		buffer.Write(mb.stateMACs[mac])
+		return io.NopCloser(&buffer), nil
+	case storage.StorageResourceLock:
+		return io.NopCloser(bytes.NewReader(mb.locks[mac])), nil
+	}
+
+	return nil, errors.ErrUnsupported
 }
 
-func (mb *MockBackend) GetPackfile(ctx context.Context, MAC objects.MAC) (io.ReadCloser, error) {
-	buffer := bytes.NewReader(mb.packfileMACs[MAC])
-	return io.NopCloser(buffer), nil
-}
+func (mb *MockBackend) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
+	switch res {
+	case storage.StorageResourcePackfile:
+		delete(mb.packfileMACs, mac)
+	case storage.StorageResourceState:
+		delete(mb.stateMACs, mac)
+	case storage.StorageResourceLock:
+		delete(mb.locks, mac)
+	default:
+		return errors.ErrUnsupported
+	}
 
-func (mb *MockBackend) GetPackfileBlob(ctx context.Context, MAC objects.MAC, offset uint64, length uint32) (io.ReadCloser, error) {
-	buffer := bytes.NewReader(mb.packfileMACs[MAC])
-	return io.NopCloser(io.NewSectionReader(buffer, int64(offset), int64(length))), nil
-}
-
-func (mb *MockBackend) DeletePackfile(ctx context.Context, MAC objects.MAC) error {
-	delete(mb.packfileMACs, MAC)
 	return nil
 }
 
 func (mb *MockBackend) Close(ctx context.Context) error {
-	return nil
-}
-
-/* Locks */
-func (mb *MockBackend) GetLocks(ctx context.Context) ([]objects.MAC, error) {
-	locks := make([]objects.MAC, 0)
-	for lock := range mb.locks {
-		locks = append(locks, lock)
-	}
-	return locks, nil
-}
-
-func (mb *MockBackend) PutLock(ctx context.Context, lockID objects.MAC, rd io.Reader) (int64, error) {
-	var buffer bytes.Buffer
-	io.Copy(&buffer, rd)
-	mb.locks[lockID] = buffer.Bytes()
-	return int64(buffer.Len()), nil
-}
-
-func (mb *MockBackend) GetLock(ctx context.Context, lockID objects.MAC) (io.ReadCloser, error) {
-	return io.NopCloser(bytes.NewReader(mb.locks[lockID])), nil
-}
-
-func (mb *MockBackend) DeleteLock(ctx context.Context, lockID objects.MAC) error {
-	delete(mb.locks, lockID)
 	return nil
 }

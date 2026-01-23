@@ -5,10 +5,10 @@ import (
 
 	"github.com/PlakarKorp/kloset/chunking"
 	"github.com/PlakarKorp/kloset/compression"
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/packfile"
-	"github.com/PlakarKorp/kloset/storage"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
 )

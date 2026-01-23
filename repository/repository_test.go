@@ -6,11 +6,11 @@ import (
 	"os"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
-	"github.com/PlakarKorp/kloset/storage"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/stretchr/testify/require"

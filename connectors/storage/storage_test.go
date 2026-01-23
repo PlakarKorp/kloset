@@ -6,9 +6,9 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
-	"github.com/PlakarKorp/kloset/storage"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
@@ -23,7 +23,7 @@ func TestNewStore(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if loc, _ := store.Location(ctx); loc != "mock:///test/location" {
+	if loc := store.Origin(); loc != "mock:///test/location" {
 		t.Errorf("expected location to be '/test/location', got %v", loc)
 	}
 
@@ -73,7 +73,7 @@ func TestOpenStore(t *testing.T) {
 		t.Fatalf("expected no error, got %v", err)
 	}
 
-	if loc, _ := store.Location(ctx); loc != "mock:///test/location" {
+	if loc := store.Origin(); loc != "mock:///test/location" {
 		t.Errorf("expected location to be '/test/location', got %v", loc)
 	}
 
@@ -129,7 +129,7 @@ func TestNew(t *testing.T) {
 				t.Fatalf("expected no error, got %v", err)
 			}
 
-			if loc, _ := store.Location(ctx); loc != location {
+			if loc := store.Origin(); loc != location {
 				t.Errorf("expected location to be '%s', got %v", location, loc)
 			}
 		})
