@@ -11,7 +11,12 @@ func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 		return s.filesystem, nil
 	}
 
-	if s.repository.Store().Mode()&storage.ModeRead == 0 {
+	mode, err := s.repository.Store().Mode(s.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	if mode&storage.ModeRead == 0 {
 		return nil, repository.ErrNotReadable
 	}
 
@@ -35,7 +40,12 @@ func (s *Snapshot) FilesystemWithCache() (*vfs.Filesystem, error) {
 		return s.filesystem, nil
 	}
 
-	if s.repository.Store().Mode()&storage.ModeRead == 0 {
+	mode, err := s.repository.Store().Mode(s.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	if mode&storage.ModeRead == 0 {
 		return nil, repository.ErrNotReadable
 	}
 

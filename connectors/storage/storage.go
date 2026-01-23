@@ -120,12 +120,32 @@ const (
 type StorageResource uint32
 
 const (
+	StorageResourceUndefined   StorageResource = 0
 	StorageResourcePackfile    StorageResource = 1
 	StorageResourceState       StorageResource = 2
 	StorageResourceLock        StorageResource = 3
 	StorageResourceECCPackfile StorageResource = 4
 	StorageResourceECCState    StorageResource = 5
 )
+
+func (s StorageResource) String() string {
+	switch s {
+	case StorageResourceUndefined:
+		return "undefined"
+	case StorageResourcePackfile:
+		return "packfile"
+	case StorageResourceState:
+		return "state"
+	case StorageResourceLock:
+		return "lock"
+	case StorageResourceECCPackfile:
+		return "ECC packfile"
+	case StorageResourceECCState:
+		return "ECC state"
+	default:
+		return "unknown"
+	}
+}
 
 type Range struct {
 	Offset uint64
@@ -141,8 +161,8 @@ type Store interface {
 	Type() string
 	Root() string
 	Flags() location.Flags
-	Mode() Mode
 
+	Mode(context.Context) (Mode, error)
 	Size(context.Context) (int64, error) // this can be costly, call with caution
 	List(context.Context, StorageResource) ([]objects.MAC, error)
 	Put(context.Context, StorageResource, objects.MAC, io.Reader) (int64, error)
