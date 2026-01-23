@@ -125,8 +125,8 @@ func (mb *MockBackend) Origin() string {
 	return mb.location
 }
 
-func (mb *MockBackend) Mode() storage.Mode {
-	return storage.ModeRead | storage.ModeWrite
+func (mb *MockBackend) Mode(context.Context) (storage.Mode, error) {
+	return storage.ModeRead | storage.ModeWrite, nil
 }
 
 func (mb *MockBackend) Flags() location.Flags {

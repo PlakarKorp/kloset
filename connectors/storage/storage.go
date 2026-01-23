@@ -142,8 +142,8 @@ type Store interface {
 	Type() string
 	Root() string
 	Flags() location.Flags
-	Mode() Mode
 
+	Mode(context.Context) (Mode, error)
 	Size(context.Context) (int64, error) // this can be costly, call with caution
 	List(context.Context, StorageResource) ([]objects.MAC, error)
 	Put(context.Context, StorageResource, objects.MAC, io.Reader) (int64, error)

@@ -43,8 +43,8 @@ func (s *store) Root() string {
 	return ""
 }
 
-func (s *store) Mode() storage.Mode {
-	return storage.ModeRead | storage.ModeWrite
+func (s *store) Mode(context.Context) (storage.Mode, error) {
+	return storage.ModeRead | storage.ModeWrite, nil
 }
 
 func (s *store) Flags() location.Flags {
