@@ -31,6 +31,7 @@ import (
 )
 
 type sourceIndexes struct {
+	vfsidx     *btree.BTree[string, int, []byte]
 	summaryidx *btree.BTree[string, int, []byte]
 	erridx     *btree.BTree[string, int, []byte]
 	xattridx   *btree.BTree[string, int, []byte]
@@ -45,8 +46,6 @@ type sourceContext struct {
 
 	vfsEntBatch *scanlog.ScanBatch
 	vfsEntLock  sync.Mutex
-
-	fileidx *btree.BTree[string, int, []byte]
 
 	indexes *sourceIndexes
 
@@ -573,6 +572,12 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 func (bi *sourceIndexes) Close(log *logging.Logger) {
 	// We need to protect those behind nil checks because we might be cleaning
 	// up a half initialized backupIndex.
+	if bi.vfsidx != nil {
+		if err := bi.vfsidx.Close(); err != nil {
+			log.Warn("Failed to close vfs btree: %s", err)
+		}
+	}
+
 	if bi.summaryidx != nil {
 		if err := bi.summaryidx.Close(); err != nil {
 			log.Warn("Failed to close summary btree: %s", err)
@@ -613,6 +618,11 @@ func (snap *Builder) tmpCacheDir() string {
 func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	bi := &sourceIndexes{}
 
+	vfsstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "vfs")
+	if err != nil {
+		return nil, err
+	}
+
 	summarystore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "summary")
 	if err != nil {
 		return nil, err
@@ -634,6 +644,11 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	}
 
 	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
+	if err != nil {
+		return nil, err
+	}
+
+	bi.vfsidx, err = btree.New(vfsstore, vfs.PathCmp, 50)
 	if err != nil {
 		return nil, err
 	}
@@ -906,7 +921,7 @@ func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, bytes 
 	dupBytes := make([]byte, len(bytes))
 	copy(dupBytes, bytes)
 
-	if err := sourceCtx.fileidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
+	if err := sourceCtx.indexes.vfsidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
 		return err
 	}
 
@@ -1051,38 +1066,14 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 	return snap.relinkNodesRecursive(sourceCtx, "/")
 }
 
-func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
-	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
-
+func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	if err := snap.relinkNodes(sourceCtx); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-
-	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
-		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	filestore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "path")
-	if err != nil {
-		return nil, nil, err
-	}
-
-	sourceCtx.fileidx, err = btree.New(filestore, vfs.PathCmp, 50)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer func() {
-		if err := sourceCtx.fileidx.Close(); err != nil {
-			snap.Logger().Warn("Failed to close fileidx btree: %s", err)
-		}
-	}()
 
 	chunker, err := snap.repository.Chunker(nil)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var rootSummary *vfs.Summary
@@ -1099,11 +1090,11 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 
 		dirBytes, err := sourceCtx.scanLog.GetDirectory(dirPath)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		if err := snap.AppContext().Err(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		pr, pw := io.Pipe()
@@ -1116,7 +1107,7 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 
 		dirEntry, err := vfs.EntryFromBytes(dirBytes)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		prefix := dirPath
@@ -1128,12 +1119,12 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 
 		if err := sourceCtx.processChildren(snap, summary, pw, prefix); err != nil {
 			pw.CloseWithError(err)
-			return nil, nil, err
+			return nil, err
 		}
 
 		erriter, err := sourceCtx.indexes.erridx.ScanFrom(prefix)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		for erriter.Next() {
 			path, _ := erriter.Current()
@@ -1146,22 +1137,22 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 			summary.Below.Errors++
 		}
 		if err := erriter.Err(); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		summary.UpdateAverages()
 
 		serializedSummary, err := summary.ToBytes()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		if err := sourceCtx.indexes.summaryidx.Insert(dirPath, serializedSummary); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		summaryMAC := snap.repository.ComputeMAC(serializedSummary)
 		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		//dirEntry.Summary = summary
@@ -1169,38 +1160,56 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		pw.Close()
 		res := <-resCh
 		if res.err != nil {
-			return nil, nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
+			return nil, fmt.Errorf("chunkify failed for %s: %w", dirPath, res.err)
 		}
 
 		if err := sourceCtx.indexes.dirpackidx.Insert(dirPath, res.mac); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		snap.emitter.DirectoryOk(dirPath, dirEntry.FileInfo)
 
 		if dirPath == "/" {
 			if rootSummary != nil {
-				return nil, nil, fmt.Errorf("importer yield a double root!")
+				return nil, fmt.Errorf("importer yield a double root!")
 			}
 			rootSummary = summary
 		}
 
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
 		mac := snap.repository.ComputeMAC(serialized)
 		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 
-		if err := sourceCtx.fileidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
-			return nil, nil, err
+		if err := sourceCtx.indexes.vfsidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
+			return nil, err
 		}
 	}
 
-	rootcsum, err := persistIndex(snap, sourceCtx.fileidx, resources.RT_VFS_BTREE,
+	return rootSummary, nil
+}
+
+func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
+	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
+
+	rootSummary, err := snap.buildVFS(sourceCtx)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
+		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
 			return snap.repository.ComputeMAC(data), nil
 		})
