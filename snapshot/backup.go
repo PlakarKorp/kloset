@@ -1103,9 +1103,13 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 
 	// stabilize order of vfsidx inserts early so we can unlock concurrency later
 	// on a 1.000.000 korpus, this takes roughly 2s
+	dirPaths := make([]string, 0)
 	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
 		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
 			return nil, err
+		}
+		if e.Kind == scanlog.KindDirectory {
+			dirPaths = append(dirPaths, e.Path)
 		}
 	}
 
@@ -1115,11 +1119,6 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	}
 
 	var rootSummary *vfs.Summary
-
-	dirPaths := make([]string, 0)
-	for e := range sourceCtx.scanLog.ListDirectories("/", true) {
-		dirPaths = append(dirPaths, e.Path)
-	}
 
 	for _, pathname := range dirPaths {
 		dirPath := pathname
