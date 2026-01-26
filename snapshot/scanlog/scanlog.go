@@ -197,7 +197,7 @@ type Entry struct {
 	Summary []byte
 }
 
-func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
+func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bool) iter.Seq[Entry] {
 	return func(yield func(Entry) bool) {
 		hi := prefix + string([]byte{0xFF})
 
@@ -206,11 +206,20 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 			order = "DESC"
 		}
 
-		query := `
+		var query string
+		if !withEntry {
+			query = `
 		SELECT kind, path
 		FROM entries
 		WHERE path >= ? AND path < ?
 		`
+		} else {
+			query = `
+		SELECT kind, path, payload
+		FROM entries
+		WHERE path >= ? AND path < ?
+		`
+		}
 		args := []any{prefix, hi}
 
 		if kind != 0 {
@@ -229,13 +238,27 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 		for rows.Next() {
 			var kInt int
 			var p string
-			if err := rows.Scan(&kInt, &p); err != nil {
-				return
+			var payload []byte
+			var storedPayload []byte
+
+			if !withEntry {
+				if err := rows.Scan(&kInt, &p); err != nil {
+					return
+				}
+			} else {
+				if err := rows.Scan(&kInt, &p, &storedPayload); err != nil {
+					return
+				}
+				payload, err = s.db.Decode(storedPayload)
+				if err != nil {
+					return
+				}
 			}
 
 			if !yield(Entry{
-				Kind: EntryKind(kInt),
-				Path: p,
+				Kind:    EntryKind(kInt),
+				Path:    p,
+				Payload: payload,
 			}) {
 				return
 			}
@@ -244,15 +267,19 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 }
 
 func (s *ScanLog) ListFiles(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindFile, prefix, reverse)
+	return s.list(KindFile, prefix, reverse, false)
 }
 
 func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindDirectory, prefix, reverse)
+	return s.list(KindDirectory, prefix, reverse, false)
 }
 
 func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(0, prefix, reverse)
+	return s.list(0, prefix, reverse, false)
+}
+
+func (s *ScanLog) ListPathnameEntries(prefix string, reverse bool) iter.Seq[Entry] {
+	return s.list(0, prefix, reverse, true)
 }
 
 func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {

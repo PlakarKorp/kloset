@@ -949,11 +949,7 @@ type chunkifyResult struct {
 	err error
 }
 
-func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, pathname string, serializedEntry []byte, serializedSummary []byte) error {
-	if err := sourceCtx.indexes.vfsidx.Insert(pathname, serializedEntry); err != nil && err != btree.ErrExists {
-		return err
-	}
-
+func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, serializedSummary []byte) error {
 	fileSummary, err := vfs.FileSummaryFromBytes(serializedSummary)
 	if err != nil {
 		return err
@@ -965,11 +961,7 @@ func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, pathna
 	return nil
 }
 
-func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string, serializedEntry []byte) error {
-	if err := sourceCtx.indexes.vfsidx.Insert(pathname, serializedEntry); err != nil && err != btree.ErrExists {
-		return err
-	}
-
+func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string) error {
 	val, found, err := sourceCtx.indexes.summaryidx.Find(pathname)
 	if err != nil {
 		return err
@@ -996,7 +988,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary
 	for e := range sourceCtx.scanLog.ListDirectPathnames(parent, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
-			err := sourceCtx.summarizeFile(currentSummary, e.Path, e.Payload, e.Summary)
+			err := sourceCtx.summarizeFile(currentSummary, e.Summary)
 			if err != nil {
 				return err
 			}
@@ -1004,7 +996,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary
 				return err
 			}
 		case scanlog.KindDirectory:
-			err := sourceCtx.summarizeDirectory(currentSummary, e.Path, e.Payload)
+			err := sourceCtx.summarizeDirectory(currentSummary, e.Path)
 			if err != nil {
 				return err
 			}
@@ -1107,6 +1099,14 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
+	}
+
+	// stabilize order of vfsidx inserts early so we can unlock concurrency later
+	// on a 1.000.000 korpus, this takes roughly 2s
+	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
+		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+			return nil, err
+		}
 	}
 
 	chunker, err := snap.repository.Chunker(nil)
@@ -1212,15 +1212,6 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 				return nil, fmt.Errorf("importer yield a double root!")
 			}
 			rootSummary = summary
-		}
-
-		serialized, err := dirEntry.ToBytes()
-		if err != nil {
-			return nil, err
-		}
-
-		if err := sourceCtx.indexes.vfsidx.Insert(dirPath, serialized); err != nil && err != btree.ErrExists {
-			return nil, err
 		}
 	}
 
