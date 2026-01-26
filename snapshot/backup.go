@@ -915,13 +915,8 @@ type chunkifyResult struct {
 	err error
 }
 
-func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, bytes []byte, path string, serializedSummary []byte) error {
-	// bytes is a slice that will be reused in the next iteration,
-	// swapping below our feet, so make a copy out of it
-	dupBytes := make([]byte, len(bytes))
-	copy(dupBytes, bytes)
-
-	if err := sourceCtx.indexes.vfsidx.Insert(path, dupBytes); err != nil && err != btree.ErrExists {
+func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, pathname string, serializedEntry []byte, serializedSummary []byte) error {
+	if err := sourceCtx.indexes.vfsidx.Insert(pathname, serializedEntry); err != nil && err != btree.ErrExists {
 		return err
 	}
 
@@ -936,7 +931,11 @@ func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, bytes 
 	return nil
 }
 
-func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string) error {
+func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string, serializedEntry []byte) error {
+	if err := sourceCtx.indexes.vfsidx.Insert(pathname, serializedEntry); err != nil && err != btree.ErrExists {
+		return err
+	}
+
 	val, found, err := sourceCtx.indexes.summaryidx.Find(pathname)
 	if err != nil {
 		return err
@@ -963,7 +962,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary
 	for e := range sourceCtx.scanLog.ListDirectPathnames(parent, false) {
 		switch e.Kind {
 		case scanlog.KindFile:
-			err := sourceCtx.summarizeFile(currentSummary, e.Payload, e.Path, e.Summary)
+			err := sourceCtx.summarizeFile(currentSummary, e.Path, e.Payload, e.Summary)
 			if err != nil {
 				return err
 			}
@@ -971,7 +970,7 @@ func (sourceCtx *sourceContext) processChildren(builder *Builder, currentSummary
 				return err
 			}
 		case scanlog.KindDirectory:
-			err := sourceCtx.summarizeDirectory(currentSummary, e.Path)
+			err := sourceCtx.summarizeDirectory(currentSummary, e.Path, e.Payload)
 			if err != nil {
 				return err
 			}
