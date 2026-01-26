@@ -1107,6 +1107,16 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				nextOffset = uint64(loc.Length) + loc.Offset
 				currChks = nil
 				currChks = append(currChks, loc)
+
+				// This is inaccurate, as in we already increment the size for
+				// the _first_ chunk of the iteration so we are over accounting
+				// for one. We have way too many specific cases handled already
+				// so we are fine with that little inaccuracy for now.
+				accumulatedSize += loc.Length
+				if accumulatedSize >= maxSize {
+					break
+				}
+
 				continue
 			}
 
