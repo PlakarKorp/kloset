@@ -151,16 +151,6 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 		}
 	}
 
-	if record.FileInfo.Mode().IsDir() {
-		atomic.AddUint64(&stats.ndirs, +1)
-		entry := vfs.NewEntry(path.Dir(record.Pathname), record)
-		if err := sourceCtx.batchRecordEntry(entry, nil); err != nil {
-			snap.emitter.DirectoryError(record.Pathname, err)
-			return err
-		}
-		return nil
-	}
-
 	if record.IsXattr {
 		atomic.AddUint64(&stats.nxattrs, +1)
 		snap.emitter.Xattr(record.Pathname)
@@ -170,6 +160,15 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 		} else {
 			snap.emitter.XattrOk(record.Pathname, record.FileInfo.Size())
 		}
+	} else if record.FileInfo.Mode().IsDir() {
+		atomic.AddUint64(&stats.ndirs, +1)
+		if err := snap.processDirectoryRecord(idx, sourceCtx, record, chunker); err != nil {
+			snap.emitter.DirectoryError(record.Pathname, err)
+			return err
+		} else {
+			snap.emitter.DirectoryOk(record.Pathname, record.FileInfo)
+		}
+		return nil
 	} else if record.Target != "" {
 		atomic.AddUint64(&stats.nlinks, +1)
 		snap.emitter.Symlink(record.Pathname)
@@ -793,6 +792,32 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}, nil
 }
 
+func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cachedPath *objects.CachedPath, record *connectors.Record) error {
+	dirEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
+	var dirEntryMAC objects.MAC
+
+	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+		dirEntryMAC = cachedPath.MAC
+	} else {
+		serialized, err := dirEntry.ToBytes()
+		if err != nil {
+			return err
+		}
+
+		dirEntryMAC = snap.repository.ComputeMAC(serialized)
+		if snap.vfsCache == nil || record.IsXattr {
+			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized); err != nil {
+				return err
+			}
+		} else {
+			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized); err != nil {
+				return err
+			}
+		}
+	}
+	return sourceCtx.batchRecordEntry(dirEntry, nil)
+}
+
 func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *objects.CachedPath, record *connectors.Record) error {
 	if meta.ContentType == "" {
 		return fmt.Errorf("content type cannot be empty!")
@@ -862,6 +887,15 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	}
 
 	return sourceCtx.batchRecordEntry(fileEntry, serializedSummary)
+}
+
+func (snap *Builder) processDirectoryRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
+	cachedPath, err := snap.checkVFSCache(sourceCtx, record)
+	if err != nil {
+		snap.Logger().Warn("VFS CACHE: %v", err)
+	}
+
+	return snap.writeDirectoryEntry(idx, sourceCtx, cachedPath, record)
 }
 
 func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
@@ -1038,6 +1072,11 @@ func (snap *Builder) relinkNodesRecursive(sourceCtx *sourceContext, pathname str
 		if err := sourceCtx.scanLog.PutDirectory(pathname, serialized); err != nil {
 			return err
 		}
+
+		mac := snap.repository.ComputeMAC(serialized)
+		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
+			return err
+		}
 	}
 
 	if parent == pathname {
@@ -1177,11 +1216,6 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
-			return nil, err
-		}
-
-		mac := snap.repository.ComputeMAC(serialized)
-		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
 			return nil, err
 		}
 
