@@ -44,6 +44,8 @@ type Builder struct {
 	lockReleaser chan bool
 
 	beginTime time.Time
+
+	noSkipSelf bool
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {

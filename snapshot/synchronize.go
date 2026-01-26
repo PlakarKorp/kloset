@@ -131,6 +131,9 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
+	// Do not do the "is store part of the import" detection, we are in a sync,
+	// not in a backup.
+	dst.noSkipSelf = true
 	imp := &syncImporter{
 		root:   "/",
 		typ:    "sync",

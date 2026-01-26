@@ -141,12 +141,14 @@ func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *
 }
 
 func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, stats *scanStats, chunker *chunkers.Chunker) error {
-	// XXX: Remove this when we introduce the Location object.
-	if snap.repository.Type() == "fs" || snap.repository.Type() == "ptar" {
-		if record.Pathname == snap.repository.Root() || strings.HasPrefix(record.Pathname, snap.repository.Root()+"/") {
-			snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
-			snap.emitter.PathOk(record.Pathname)
-			return nil
+	if !snap.noSkipSelf {
+		// XXX: Remove this when we introduce the Location object.
+		if snap.repository.Type() == "fs" || snap.repository.Type() == "ptar" {
+			if record.Pathname == snap.repository.Root() || strings.HasPrefix(record.Pathname, snap.repository.Root()+"/") {
+				snap.Logger().Warn("skipping entry from repository: %s", record.Pathname)
+				snap.emitter.PathOk(record.Pathname)
+				return nil
+			}
 		}
 	}
 
