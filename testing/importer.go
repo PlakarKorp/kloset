@@ -14,6 +14,8 @@ type MockImporter struct {
 	files    map[string]MockFile
 
 	gen func(chan<- *connectors.Record)
+
+	FakeRoot string
 }
 
 func init() {
@@ -23,6 +25,7 @@ func init() {
 func NewMockImporter(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (importer.Importer, error) {
 	return &MockImporter{
 		location: config["location"],
+		FakeRoot: "/",
 	}, nil
 
 }
@@ -56,7 +59,7 @@ func (p *MockImporter) SetGenerator(gen func(chan<- *connectors.Record)) {
 
 func (p *MockImporter) Origin() string        { return "mock" }
 func (p *MockImporter) Type() string          { return "mock" }
-func (p *MockImporter) Root() string          { return "/" }
+func (p *MockImporter) Root() string          { return p.FakeRoot }
 func (p *MockImporter) Flags() location.Flags { return 0 }
 
 func (p *MockImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
