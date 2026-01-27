@@ -14,7 +14,7 @@ func TestSourceDedupEqual(t *testing.T) {
 		FakeRoot: "/home/bar",
 	}
 	imp2 := &ptesting.MockImporter{
-		FakeRoot: "/home/bar",
+		FakeRoot: "/home/bar/",
 	}
 	imp3 := &ptesting.MockImporter{
 		FakeRoot: "/home/bar",
