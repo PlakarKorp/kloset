@@ -65,6 +65,15 @@ func createSchema(db *sqlite.SQLiteCache) error {
 
 	CREATE INDEX IF NOT EXISTS entries_parent_idx
 	ON entries(parent, kind, path);
+
+	CREATE TABLE IF NOT EXISTS errors (
+		path    TEXT NOT NULL PRIMARY KEY,
+		parent  TEXT NOT NULL,
+		payload BLOB NOT NULL
+	) WITHOUT ROWID;
+
+	CREATE INDEX IF NOT EXISTS errors_parent_idx
+	ON errors(parent, path);
 	`
 
 	_, err := db.Exec(schema)
@@ -197,7 +206,7 @@ type Entry struct {
 	Summary []byte
 }
 
-func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
+func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bool) iter.Seq[Entry] {
 	return func(yield func(Entry) bool) {
 		hi := prefix + string([]byte{0xFF})
 
@@ -206,11 +215,20 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 			order = "DESC"
 		}
 
-		query := `
+		var query string
+		if !withEntry {
+			query = `
 		SELECT kind, path
 		FROM entries
 		WHERE path >= ? AND path < ?
 		`
+		} else {
+			query = `
+		SELECT kind, path, payload
+		FROM entries
+		WHERE path >= ? AND path < ?
+		`
+		}
 		args := []any{prefix, hi}
 
 		if kind != 0 {
@@ -229,13 +247,27 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 		for rows.Next() {
 			var kInt int
 			var p string
-			if err := rows.Scan(&kInt, &p); err != nil {
-				return
+			var payload []byte
+			var storedPayload []byte
+
+			if !withEntry {
+				if err := rows.Scan(&kInt, &p); err != nil {
+					return
+				}
+			} else {
+				if err := rows.Scan(&kInt, &p, &storedPayload); err != nil {
+					return
+				}
+				payload, err = s.db.Decode(storedPayload)
+				if err != nil {
+					return
+				}
 			}
 
 			if !yield(Entry{
-				Kind: EntryKind(kInt),
-				Path: p,
+				Kind:    EntryKind(kInt),
+				Path:    p,
+				Payload: payload,
 			}) {
 				return
 			}
@@ -244,15 +276,19 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool) iter.Seq[Ent
 }
 
 func (s *ScanLog) ListFiles(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindFile, prefix, reverse)
+	return s.list(KindFile, prefix, reverse, false)
 }
 
 func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindDirectory, prefix, reverse)
+	return s.list(KindDirectory, prefix, reverse, false)
 }
 
 func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(0, prefix, reverse)
+	return s.list(0, prefix, reverse, false)
+}
+
+func (s *ScanLog) ListPathnameEntries(prefix string, reverse bool) iter.Seq[Entry] {
+	return s.list(0, prefix, reverse, true)
 }
 
 func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {
@@ -306,6 +342,97 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 				Payload: payload,
 				Summary: summary,
 			}) {
+				return
+			}
+		}
+	}
+}
+
+type ErrorEntry struct {
+	Path    string
+	Payload []byte
+}
+
+func (s *ScanLog) PutError(p string, payload []byte) error {
+	parent := path.Dir(p)
+	storedPayload := s.db.Encode(payload)
+
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO errors (path, parent, payload) VALUES (?, ?, ?)`,
+		p, parent, storedPayload,
+	)
+	return err
+}
+
+func (s *ScanLog) GetError(p string) ([]byte, error) {
+	var stored []byte
+	err := s.db.QueryRow(`SELECT payload FROM errors WHERE path = ?`, p).Scan(&stored)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return s.db.Decode(stored)
+}
+
+func (s *ScanLog) ListErrorsFrom(prefix string) iter.Seq[ErrorEntry] {
+	return func(yield func(ErrorEntry) bool) {
+		hi := prefix + string([]byte{0xFF})
+
+		rows, err := s.db.Query(
+			`SELECT path, payload FROM errors WHERE path >= ? AND path < ? ORDER BY path ASC`,
+			prefix, hi,
+		)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p string
+			var storedPayload []byte
+			if err := rows.Scan(&p, &storedPayload); err != nil {
+				return
+			}
+			payload, err := s.db.Decode(storedPayload)
+			if err != nil {
+				return
+			}
+			if !yield(ErrorEntry{Path: p, Payload: payload}) {
+				return
+			}
+		}
+	}
+}
+
+func (s *ScanLog) ListDirectErrors(parent string, reverse bool) iter.Seq[ErrorEntry] {
+	return func(yield func(ErrorEntry) bool) {
+		order := "ASC"
+		if reverse {
+			order = "DESC"
+		}
+
+		rows, err := s.db.Query(
+			`SELECT path, payload FROM errors WHERE parent = ? AND parent != path ORDER BY path `+order,
+			parent,
+		)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var p string
+			var storedPayload []byte
+			if err := rows.Scan(&p, &storedPayload); err != nil {
+				return
+			}
+			payload, err := s.db.Decode(storedPayload)
+			if err != nil {
+				return
+			}
+			if !yield(ErrorEntry{Path: p, Payload: payload}) {
 				return
 			}
 		}
