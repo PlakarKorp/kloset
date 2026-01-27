@@ -113,7 +113,7 @@ func (sourceCtx *sourceContext) recordError(path string, err error) error {
 		return err
 	}
 
-	return sourceCtx.indexes.erridx.Insert(path, serialized)
+	return sourceCtx.scanLog.PutError(path, serialized)
 }
 
 func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
@@ -1001,33 +1001,8 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 
 	}
 
-	// XXX - will be removed once we switch to scanlog errors,
-	//       required for now to correctly account children in
-	//       a btree scan
-	prefix := pathname
-	if pathname != "/" {
-		prefix += "/"
-	}
-
-	erriter, err := sourceCtx.indexes.erridx.ScanFrom(prefix)
-	if err != nil {
-		return nil, err
-	}
-
-	// we need the prefix to be /
-
-	for erriter.Next() {
-		path, _ := erriter.Current()
-		if !strings.HasPrefix(path, prefix) {
-			break
-		}
-		if strings.Contains(path[len(prefix):], "/") {
-			break
-		}
+	for range sourceCtx.scanLog.ListDirectErrors(pathname, false) {
 		currentSummary.Below.Errors++
-	}
-	if err := erriter.Err(); err != nil {
-		return nil, err
 	}
 
 	currentSummary.UpdateAverages()
@@ -1197,6 +1172,15 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 	return snap.relinkNodesRecursive(sourceCtx, "/")
 }
 
+func (sourceCtx *sourceContext) buildErrorIndex() error {
+	for e := range sourceCtx.scanLog.ListErrorsFrom("/") {
+		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+			return err
+		}
+	}
+	return nil
+}
+
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
@@ -1248,6 +1232,9 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
+	if err := sourceCtx.buildErrorIndex(); err != nil {
+		return nil, nil, err
+	}
 	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
 	if err != nil {
