@@ -68,7 +68,7 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 	for _, p := range is {
 		foundPrefix := false
 		for _, m := range s.importers {
-			if pathIsWithin(p.Root(), m.Root()) {
+			if pathIsWithin(p.Root(), m.Root()) || p.Root() == m.Root() {
 				foundPrefix = true
 				break
 			}
