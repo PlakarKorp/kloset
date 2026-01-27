@@ -68,7 +68,7 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 	for _, p := range is {
 		foundPrefix := false
 		for _, m := range s.importers {
-			if pathIsWithin(p.Root(), m.Root()) {
+			if pathIsWithin(p.Root(), m.Root()) || pathEqual(p.Root(), m.Root()) {
 				foundPrefix = true
 				break
 			}
@@ -94,6 +94,13 @@ func pathIsWithin(pathname string, within string) bool {
 		return true
 	}
 	return strings.HasPrefix(cleanPath, cleanWithin+"/")
+}
+
+func pathEqual(lhs, rhs string) bool {
+	cleanPath := path.Clean(lhs)
+	cleanWithin := path.Clean(rhs)
+
+	return cleanPath == cleanWithin
 }
 
 func (s *Source) SetExcludes(excludes []string) error {
