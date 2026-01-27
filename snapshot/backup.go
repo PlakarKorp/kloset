@@ -74,23 +74,16 @@ var (
 	ErrOutOfRange = errors.New("out of range")
 )
 
-func (sourceCtx *sourceContext) batchRecordEntry(entry *vfs.Entry, serializedSummary []byte) error {
-	path := entry.Path()
-
-	bytes, err := entry.ToBytes()
-	if err != nil {
-		return err
-	}
-
+func (sourceCtx *sourceContext) batchRecordEntry(kind scanlog.EntryKind, pathname string, serializedEntry []byte, serializedSummary []byte) error {
 	sourceCtx.vfsEntLock.Lock()
 	defer sourceCtx.vfsEntLock.Unlock()
 
-	if entry.FileInfo.IsDir() {
-		if err := sourceCtx.vfsEntBatch.PutDirectory(path, bytes); err != nil {
+	if kind == scanlog.KindDirectory {
+		if err := sourceCtx.vfsEntBatch.PutDirectory(pathname, serializedEntry); err != nil {
 			return err
 		}
 	} else {
-		if err := sourceCtx.vfsEntBatch.PutFile(path, bytes, serializedSummary); err != nil {
+		if err := sourceCtx.vfsEntBatch.PutFile(pathname, serializedEntry, serializedSummary); err != nil {
 			return err
 		}
 	}
@@ -798,6 +791,11 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 
 	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
 		dirEntryMAC = cachedPath.MAC
+		serialized, err := dirEntry.ToBytes()
+		if err != nil {
+			return err
+		}
+		return sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), serialized, nil)
 	} else {
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
@@ -814,8 +812,8 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 				return err
 			}
 		}
+		return sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), serialized, nil)
 	}
-	return sourceCtx.batchRecordEntry(dirEntry, nil)
 }
 
 func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *objects.CachedPath, record *connectors.Record) error {
@@ -829,6 +827,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	}
 
 	var fileEntryMAC objects.MAC
+	var serializedFileEntry []byte
 	var err error
 
 	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
@@ -839,6 +838,10 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 		fileEntry.Chunks = cachedPath.Chunks
 		fileEntry.ContentType = cachedPath.ContentType
 		fileEntry.Entropy = cachedPath.Entropy
+		serializedFileEntry, err = fileEntry.ToBytes()
+		if err != nil {
+			return err
+		}
 	} else {
 
 		fileEntry.Chunks = meta.Chunks
@@ -861,6 +864,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 				return err
 			}
 		}
+		serializedFileEntry = serialized
 	}
 
 	fileSummary := &vfs.FileSummary{
@@ -886,7 +890,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 		return err
 	}
 
-	return sourceCtx.batchRecordEntry(fileEntry, serializedSummary)
+	return sourceCtx.batchRecordEntry(scanlog.KindFile, fileEntry.Path(), serializedFileEntry, serializedSummary)
 }
 
 func (snap *Builder) processDirectoryRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
