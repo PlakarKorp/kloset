@@ -721,8 +721,9 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 	if record.FileInfo.Mode()&os.ModeSymlink != 0 {
 		snap.emitter.SymlinkCached(record.Pathname)
 		return &objects.CachedPath{
-			MAC:      entry.MAC,
-			FileInfo: entry.FileInfo,
+			MAC:         entry.MAC,
+			FileInfo:    entry.FileInfo,
+			ContentType: "application/x-not-regular-file",
 		}, nil
 	}
 
