@@ -33,14 +33,15 @@ import (
 type sourceIndexes struct {
 	vfsidx     *btree.BTree[string, int, []byte]
 	summaryidx *btree.BTree[string, int, []byte]
-	erridx     *btree.BTree[string, int, []byte]
+	erridx     *btree.BTree[string, int, objects.MAC]
 	xattridx   *btree.BTree[string, int, []byte]
 	ctidx      *btree.BTree[string, int, objects.MAC]
 	dirpackidx *btree.BTree[string, int, objects.MAC]
 }
 
 type sourceContext struct {
-	source *Source
+	builder *Builder
+	source  *Source
 
 	vfsCache *vfs.Filesystem
 
@@ -106,7 +107,12 @@ func (sourceCtx *sourceContext) recordError(path string, err error) error {
 		return err
 	}
 
-	return sourceCtx.scanLog.PutError(path, serialized)
+	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
+	err = sourceCtx.builder.repository.PutBlobIfNotExists(resources.RT_ERROR_ENTRY, mac, serialized)
+	if err != nil {
+		return nil
+	}
+	return sourceCtx.scanLog.PutPathMAC(scanlog.KindError, path, mac)
 }
 
 func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
@@ -620,7 +626,7 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 		return nil, err
 	}
 
-	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
+	errstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "error")
 	if err != nil {
 		return nil, err
 	}
@@ -675,6 +681,7 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 	}
 
 	sourceCtx := &sourceContext{
+		builder:     snap,
 		source:      source,
 		vfsEntBatch: scanLog.NewBatch(),
 		vfsCache:    snap.vfsCache,
@@ -1006,9 +1013,11 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 
 	}
 
-	for range sourceCtx.scanLog.ListDirectErrors(pathname, false) {
-		currentSummary.Below.Errors++
+	errorsCount, err := sourceCtx.scanLog.CountDirectPathMACs(scanlog.KindError, pathname)
+	if err != nil {
+		return nil, err
 	}
+	currentSummary.Below.Errors += errorsCount
 
 	currentSummary.UpdateAverages()
 
@@ -1178,8 +1187,8 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 }
 
 func (sourceCtx *sourceContext) buildErrorIndex() error {
-	for e := range sourceCtx.scanLog.ListErrorsFrom("/") {
-		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindError, "/") {
+		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
 	}
@@ -1240,8 +1249,10 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 	if err := sourceCtx.buildErrorIndex(); err != nil {
 		return nil, nil, err
 	}
-	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
-		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
+	errcsum, err := persistIndex(snap, sourceCtx.indexes.erridx,
+		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
+			return mac, nil
+		})
 	if err != nil {
 		return nil, nil, err
 	}

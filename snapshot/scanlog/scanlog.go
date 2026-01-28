@@ -3,17 +3,24 @@ package scanlog
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"iter"
 	"path"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
+	"github.com/PlakarKorp/kloset/objects"
 )
 
 type EntryKind int
+type PathMACKind int
 
 const (
 	KindDirectory EntryKind = 1
 	KindFile      EntryKind = 2
+)
+
+const (
+	KindError PathMACKind = 1
 )
 
 type ScanBatch struct {
@@ -66,14 +73,15 @@ func createSchema(db *sqlite.SQLiteCache) error {
 	CREATE INDEX IF NOT EXISTS entries_parent_idx
 	ON entries(parent, kind, path);
 
-	CREATE TABLE IF NOT EXISTS errors (
+	CREATE TABLE IF NOT EXISTS pathmacs (
+		kind    INTEGER NOT NULL, -- 1 = errors
 		path    TEXT NOT NULL PRIMARY KEY,
 		parent  TEXT NOT NULL,
-		payload BLOB NOT NULL
+		mac     BLOB NOT NULL
 	) WITHOUT ROWID;
 
-	CREATE INDEX IF NOT EXISTS errors_parent_idx
-	ON errors(parent, path);
+	CREATE INDEX IF NOT EXISTS pathmacs_parent_idx
+	ON pathmacs(parent, path);
 	`
 
 	_, err := db.Exec(schema)
@@ -348,41 +356,45 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 	}
 }
 
-type ErrorEntry struct {
-	Path    string
-	Payload []byte
+type PathMACEntry struct {
+	Path string
+	MAC  objects.MAC
 }
 
-func (s *ScanLog) PutError(p string, payload []byte) error {
+func (s *ScanLog) PutPathMAC(kind PathMACKind, p string, mac objects.MAC) error {
 	parent := path.Dir(p)
-	storedPayload := s.db.Encode(payload)
-
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO errors (path, parent, payload) VALUES (?, ?, ?)`,
-		p, parent, storedPayload,
+		`INSERT OR REPLACE INTO pathmacs (kind, path, parent, mac) VALUES (?, ?, ?, ?)`,
+		kind, p, parent, mac[:],
 	)
 	return err
 }
 
-func (s *ScanLog) GetError(p string) ([]byte, error) {
+func (s *ScanLog) GetPathMAC(kind PathMACKind, p string) (objects.MAC, error) {
 	var stored []byte
-	err := s.db.QueryRow(`SELECT payload FROM errors WHERE path = ?`, p).Scan(&stored)
+	err := s.db.QueryRow(
+		`SELECT mac FROM pathmacs WHERE kind = ? AND path = ?`,
+		kind, p,
+	).Scan(&stored)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return objects.NilMac, nil
 		}
-		return nil, err
+		return objects.NilMac, err
 	}
-	return s.db.Decode(stored)
+	if len(stored) != 32 {
+		return objects.NilMac, fmt.Errorf("invalid MAC for path: %s", p)
+	}
+	return objects.MAC(stored[:]), nil
 }
 
-func (s *ScanLog) ListErrorsFrom(prefix string) iter.Seq[ErrorEntry] {
-	return func(yield func(ErrorEntry) bool) {
+func (s *ScanLog) ListPathMACsFrom(kind PathMACKind, prefix string) iter.Seq[PathMACEntry] {
+	return func(yield func(PathMACEntry) bool) {
 		hi := prefix + string([]byte{0xFF})
 
 		rows, err := s.db.Query(
-			`SELECT path, payload FROM errors WHERE path >= ? AND path < ? ORDER BY path ASC`,
-			prefix, hi,
+			`SELECT path, mac FROM pathmacs WHERE kind = ? AND path >= ? AND path < ? ORDER BY path ASC`,
+			kind, prefix, hi,
 		)
 		if err != nil {
 			return
@@ -391,31 +403,42 @@ func (s *ScanLog) ListErrorsFrom(prefix string) iter.Seq[ErrorEntry] {
 
 		for rows.Next() {
 			var p string
-			var storedPayload []byte
-			if err := rows.Scan(&p, &storedPayload); err != nil {
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
 				return
 			}
-			payload, err := s.db.Decode(storedPayload)
-			if err != nil {
+			if len(stored) != 32 {
 				return
 			}
-			if !yield(ErrorEntry{Path: p, Payload: payload}) {
+			if !yield(PathMACEntry{Path: p, MAC: objects.MAC(stored[:])}) {
 				return
 			}
 		}
 	}
 }
 
-func (s *ScanLog) ListDirectErrors(parent string, reverse bool) iter.Seq[ErrorEntry] {
-	return func(yield func(ErrorEntry) bool) {
+func (s *ScanLog) CountPathMACs(kind PathMACKind) (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM pathmacs WHERE kind = ?`,
+		kind,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (s *ScanLog) ListDirectPathMACs(kind PathMACKind, parent string, reverse bool) iter.Seq[PathMACEntry] {
+	return func(yield func(PathMACEntry) bool) {
 		order := "ASC"
 		if reverse {
 			order = "DESC"
 		}
 
 		rows, err := s.db.Query(
-			`SELECT path, payload FROM errors WHERE parent = ? AND parent != path ORDER BY path `+order,
-			parent,
+			`SELECT path, payload FROM pathmacs WHERE kind = ? AND parent = ? AND parent != path ORDER BY path `+order,
+			kind, parent,
 		)
 		if err != nil {
 			return
@@ -424,17 +447,28 @@ func (s *ScanLog) ListDirectErrors(parent string, reverse bool) iter.Seq[ErrorEn
 
 		for rows.Next() {
 			var p string
-			var storedPayload []byte
-			if err := rows.Scan(&p, &storedPayload); err != nil {
+			var stored []byte
+			if err := rows.Scan(&p, &stored); err != nil {
 				return
 			}
-			payload, err := s.db.Decode(storedPayload)
-			if err != nil {
+			if len(stored) != 32 {
 				return
 			}
-			if !yield(ErrorEntry{Path: p, Payload: payload}) {
+			if !yield(PathMACEntry{Path: p, MAC: objects.MAC(stored[:])}) {
 				return
 			}
 		}
 	}
+}
+
+func (s *ScanLog) CountDirectPathMACs(kind PathMACKind, parent string) (uint64, error) {
+	var n uint64
+	err := s.db.QueryRow(
+		`SELECT COUNT(1) FROM pathmacs WHERE kind = ? AND parent = ? AND parent != path`,
+		kind, parent,
+	).Scan(&n)
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
 }
