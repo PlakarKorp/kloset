@@ -100,7 +100,7 @@ func (sourceCtx *sourceContext) batchRecordEntry(kind scanlog.EntryKind, pathnam
 	return nil
 }
 
-func (sourceCtx *sourceContext) recordError(path string, err error) error {
+func (sourceCtx *sourceContext) recordError(idx int, path string, err error) error {
 	entry := vfs.NewErrorItem(path, err.Error())
 	serialized, e := entry.ToBytes()
 	if e != nil {
@@ -108,14 +108,14 @@ func (sourceCtx *sourceContext) recordError(path string, err error) error {
 	}
 
 	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
-	err = sourceCtx.builder.repository.PutBlobIfNotExists(resources.RT_ERROR_ENTRY, mac, serialized)
+	err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_ERROR_ENTRY, mac, serialized)
 	if err != nil {
 		return nil
 	}
 	return sourceCtx.scanLog.PutPathMAC(scanlog.KindError, path, mac)
 }
 
-func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
+func (sourceCtx *sourceContext) recordXattr(idx int, record *connectors.Record, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
@@ -123,7 +123,7 @@ func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC
 	}
 
 	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
-	err = sourceCtx.builder.repository.PutBlobIfNotExists(resources.RT_XATTR_ENTRY, mac, serialized)
+	err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_XATTR_ENTRY, mac, serialized)
 	if err != nil {
 		return nil
 	}
@@ -243,12 +243,12 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 						if record.Err != nil {
 							snap.emitter.Path(record.Pathname)
 							snap.emitter.PathError(record.Pathname, record.Err)
-							sourceCtx.recordError(record.Pathname, record.Err)
+							sourceCtx.recordError(idx, record.Pathname, record.Err)
 
 						} else if !snap.skipExcludedPathname(sourceCtx, record) {
 							snap.emitter.Path(record.Pathname)
 							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
-								sourceCtx.recordError(record.Pathname, err)
+								sourceCtx.recordError(idx, record.Pathname, err)
 								snap.emitter.PathError(record.Pathname, err)
 							} else {
 								snap.emitter.PathOk(record.Pathname)
@@ -929,7 +929,7 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	}
 
 	if record.IsXattr {
-		return sourceCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
+		return sourceCtx.recordXattr(idx, record, meta.ObjectMAC, meta.Size)
 	}
 
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
