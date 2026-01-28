@@ -21,6 +21,7 @@ const (
 
 const (
 	KindError PathMACKind = 1
+	KindXattr PathMACKind = 2
 )
 
 type ScanBatch struct {
@@ -74,7 +75,7 @@ func createSchema(db *sqlite.SQLiteCache) error {
 	ON entries(parent, kind, path);
 
 	CREATE TABLE IF NOT EXISTS pathmacs (
-		kind    INTEGER NOT NULL, -- 1 = errors
+		kind    INTEGER NOT NULL, -- 1 = errors, 2 = xattr
 		path    TEXT NOT NULL PRIMARY KEY,
 		parent  TEXT NOT NULL,
 		mac     BLOB NOT NULL
