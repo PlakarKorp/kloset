@@ -351,7 +351,7 @@ func (snap *Builder) Backup(source *Source) error {
 	}
 
 	/* PERSIST */
-	vfsHeader, indexes, err := snap.persistTrees(sourceCtx)
+	vfsHeader, indexes, err := snap.persistVFS(sourceCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
@@ -944,23 +944,6 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
 }
 
-func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, []header.Index, error) {
-	snap.emitter.Info("snapshot.index.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
-
-	vfsHeader, err := snap.persistVFS(sourceCtx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	indexes, err := snap.persistIndexes(sourceCtx)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return vfsHeader, indexes, nil
-}
-
 // FrameHeader is just for documentation; it is hand-de/serialized.
 type FrameHeader struct {
 	Type   uint8  // Entry type (directory, file, xattr, etc.)
@@ -1267,35 +1250,62 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	return rootSummary, nil
 }
 
-func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, error) {
+func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header.Index, error) {
+	snap.emitter.Info("snapshot.index.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
+
 	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
 			return snap.repository.ComputeMAC(data), nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := sourceCtx.buildErrorIndex(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	errcsum, err := persistIndex(snap, sourceCtx.indexes.erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := sourceCtx.buildXattrIndex(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	xattrcsum, err := persistIndex(snap, sourceCtx.indexes.xattridx,
 		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
+	}
+
+	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+			return mac, nil
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+			return mac, nil
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
+		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
+			return snap.repository.ComputeMAC(data), nil
+		})
+	if err != nil {
+		return nil, nil, err
 	}
 
 	vfsHeader := &header.VFS{
@@ -1304,35 +1314,7 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, error) {
 		Errors: errcsum,
 	}
 
-	return vfsHeader, nil
-}
-
-func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, error) {
-	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, err
-	}
-
-	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, err
-	}
-
-	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
-			return snap.repository.ComputeMAC(data), nil
-		})
-	if err != nil {
-		return nil, err
-	}
-
-	return []header.Index{
+	vfsIndexes := []header.Index{
 		{
 			Name:  "content-type",
 			Type:  "btree",
@@ -1348,5 +1330,7 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 			Type:  "btree",
 			Value: summariesmac,
 		},
-	}, nil
+	}
+
+	return vfsHeader, vfsIndexes, nil
 }

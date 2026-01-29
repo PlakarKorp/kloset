@@ -212,7 +212,7 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	}
 
 	/* PERSIST */
-	vfsHeader, indexes, err := snap.persistTrees(backupCtx)
+	vfsHeader, indexes, err := snap.persistVFS(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
