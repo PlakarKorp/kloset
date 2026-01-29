@@ -200,7 +200,7 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 	return nil
 }
 
-func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
+func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -302,11 +302,39 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 	return nil
 }
 
+func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
+	var stats scanStats
+
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
+	defer func() {
+		snap.emitter.Info("snapshot.import.done", map[string]any{
+			"nfiles": stats.nfiles,
+			"ndirs":  stats.ndirs,
+			"size":   stats.size,
+		})
+	}()
+
+	for _, imp := range sourceCtx.source.Importers() {
+		if err := snap.importSource(imp, sourceCtx, &stats); err != nil {
+			return err
+		}
+	}
+
+	// Flush any left over entries.
+	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
+		return err
+	}
+
+	sourceCtx.vfsEntBatch = nil
+	return nil
+}
+
 func (snap *Builder) Import(source *Source) error {
 	return snap.Backup(source)
 }
 
 func (snap *Builder) Backup(source *Source) error {
+	/* phase 0: setup - prepare source context and indexes */
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -315,53 +343,33 @@ func (snap *Builder) Backup(source *Source) error {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-
 	defer sourceCtx.scanLog.Close()
 
-	/* IMPORT */
-
-	snap.emitter.Info("snapshot.import.start", map[string]any{})
-
-	var stats scanStats
-	for _, imp := range sourceCtx.source.Importers() {
-		if err := snap.importerJob(imp, sourceCtx, &stats); err != nil {
-			snap.repository.PackerManager.Wait()
-			return err
-		}
-	}
-
-	snap.emitter.Info("snapshot.import.done", map[string]any{
-		"nfiles": stats.nfiles,
-		"ndirs":  stats.ndirs,
-		"size":   stats.size,
-	})
-
-	// Flush any left over entries.
-	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
+	/* phase 1: import data/metadata from source, reuse cached or store new, log to scanlog */
+	if err := snap.importerJob(sourceCtx); err != nil {
+		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	sourceCtx.vfsEntBatch = nil
-
-	/* BUILD */
+	/* phase 2: build VFS indexes from scanlog */
 	rootSummary, err := snap.buildVFS(sourceCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	/* PERSIST */
+	/* phase 3: persist indexes to store */
 	vfsHeader, indexes, err := snap.persistVFS(sourceCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
+	/* everything successful, we can record to snapshot header */
 	headerSource := source.GetHeader()
 	headerSource.VFS = *vfsHeader
 	headerSource.Summary = *rootSummary
 	headerSource.Indexes = indexes
-
 	snap.Header.Sources = append(snap.Header.Sources, headerSource)
 
 	return nil
