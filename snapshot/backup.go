@@ -33,14 +33,15 @@ import (
 type sourceIndexes struct {
 	vfsidx     *btree.BTree[string, int, []byte]
 	summaryidx *btree.BTree[string, int, []byte]
-	erridx     *btree.BTree[string, int, []byte]
-	xattridx   *btree.BTree[string, int, []byte]
+	erridx     *btree.BTree[string, int, objects.MAC]
+	xattridx   *btree.BTree[string, int, objects.MAC]
 	ctidx      *btree.BTree[string, int, objects.MAC]
 	dirpackidx *btree.BTree[string, int, objects.MAC]
 }
 
 type sourceContext struct {
-	source *Source
+	builder *Builder
+	source  *Source
 
 	vfsCache *vfs.Filesystem
 
@@ -99,24 +100,36 @@ func (sourceCtx *sourceContext) batchRecordEntry(kind scanlog.EntryKind, pathnam
 	return nil
 }
 
-func (sourceCtx *sourceContext) recordError(path string, err error) error {
+func (sourceCtx *sourceContext) recordError(idx int, path string, err error) error {
 	entry := vfs.NewErrorItem(path, err.Error())
 	serialized, e := entry.ToBytes()
 	if e != nil {
 		return err
 	}
 
-	return sourceCtx.scanLog.PutError(path, serialized)
+	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
+	err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_ERROR_ENTRY, mac, serialized)
+	if err != nil {
+		return nil
+	}
+	return sourceCtx.scanLog.PutPathMAC(scanlog.KindError, path, mac)
 }
 
-func (sourceCtx *sourceContext) recordXattr(record *connectors.Record, objectMAC objects.MAC, size int64) error {
+func (sourceCtx *sourceContext) recordXattr(idx int, record *connectors.Record, objectMAC objects.MAC, size int64) error {
 	xattr := vfs.NewXattr(record, objectMAC, size)
 	serialized, err := xattr.ToBytes()
 	if err != nil {
 		return err
 	}
 
-	return sourceCtx.indexes.xattridx.Insert(xattr.ToPath(), serialized)
+	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
+	err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_XATTR_ENTRY, mac, serialized)
+	if err != nil {
+		return nil
+	}
+	return sourceCtx.scanLog.PutPathMAC(scanlog.KindXattr, record.Pathname, mac)
+
+	//return sourceCtx.indexes.xattridx.Insert(xattr.ToPath(), serialized)
 }
 
 func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *connectors.Record) bool {
@@ -230,12 +243,12 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 						if record.Err != nil {
 							snap.emitter.Path(record.Pathname)
 							snap.emitter.PathError(record.Pathname, record.Err)
-							sourceCtx.recordError(record.Pathname, record.Err)
+							sourceCtx.recordError(idx, record.Pathname, record.Err)
 
 						} else if !snap.skipExcludedPathname(sourceCtx, record) {
 							snap.emitter.Path(record.Pathname)
 							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
-								sourceCtx.recordError(record.Pathname, err)
+								sourceCtx.recordError(idx, record.Pathname, err)
 								snap.emitter.PathError(record.Pathname, err)
 							} else {
 								snap.emitter.PathOk(record.Pathname)
@@ -620,12 +633,12 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 		return nil, err
 	}
 
-	errstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "error")
+	errstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "error")
 	if err != nil {
 		return nil, err
 	}
 
-	xattrstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "xattr")
+	xattrstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "xattr")
 	if err != nil {
 		return nil, err
 	}
@@ -675,6 +688,7 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 	}
 
 	sourceCtx := &sourceContext{
+		builder:     snap,
 		source:      source,
 		vfsEntBatch: scanLog.NewBatch(),
 		vfsCache:    snap.vfsCache,
@@ -915,7 +929,7 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	}
 
 	if record.IsXattr {
-		return sourceCtx.recordXattr(record, meta.ObjectMAC, meta.Size)
+		return sourceCtx.recordXattr(idx, record, meta.ObjectMAC, meta.Size)
 	}
 
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
@@ -1006,9 +1020,11 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 
 	}
 
-	for range sourceCtx.scanLog.ListDirectErrors(pathname, false) {
-		currentSummary.Below.Errors++
+	errorsCount, err := sourceCtx.scanLog.CountDirectPathMACs(scanlog.KindError, pathname)
+	if err != nil {
+		return nil, err
 	}
+	currentSummary.Below.Errors += errorsCount
 
 	currentSummary.UpdateAverages()
 
@@ -1178,8 +1194,17 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 }
 
 func (sourceCtx *sourceContext) buildErrorIndex() error {
-	for e := range sourceCtx.scanLog.ListErrorsFrom("/") {
-		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindError, "/") {
+		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
+			return err
+		}
+	}
+	return nil
+}
+
+func (sourceCtx *sourceContext) buildXattrIndex() error {
+	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindXattr, "/") {
+		if err := sourceCtx.indexes.xattridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
 	}
@@ -1237,15 +1262,6 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	if err := sourceCtx.buildErrorIndex(); err != nil {
-		return nil, nil, err
-	}
-	errcsum, err := persistMACIndex(snap, sourceCtx.indexes.erridx,
-		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, resources.RT_ERROR_ENTRY)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
 			return snap.repository.ComputeMAC(data), nil
@@ -1254,8 +1270,24 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	xattrcsum, err := persistMACIndex(snap, sourceCtx.indexes.xattridx,
-		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, resources.RT_XATTR_ENTRY)
+	if err := sourceCtx.buildErrorIndex(); err != nil {
+		return nil, nil, err
+	}
+	errcsum, err := persistIndex(snap, sourceCtx.indexes.erridx,
+		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
+			return mac, nil
+		})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if err := sourceCtx.buildXattrIndex(); err != nil {
+		return nil, nil, err
+	}
+	xattrcsum, err := persistIndex(snap, sourceCtx.indexes.xattridx,
+		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, func(mac objects.MAC) (objects.MAC, error) {
+			return mac, nil
+		})
 	if err != nil {
 		return nil, nil, err
 	}
