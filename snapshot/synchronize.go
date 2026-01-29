@@ -204,8 +204,15 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 		"size":   stats.size,
 	})
 
-	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
+	/* BUILD */
+	rootSummary, err := snap.buildVFS(backupCtx)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	/* PERSIST */
+	vfsHeader, indexes, err := snap.persistTrees(backupCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err

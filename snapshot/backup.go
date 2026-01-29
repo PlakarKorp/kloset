@@ -318,6 +318,8 @@ func (snap *Builder) Backup(source *Source) error {
 
 	defer sourceCtx.scanLog.Close()
 
+	/* IMPORT */
+
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 
 	var stats scanStats
@@ -341,8 +343,15 @@ func (snap *Builder) Backup(source *Source) error {
 
 	sourceCtx.vfsEntBatch = nil
 
-	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(sourceCtx)
+	/* BUILD */
+	rootSummary, err := snap.buildVFS(sourceCtx)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	/* PERSIST */
+	vfsHeader, indexes, err := snap.persistTrees(sourceCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
@@ -935,19 +944,21 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
 }
 
-func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
+func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, []header.Index, error) {
+	snap.emitter.Info("snapshot.index.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 
-	vfsHeader, summary, err := snap.persistVFS(sourceCtx)
+	vfsHeader, err := snap.persistVFS(sourceCtx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	indexes, err := snap.persistIndexes(sourceCtx)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	return vfsHeader, summary, indexes, nil
+	return vfsHeader, indexes, nil
 }
 
 // FrameHeader is just for documentation; it is hand-de/serialized.
@@ -1212,6 +1223,9 @@ func (sourceCtx *sourceContext) buildXattrIndex() error {
 }
 
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
+	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
+
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
 	}
@@ -1253,43 +1267,35 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	return rootSummary, nil
 }
 
-func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
-	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
-
-	rootSummary, err := snap.buildVFS(sourceCtx)
-	if err != nil {
-		return nil, nil, err
-	}
-
+func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, error) {
 	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
 			return snap.repository.ComputeMAC(data), nil
 		})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := sourceCtx.buildErrorIndex(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	errcsum, err := persistIndex(snap, sourceCtx.indexes.erridx,
 		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	if err := sourceCtx.buildXattrIndex(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	xattrcsum, err := persistIndex(snap, sourceCtx.indexes.xattridx,
 		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	vfsHeader := &header.VFS{
@@ -1298,13 +1304,10 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		Errors: errcsum,
 	}
 
-	return vfsHeader, rootSummary, nil
+	return vfsHeader, nil
 }
 
 func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, error) {
-	snap.emitter.Info("snapshot.index.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
-
 	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
