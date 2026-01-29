@@ -9,7 +9,7 @@ import (
 	"github.com/PlakarKorp/kloset/compression"
 )
 
-func TestDeriveKey(t *testing.T) {
+func testSetup(t *testing.T) (*Configuration, []byte) {
 	config := NewDefaultConfiguration()
 
 	salt, err := Salt()
@@ -23,6 +23,11 @@ func TestDeriveKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to derive key from passphrase: %v", err)
 	}
+	return config, key
+}
+
+func TestDeriveKey(t *testing.T) {
+	_, key := testSetup(t)
 
 	// Verify that derived key is non-nil and of expected length
 	if key == nil || len(key) != 32 {
@@ -31,19 +36,7 @@ func TestDeriveKey(t *testing.T) {
 }
 
 func TestEncryptDecryptStream(t *testing.T) {
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	config, key := testSetup(t)
 
 	// Original data to encrypt and decrypt
 	originalData := "This is a test data string for encryption and decryption"
@@ -74,20 +67,7 @@ func TestEncryptDecryptStream(t *testing.T) {
 }
 
 func TestEncryptDecryptEmptyStream(t *testing.T) {
-
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	config, key := testSetup(t)
 
 	// Original data to encrypt and decrypt
 	originalData := ""
@@ -118,19 +98,7 @@ func TestEncryptDecryptEmptyStream(t *testing.T) {
 }
 
 func TestEncryptDecryptStreamWithIncorrectKey(t *testing.T) {
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	config, key := testSetup(t)
 
 	// Original data to encrypt and decrypt
 	originalData := "Sensitive information to protect"
@@ -161,19 +129,7 @@ func TestEncryptDecryptStreamWithIncorrectKey(t *testing.T) {
 }
 
 func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	config, key := testSetup(t)
 
 	// Original data to compress, encrypt, decrypt, and decompress
 	originalData := "This is a test string for compression and encryption. It should work!"
