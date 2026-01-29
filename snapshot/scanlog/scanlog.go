@@ -72,7 +72,7 @@ func createSchema(db *sqlite.SQLiteCache) error {
 	) WITHOUT ROWID;
 
 	CREATE INDEX IF NOT EXISTS entries_parent_idx
-	ON entries(parent, kind, path);
+	ON entries(kind, parent, path);
 
 	CREATE TABLE IF NOT EXISTS pathmacs (
 		kind    INTEGER NOT NULL, -- 1 = errors, 2 = xattr
@@ -82,7 +82,9 @@ func createSchema(db *sqlite.SQLiteCache) error {
 	) WITHOUT ROWID;
 
 	CREATE INDEX IF NOT EXISTS pathmacs_parent_idx
-	ON pathmacs(parent, path);
+	ON pathmacs(kind, parent, path);
+	CREATE INDEX IF NOT EXISTS pathmacs_kind_idx
+	ON pathmacs(kind);
 	`
 
 	_, err := db.Exec(schema)
