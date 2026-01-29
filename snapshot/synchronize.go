@@ -161,6 +161,13 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
+	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
+	nErrors := dst.Header.GetSource(0).Summary.Directory.Errors + dst.Header.GetSource(0).Summary.Below.Errors
+	if nErrors != srcErrors {
+		dst.repository.PackerManager.Wait()
+		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
+	}
+
 	if !dst.builderOptions.NoCommit {
 		return dst.Commit()
 	} else {
@@ -221,13 +228,6 @@ func (snap *Builder) ingestSync(imp *syncImporter) error {
 	snap.Header.GetSource(0).VFS = *vfsHeader
 	snap.Header.GetSource(0).Summary = *rootSummary
 	snap.Header.GetSource(0).Indexes = indexes
-
-	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
-	nErrors := snap.Header.GetSource(0).Summary.Directory.Errors + snap.Header.GetSource(0).Summary.Below.Errors
-	if nErrors != srcErrors {
-		snap.repository.PackerManager.Wait()
-		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
-	}
 
 	return nil
 }
