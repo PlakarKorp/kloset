@@ -398,7 +398,7 @@ func entropy(data []byte) (float64, [256]float64) {
 	return entropy, freq
 }
 
-func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, rd io.Reader) (objects.MAC, error) {
+func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Reader) (objects.MAC, error) {
 	object := objects.NewObject()
 
 	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
@@ -427,7 +427,7 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, rd io.Reader) (objec
 		// It's safe to pin to 0 here, we are not chunkifying files
 		// concurrently so there will be no interleaving, and that means we get
 		// the dirpack's chunk and Object entries in a sequence.
-		return snap.repository.PutBlobIfNotExistsWithHint(0, resources.RT_CHUNK, chunk.ContentMAC, data)
+		return snap.repository.PutBlobIfNotExistsWithHint(chkId, resources.RT_CHUNK, chunk.ContentMAC, data)
 	}
 
 	chk.Reset(rd)
@@ -473,7 +473,7 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, rd io.Reader) (objec
 	// chunkify has only PutBlobWithHint() because the Exists() test is done
 	// _beforehand_, in the dirpack case we do not do the caching layer at all
 	// so we need to do the deduplication here.
-	if err := snap.repository.PutBlobIfNotExistsWithHint(0, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+	if err := snap.repository.PutBlobIfNotExistsWithHint(chkId, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
 		return objects.MAC{}, err
 	}
 
@@ -1019,7 +1019,6 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 		default:
 			return nil, fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
 		}
-
 	}
 
 	errorsCount, err := sourceCtx.scanLog.CountDirectPathMACs(scanlog.KindError, pathname)
@@ -1063,61 +1062,116 @@ func (sourceCtx *sourceContext) buildSummaries(builder *Builder, directories []s
 	return rootSummary, nil
 }
 
-func (sourceCtx *sourceContext) buildDirpack(builder *Builder, pathname string) error {
-	chunker, err := builder.repository.Chunker(nil)
-	if err != nil {
-		return err
-	}
-
+func (sourceCtx *sourceContext) buildDirpack(builder *Builder, chunker *chunkers.Chunker, chkId int, pathname string) (objects.MAC, error) {
 	pr, pw := io.Pipe()
 	resCh := make(chan chunkifyResult, 1)
 
 	go func() {
-		mac, err := builder.chunkifyDirpack(chunker, pr)
+		mac, err := builder.chunkifyDirpack(chunker, chkId, pr)
 		resCh <- chunkifyResult{mac: mac, err: err}
 	}()
 
 	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
 		if err := builder.AppContext().Err(); err != nil {
 			pw.CloseWithError(err)
-			return err
+			return objects.NilMac, err
 		}
 		switch e.Kind {
 		case scanlog.KindFile:
 			if err := writeFrame(builder, pw, TypeVFSFile, e.Payload); err != nil {
 				pw.CloseWithError(err)
-				return err
+				return objects.NilMac, err
 			}
 		case scanlog.KindDirectory:
 			if err := writeFrame(builder, pw, TypeVFSDirectory, e.Payload); err != nil {
 				pw.CloseWithError(err)
-				return err
+				return objects.NilMac, err
 			}
 
 		default:
 			err := fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
 			pw.CloseWithError(err)
-			return err
+			return objects.NilMac, err
 		}
 	}
 
 	pw.Close()
 	res := <-resCh
 	if res.err != nil {
-		return fmt.Errorf("chunkify failed for %s: %w", pathname, res.err)
+		return objects.NilMac, fmt.Errorf("chunkify failed for %s: %w", pathname, res.err)
 	}
 
-	if err := sourceCtx.indexes.dirpackidx.Insert(pathname, res.mac); err != nil {
-		return err
-	}
-
-	return nil
+	return res.mac, nil
 }
 
 func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []string) error {
-	for _, directory := range directories {
-		err := sourceCtx.buildDirpack(builder, directory)
+	type directoryRequest struct {
+		directory string
+		idx       int
+	}
+	macs := make([]objects.MAC, len(directories))
+	directoriesChan := make(chan directoryRequest, builder.AppContext().MaxConcurrency*2)
+
+	// setup chunkers
+	var ckers []*chunkers.Chunker
+	for range builder.AppContext().MaxConcurrency {
+		cker, err := builder.repository.Chunker(nil)
 		if err != nil {
+			return err
+		}
+		ckers = append(ckers, cker)
+	}
+
+	g, ctx := errgroup.WithContext(builder.AppContext())
+
+	// emit directory processing requests, provide idx so that the workers can update
+	// the macs array with an immediate access regardless of their execution order...
+	g.Go(func() error {
+		defer close(directoriesChan)
+		for idx, directory := range directories {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case directoriesChan <- directoryRequest{directory: directory, idx: idx}:
+			}
+		}
+		return nil
+	})
+
+	// compute multiple dirpacks concurrently, each one is pegged to a chunker
+	for i, cker := range ckers {
+		ck := cker
+		cIdx := i
+
+		g.Go(func() error {
+			for {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+
+				case req, ok := <-directoriesChan:
+					if !ok {
+						return nil
+					}
+
+					mac, err := sourceCtx.buildDirpack(builder, ck, cIdx, req.directory)
+					if err != nil {
+						return err
+					}
+
+					// lock-safe: each idx written exactly once
+					macs[req.idx] = mac
+				}
+			}
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	for idx, directory := range directories {
+		if err := sourceCtx.indexes.dirpackidx.Insert(directory, macs[idx]); err != nil {
 			return err
 		}
 	}
