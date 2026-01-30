@@ -1262,64 +1262,103 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	snap.emitter.Info("snapshot.index.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 
-	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
-		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
-			return snap.repository.ComputeMAC(data), nil
-		})
-	if err != nil {
-		return nil, nil, err
-	}
+	var (
+		rootmac      objects.MAC
+		errmac       objects.MAC
+		xattrmac     objects.MAC
+		ctmac        objects.MAC
+		dirpackmac   objects.MAC
+		summariesmac objects.MAC
+	)
 
-	if err := sourceCtx.buildErrorIndex(); err != nil {
-		return nil, nil, err
-	}
-	errcsum, err := persistIndex(snap, sourceCtx.indexes.erridx,
-		resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, nil, err
-	}
+	g, _ := errgroup.WithContext(snap.AppContext())
 
-	if err := sourceCtx.buildXattrIndex(); err != nil {
-		return nil, nil, err
-	}
-	xattrcsum, err := persistIndex(snap, sourceCtx.indexes.xattridx,
-		resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, nil, err
-	}
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
+			resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
+				return snap.repository.ComputeMAC(data), nil
+			})
+		if err != nil {
+			return err
+		}
+		rootmac = m
+		return nil
+	})
 
-	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, nil, err
-	}
+	g.Go(func() error {
+		if err := sourceCtx.buildErrorIndex(); err != nil {
+			return err
+		}
+		m, err := persistIndex(snap, sourceCtx.indexes.erridx,
+			resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
+			})
+		if err != nil {
+			return err
+		}
+		errmac = m
+		return nil
+	})
 
-	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
-			return mac, nil
-		})
-	if err != nil {
-		return nil, nil, err
-	}
+	g.Go(func() error {
+		if err := sourceCtx.buildXattrIndex(); err != nil {
+			return err
+		}
+		m, err := persistIndex(snap, sourceCtx.indexes.xattridx,
+			resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
+			})
+		if err != nil {
+			return err
+		}
+		xattrmac = m
+		return nil
+	})
 
-	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
-		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
-			return snap.repository.ComputeMAC(data), nil
-		})
-	if err != nil {
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.ctidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
+			})
+		if err != nil {
+			return err
+		}
+		ctmac = m
+		return nil
+	})
+
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
+			})
+		if err != nil {
+			return err
+		}
+		dirpackmac = m
+		return nil
+	})
+
+	g.Go(func() error {
+		m, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
+				return snap.repository.ComputeMAC(data), nil
+			})
+		if err != nil {
+			return err
+		}
+		summariesmac = m
+		return nil
+	})
+
+	if err := g.Wait(); err != nil {
 		return nil, nil, err
 	}
 
 	vfsHeader := &header.VFS{
-		Root:   rootcsum,
-		Xattrs: xattrcsum,
-		Errors: errcsum,
+		Root:   rootmac,
+		Xattrs: xattrmac,
+		Errors: errmac,
 	}
 
 	vfsIndexes := []header.Index{
