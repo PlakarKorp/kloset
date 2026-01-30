@@ -73,6 +73,9 @@ func createSchema(db *sqlite.SQLiteCache) error {
 
 	CREATE INDEX IF NOT EXISTS entries_parent_idx
 	ON entries(kind, parent, path);
+	CREATE INDEX IF NOT EXISTS entries_parent_path_idx
+	ON entries(parent, path);
+
 
 	CREATE TABLE IF NOT EXISTS pathmacs (
 		kind    INTEGER NOT NULL, -- 1 = errors, 2 = xattr
