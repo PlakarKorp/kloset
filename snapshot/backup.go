@@ -1312,10 +1312,6 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 		return nil
 	})
 
-	if err := g.Wait(); err != nil {
-		return nil, err
-	}
-
 	g.Go(func() error {
 		return sourceCtx.buildDirpacks(snap, dirPaths)
 	})
