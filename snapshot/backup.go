@@ -200,7 +200,7 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 	return nil
 }
 
-func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
+func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -302,11 +302,39 @@ func (snap *Builder) importerJob(imp importer.Importer, sourceCtx *sourceContext
 	return nil
 }
 
+func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
+	var stats scanStats
+
+	snap.emitter.Info("snapshot.import.start", map[string]any{})
+	defer func() {
+		snap.emitter.Info("snapshot.import.done", map[string]any{
+			"nfiles": stats.nfiles,
+			"ndirs":  stats.ndirs,
+			"size":   stats.size,
+		})
+	}()
+
+	for _, imp := range sourceCtx.source.Importers() {
+		if err := snap.importSource(imp, sourceCtx, &stats); err != nil {
+			return err
+		}
+	}
+
+	// Flush any left over entries.
+	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
+		return err
+	}
+
+	sourceCtx.vfsEntBatch = nil
+	return nil
+}
+
 func (snap *Builder) Import(source *Source) error {
 	return snap.Backup(source)
 }
 
 func (snap *Builder) Backup(source *Source) error {
+	/* phase 0: setup - prepare source context and indexes */
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -315,44 +343,33 @@ func (snap *Builder) Backup(source *Source) error {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
-
 	defer sourceCtx.scanLog.Close()
 
-	snap.emitter.Info("snapshot.import.start", map[string]any{})
-
-	var stats scanStats
-	for _, imp := range sourceCtx.source.Importers() {
-		if err := snap.importerJob(imp, sourceCtx, &stats); err != nil {
-			snap.repository.PackerManager.Wait()
-			return err
-		}
-	}
-
-	snap.emitter.Info("snapshot.import.done", map[string]any{
-		"nfiles": stats.nfiles,
-		"ndirs":  stats.ndirs,
-		"size":   stats.size,
-	})
-
-	// Flush any left over entries.
-	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
+	/* phase 1: import data/metadata from source, reuse cached or store new, log to scanlog */
+	if err := snap.importerJob(sourceCtx); err != nil {
+		snap.repository.PackerManager.Wait()
 		return err
 	}
 
-	sourceCtx.vfsEntBatch = nil
-
-	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(sourceCtx)
+	/* phase 2: build VFS indexes from scanlog */
+	rootSummary, err := snap.buildVFS(sourceCtx)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
 
+	/* phase 3: persist indexes to store */
+	vfsHeader, indexes, err := snap.persistVFS(sourceCtx)
+	if err != nil {
+		snap.repository.PackerManager.Wait()
+		return err
+	}
+
+	/* everything successful, we can record to snapshot header */
 	headerSource := source.GetHeader()
 	headerSource.VFS = *vfsHeader
 	headerSource.Summary = *rootSummary
 	headerSource.Indexes = indexes
-
 	snap.Header.Sources = append(snap.Header.Sources, headerSource)
 
 	return nil
@@ -935,21 +952,6 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 	return snap.writeFileEntry(idx, sourceCtx, meta, cachedPath, record)
 }
 
-func (snap *Builder) persistTrees(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, []header.Index, error) {
-
-	vfsHeader, summary, err := snap.persistVFS(sourceCtx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	indexes, err := snap.persistIndexes(sourceCtx)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-
-	return vfsHeader, summary, indexes, nil
-}
-
 // FrameHeader is just for documentation; it is hand-de/serialized.
 type FrameHeader struct {
 	Type   uint8  // Entry type (directory, file, xattr, etc.)
@@ -1212,6 +1214,9 @@ func (sourceCtx *sourceContext) buildXattrIndex() error {
 }
 
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
+	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
+
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
 	}
@@ -1253,14 +1258,9 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	return rootSummary, nil
 }
 
-func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Summary, error) {
-	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
-
-	rootSummary, err := snap.buildVFS(sourceCtx)
-	if err != nil {
-		return nil, nil, err
-	}
+func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header.Index, error) {
+	snap.emitter.Info("snapshot.index.start", map[string]any{})
+	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 
 	rootcsum, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
 		resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
@@ -1292,25 +1292,12 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, *vfs.Sum
 		return nil, nil, err
 	}
 
-	vfsHeader := &header.VFS{
-		Root:   rootcsum,
-		Xattrs: xattrcsum,
-		Errors: errcsum,
-	}
-
-	return vfsHeader, rootSummary, nil
-}
-
-func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, error) {
-	snap.emitter.Info("snapshot.index.start", map[string]any{})
-	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
-
 	ctmac, err := persistIndex(snap, sourceCtx.indexes.ctidx,
 		resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 			return mac, nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	dirpackmac, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
@@ -1318,7 +1305,7 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 			return mac, nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	summariesmac, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
@@ -1326,10 +1313,16 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 			return snap.repository.ComputeMAC(data), nil
 		})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return []header.Index{
+	vfsHeader := &header.VFS{
+		Root:   rootcsum,
+		Xattrs: xattrcsum,
+		Errors: errcsum,
+	}
+
+	vfsIndexes := []header.Index{
 		{
 			Name:  "content-type",
 			Type:  "btree",
@@ -1345,5 +1338,7 @@ func (snap *Builder) persistIndexes(sourceCtx *sourceContext) ([]header.Index, e
 			Type:  "btree",
 			Value: summariesmac,
 		},
-	}, nil
+	}
+
+	return vfsHeader, vfsIndexes, nil
 }

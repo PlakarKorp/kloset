@@ -135,16 +135,17 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	// not in a backup.
 	dst.noSkipSelf = true
 	imp := &syncImporter{
-		root:   "/",
-		typ:    "sync",
-		origin: fmt.Sprintf("%s-%s-%x", uuid.NewString(), src.repository.Configuration().RepositoryID, src.Header.Identifier),
+		root: src.Header.GetSource(0).Importer.Directory,
+		typ:  src.Header.GetSource(0).Importer.Type,
+		//origin: fmt.Sprintf("%s-%s-%x", uuid.NewString(), src.repository.Configuration().RepositoryID, src.Header.Identifier),
+		origin: src.Header.GetSource(0).Importer.Origin,
 		fs:     fs,
 		src:    src,
 	}
 
-	dst.Header.GetSource(0).Importer.Directory = src.Header.GetSource(0).Importer.Directory
-	dst.Header.GetSource(0).Importer.Origin = src.Header.GetSource(0).Importer.Origin
-	dst.Header.GetSource(0).Importer.Type = src.Header.GetSource(0).Importer.Type
+	dst.Header = src.Header
+	dst.Header.Sources = nil
+
 	dst.Header.Timestamp = src.Header.Timestamp
 	dst.Header.Duration = src.Header.Duration
 	dst.Header.Name = src.Header.Name
@@ -157,8 +158,20 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	dst.Header.Tags = src.Header.Tags
 	dst.Header.Context = src.Header.Context
 
-	if err := dst.ingestSync(imp); err != nil {
+	source, err := NewSource(dst.AppContext(), 0, imp)
+	if err != nil {
 		return err
+	}
+
+	if err := dst.Import(source); err != nil {
+		return err
+	}
+
+	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
+	nErrors := dst.Header.GetSource(0).Summary.Directory.Errors + dst.Header.GetSource(0).Summary.Below.Errors
+	if nErrors != srcErrors {
+		dst.repository.PackerManager.Wait()
+		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
 	}
 
 	if !dst.builderOptions.NoCommit {
@@ -167,60 +180,4 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		_, err := dst.PutSnapshot()
 		return err
 	}
-}
-
-func (snap *Builder) ingestSync(imp *syncImporter) error {
-	emitter := snap.Emitter("sync")
-	defer emitter.Close()
-
-	source, err := NewSource(snap.AppContext(), 0, imp)
-	if err != nil {
-		return err
-	}
-
-	backupCtx, err := snap.prepareSourceContext(source)
-	if backupCtx != nil {
-		defer backupCtx.indexes.Close(snap.Logger())
-	}
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	defer backupCtx.scanLog.Close()
-
-	/* importer */
-	snap.emitter.Info("snapshot.import.start", map[string]any{})
-
-	var stats scanStats
-	if err := snap.importerJob(imp, backupCtx, &stats); err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	snap.emitter.Info("snapshot.import.done", map[string]any{
-		"nfiles": stats.nfiles,
-		"ndirs":  stats.ndirs,
-		"size":   stats.size,
-	})
-
-	/* tree builders */
-	vfsHeader, rootSummary, indexes, err := snap.persistTrees(backupCtx)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return err
-	}
-
-	snap.Header.GetSource(0).VFS = *vfsHeader
-	snap.Header.GetSource(0).Summary = *rootSummary
-	snap.Header.GetSource(0).Indexes = indexes
-
-	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
-	nErrors := snap.Header.GetSource(0).Summary.Directory.Errors + snap.Header.GetSource(0).Summary.Below.Errors
-	if nErrors != srcErrors {
-		snap.repository.PackerManager.Wait()
-		return fmt.Errorf("synchronization failed: source errors %d, destination errors %d", srcErrors, nErrors)
-	}
-
-	return nil
 }
