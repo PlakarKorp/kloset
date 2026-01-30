@@ -1046,7 +1046,24 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 	return currentSummary, nil
 }
 
-func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, pathname string) error {
+func (sourceCtx *sourceContext) buildSummaries(builder *Builder, directories []string) (*vfs.Summary, error) {
+	var rootSummary *vfs.Summary
+	for _, directory := range directories {
+		summary, err := sourceCtx.buildSummary(builder, directory)
+		if err != nil {
+			return nil, err
+		}
+		if directory == "/" {
+			rootSummary = summary
+		}
+	}
+	if rootSummary == nil {
+		return nil, fmt.Errorf("failed to build root summary !")
+	}
+	return rootSummary, nil
+}
+
+func (sourceCtx *sourceContext) buildDirpack(builder *Builder, pathname string) error {
 	chunker, err := builder.repository.Chunker(nil)
 	if err != nil {
 		return err
@@ -1097,18 +1114,14 @@ func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, pathname string)
 	return nil
 }
 
-func (sourceCtx *sourceContext) processChildren(builder *Builder, pathname string) (*vfs.Summary, error) {
-	summary, err := sourceCtx.buildSummary(builder, pathname)
-	if err != nil {
-		return nil, err
+func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []string) error {
+	for _, directory := range directories {
+		err := sourceCtx.buildDirpack(builder, directory)
+		if err != nil {
+			return err
+		}
 	}
-
-	err = sourceCtx.buildDirpacks(builder, pathname)
-	if err != nil {
-		return nil, err
-	}
-
-	return summary, nil
+	return nil
 }
 
 // writeFrame writes a directory entry for dirpack.  Each entry is
@@ -1235,21 +1248,22 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 
 	var rootSummary *vfs.Summary
 
-	for _, pathname := range dirPaths {
-		if err := snap.AppContext().Err(); err != nil {
-			return nil, err
+	g, _ := errgroup.WithContext(snap.AppContext())
+	g.Go(func() error {
+		summary, err := sourceCtx.buildSummaries(snap, dirPaths)
+		if err != nil {
+			return err
 		}
+		rootSummary = summary
+		return nil
+	})
 
-		if summary, err := sourceCtx.processChildren(snap, pathname); err != nil {
-			return nil, err
-		} else {
-			if pathname == "/" {
-				if rootSummary != nil {
-					return nil, fmt.Errorf("importer yield a double root!")
-				}
-				rootSummary = summary
-			}
-		}
+	g.Go(func() error {
+		return sourceCtx.buildDirpacks(snap, dirPaths)
+	})
+
+	if err := g.Wait(); err != nil {
+		return nil, err
 	}
 
 	if rootSummary == nil {
