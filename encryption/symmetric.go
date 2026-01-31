@@ -112,8 +112,8 @@ type PBKDF2Params struct {
 	Hashing    string
 }
 
-func NewDefaultConfiguration() *Configuration {
-	kdfParams, err := NewDefaultKDFParams(DEFAULT_KDF)
+func NewConfiguration(hashing string) *Configuration {
+	kdfParams, err := NewDefaultKDFParams(hashing)
 	if err != nil {
 		panic(err)
 	}
@@ -124,6 +124,10 @@ func NewDefaultConfiguration() *Configuration {
 		ChunkSize:       chunkSize,
 		KDFParams:       *kdfParams,
 	}
+}
+
+func NewDefaultConfiguration() *Configuration {
+	return NewConfiguration(DEFAULT_KDF)
 }
 
 func Salt() (salt []byte, err error) {

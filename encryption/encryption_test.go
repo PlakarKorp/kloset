@@ -9,8 +9,13 @@ import (
 	"github.com/PlakarKorp/kloset/compression"
 )
 
-func TestDeriveKey(t *testing.T) {
-	config := NewDefaultConfiguration()
+type SymmetricParams struct {
+	config *Configuration
+	key    []byte
+}
+
+func testSetup(t *testing.T, hashing string) SymmetricParams {
+	config := NewConfiguration(hashing)
 
 	salt, err := Salt()
 	if err != nil {
@@ -24,39 +29,42 @@ func TestDeriveKey(t *testing.T) {
 		t.Fatalf("Failed to derive key from passphrase: %v", err)
 	}
 
-	// Verify that derived key is non-nil and of expected length
-	if key == nil || len(key) != 32 {
-		t.Errorf("Unexpected derived key length. Got %d, want 32", len(key))
+	params := SymmetricParams{config, key}
+	return params
+}
+
+func TestDeriveKey(t *testing.T) {
+	testCases := []SymmetricParams{
+		testSetup(t, DEFAULT_KDF),
+		testSetup(t, "SCRYPT"),
+		testSetup(t, "PBKDF2"),
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.config.KDFParams.KDF, func(t *testing.T) {
+			// Verify that derived key is non-nil and of expected length
+			if tc.key == nil || len(tc.key) != 32 {
+				t.Errorf("Unexpected derived key length. Got %d, want 32", len(tc.key))
+			}
+		})
 	}
 }
 
 func TestEncryptDecryptStream(t *testing.T) {
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	params := testSetup(t, DEFAULT_KDF)
 
 	// Original data to encrypt and decrypt
 	originalData := "This is a test data string for encryption and decryption"
 	r := strings.NewReader(originalData)
 
 	// Encrypt the data
-	encryptedReader, err := EncryptStream(config, key, r)
+	encryptedReader, err := EncryptStream(params.config, params.key, r)
 	if err != nil {
 		t.Fatalf("Failed to encrypt data: %v", err)
 	}
 
 	// Decrypt the data
-	decryptedReader, err := DecryptStream(config, key, io.NopCloser(encryptedReader))
+	decryptedReader, err := DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
 	if err != nil {
 		t.Fatalf("Failed to decrypt data: %v", err)
 	}
@@ -74,33 +82,20 @@ func TestEncryptDecryptStream(t *testing.T) {
 }
 
 func TestEncryptDecryptEmptyStream(t *testing.T) {
-
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	params := testSetup(t, DEFAULT_KDF)
 
 	// Original data to encrypt and decrypt
 	originalData := ""
 	r := strings.NewReader(originalData)
 
 	// Encrypt the data
-	encryptedReader, err := EncryptStream(config, key, r)
+	encryptedReader, err := EncryptStream(params.config, params.key, r)
 	if err != nil {
 		t.Fatalf("Failed to encrypt data: %v", err)
 	}
 
 	// Decrypt the data
-	decryptedReader, err := DecryptStream(config, key, io.NopCloser(encryptedReader))
+	decryptedReader, err := DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
 	if err != nil {
 		t.Fatalf("Failed to decrypt data: %v", err)
 	}
@@ -118,38 +113,26 @@ func TestEncryptDecryptEmptyStream(t *testing.T) {
 }
 
 func TestEncryptDecryptStreamWithIncorrectKey(t *testing.T) {
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	params := testSetup(t, DEFAULT_KDF)
 
 	// Original data to encrypt and decrypt
 	originalData := "Sensitive information to protect"
 	r := strings.NewReader(originalData)
 
 	// Encrypt the data
-	encryptedReader, err := EncryptStream(config, key, r)
+	encryptedReader, err := EncryptStream(params.config, params.key, r)
 	if err != nil {
 		t.Fatalf("Failed to encrypt data: %v", err)
 	}
 
 	// Generate an incorrect key for decryption
-	incorrectKey := make([]byte, len(key))
+	incorrectKey := make([]byte, len(params.key))
 	if _, err := rand.Read(incorrectKey); err != nil {
 		t.Fatalf("Failed to generate incorrect decryption key: %v", err)
 	}
 
 	// Attempt to decrypt the data with the incorrect key
-	decryptedReader, err := DecryptStream(config, incorrectKey, io.NopCloser(encryptedReader))
+	decryptedReader, err := DecryptStream(params.config, incorrectKey, io.NopCloser(encryptedReader))
 	if err == nil {
 		// Attempt to read the (likely) invalid decrypted data to trigger an error
 		if _, readErr := io.ReadAll(decryptedReader); readErr == nil {
@@ -161,19 +144,7 @@ func TestEncryptDecryptStreamWithIncorrectKey(t *testing.T) {
 }
 
 func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
-	config := NewDefaultConfiguration()
-
-	salt, err := Salt()
-	if err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
+	params := testSetup(t, DEFAULT_KDF)
 
 	// Original data to compress, encrypt, decrypt, and decompress
 	originalData := "This is a test string for compression and encryption. It should work!"
@@ -186,13 +157,13 @@ func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
 	}
 
 	// Step 2: Encrypt the compressed data
-	encryptedReader, err := EncryptStream(config, key, compressedReader)
+	encryptedReader, err := EncryptStream(params.config, params.key, compressedReader)
 	if err != nil {
 		t.Fatalf("Failed to encrypt data: %v", err)
 	}
 
 	// Step 3: Decrypt the data
-	decryptedReader, err := DecryptStream(config, key, io.NopCloser(encryptedReader))
+	decryptedReader, err := DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
 	if err != nil {
 		t.Fatalf("Failed to decrypt data: %v", err)
 	}
