@@ -304,6 +304,11 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 }
 
 func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "importer job took %s", time.Since(t0))
+	}()
+
 	var stats scanStats
 
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
@@ -1047,6 +1052,12 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 }
 
 func (sourceCtx *sourceContext) buildSummaries(builder *Builder, directories []string) (*vfs.Summary, error) {
+	itemsCount := 0
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "building summary index took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
 	var rootSummary *vfs.Summary
 	for _, directory := range directories {
 		summary, err := sourceCtx.buildSummary(builder, directory)
@@ -1056,6 +1067,7 @@ func (sourceCtx *sourceContext) buildSummaries(builder *Builder, directories []s
 		if directory == "/" {
 			rootSummary = summary
 		}
+		itemsCount++
 	}
 	if rootSummary == nil {
 		return nil, fmt.Errorf("failed to build root summary !")
@@ -1106,6 +1118,12 @@ func (sourceCtx *sourceContext) buildDirpack(builder *Builder, chunker *chunkers
 }
 
 func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []string) error {
+	itemsCount := 0
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "building dirpack index took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
 	type directoryRequest struct {
 		directory string
 		idx       int
@@ -1135,6 +1153,7 @@ func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []st
 				return ctx.Err()
 			case directoriesChan <- directoryRequest{directory: directory, idx: idx}:
 			}
+			itemsCount++
 		}
 		return nil
 	})
@@ -1246,6 +1265,13 @@ func (snap *Builder) relinkNodesRecursive(sourceCtx *sourceContext, pathname str
 }
 
 func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
+	var itemsCount uint64
+
+	t0 := time.Now()
+	defer func() {
+		snap.appContext.GetLogger().Trace("import", "relinking nodes took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
 	var missingMap = make(map[string]struct{})
 
 	for e := range sourceCtx.scanLog.ListPathnames("/", true) {
@@ -1257,6 +1283,7 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 		if err := snap.relinkNodesRecursive(sourceCtx, missingDir); err != nil {
 			return err
 		}
+		itemsCount++
 		delete(missingMap, missingDir)
 	}
 
@@ -1264,48 +1291,84 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 }
 
 func (sourceCtx *sourceContext) buildErrorIndex() error {
+	itemsCount := 0
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "building error index took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
 	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindError, "/") {
 		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
+		itemsCount++
 	}
 	return nil
 }
 
 func (sourceCtx *sourceContext) buildXattrIndex() error {
+	itemsCount := 0
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "building xattr index took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
 	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindXattr, "/") {
 		if err := sourceCtx.indexes.xattridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
+		itemsCount++
 	}
 	return nil
 }
 
+func (sourceCtx *sourceContext) buildVFSIndex() ([]string, error) {
+	itemsCount := 0
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "building vfs index took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
+	directories := make([]string, 0)
+	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
+		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+			return nil, err
+		}
+		if e.Kind == scanlog.KindDirectory {
+			directories = append(directories, e.Path)
+		}
+		itemsCount++
+	}
+	return directories, nil
+}
+
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "build VFS took %s", time.Since(t0))
+	}()
+
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
+	/* relinking must happen before anything else so we guarantee there are no orphan pathnames */
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
 	}
 
 	// stabilize order of vfsidx inserts early so we can unlock concurrency later
 	// on a 1.000.000 korpus, this takes roughly 2s
-	dirPaths := make([]string, 0)
-	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
-		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
-			return nil, err
-		}
-		if e.Kind == scanlog.KindDirectory {
-			dirPaths = append(dirPaths, e.Path)
-		}
+	// /!\ this can't be parallelized with other indexes and must finish first !
+	directories, err := sourceCtx.buildVFSIndex()
+	if err != nil {
+		return nil, err
 	}
 
 	var rootSummary *vfs.Summary
 
 	g, _ := errgroup.WithContext(snap.AppContext())
 	g.Go(func() error {
-		summary, err := sourceCtx.buildSummaries(snap, dirPaths)
+		summary, err := sourceCtx.buildSummaries(snap, directories)
 		if err != nil {
 			return err
 		}
@@ -1314,7 +1377,15 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	})
 
 	g.Go(func() error {
-		return sourceCtx.buildDirpacks(snap, dirPaths)
+		return sourceCtx.buildDirpacks(snap, directories)
+	})
+
+	g.Go(func() error {
+		return sourceCtx.buildErrorIndex()
+	})
+
+	g.Go(func() error {
+		return sourceCtx.buildXattrIndex()
 	})
 
 	if err := g.Wait(); err != nil {
@@ -1328,6 +1399,11 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 }
 
 func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header.Index, error) {
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "persistVFS took %s", time.Since(t0))
+	}()
+
 	snap.emitter.Info("snapshot.index.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.index.end", map[string]any{})
 
@@ -1343,6 +1419,10 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	g, _ := errgroup.WithContext(snap.AppContext())
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting vfs index took %s", time.Since(t0))
+		}()
 		m, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
 			resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
 				return snap.repository.ComputeMAC(data), nil
@@ -1355,9 +1435,11 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	})
 
 	g.Go(func() error {
-		if err := sourceCtx.buildErrorIndex(); err != nil {
-			return err
-		}
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting error index took %s", time.Since(t0))
+		}()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.erridx,
 			resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, func(mac objects.MAC) (objects.MAC, error) {
 				return mac, nil
@@ -1370,9 +1452,11 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	})
 
 	g.Go(func() error {
-		if err := sourceCtx.buildXattrIndex(); err != nil {
-			return err
-		}
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting xattr index took %s", time.Since(t0))
+		}()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.xattridx,
 			resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, func(mac objects.MAC) (objects.MAC, error) {
 				return mac, nil
@@ -1385,6 +1469,11 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	})
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting content-types index took %s", time.Since(t0))
+		}()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.ctidx,
 			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 				return mac, nil
@@ -1397,6 +1486,11 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	})
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting dirpack index took %s", time.Since(t0))
+		}()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.dirpackidx,
 			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
 				return mac, nil
@@ -1409,6 +1503,11 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	})
 
 	g.Go(func() error {
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting summary index took %s", time.Since(t0))
+		}()
+
 		m, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
 			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
 				return snap.repository.ComputeMAC(data), nil
