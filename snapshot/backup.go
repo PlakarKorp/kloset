@@ -168,6 +168,7 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 		}
 	} else if record.FileInfo.Mode().IsDir() {
 		atomic.AddUint64(&stats.ndirs, +1)
+		snap.emitter.Directory(record.Pathname)
 		if err := snap.processDirectoryRecord(idx, sourceCtx, record, chunker); err != nil {
 			snap.emitter.DirectoryError(record.Pathname, err)
 			return err
