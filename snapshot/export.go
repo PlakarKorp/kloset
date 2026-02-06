@@ -2,11 +2,14 @@ package snapshot
 
 import (
 	"io"
+	"os"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/exporter"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
@@ -75,6 +78,15 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	}()
 
 	go func() {
+		// We are a single file, let's emit the root dir to create the parent
+		// dir if any.
+		if !entry.IsDir() {
+			records <- connectors.NewRecord("/", "", objects.FileInfo{Lname: "/", Lmode: 0700 | os.ModeDir, LmodTime: time.Now()}, nil,
+				func() (io.ReadCloser, error) {
+					return nil, nil
+				})
+		}
+
 		i := 0
 		pvfs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 			if i%1000 == 0 {
