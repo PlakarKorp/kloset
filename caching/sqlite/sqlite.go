@@ -8,7 +8,7 @@ import (
 	"path"
 
 	"github.com/golang/snappy"
-	_ "github.com/mattn/go-sqlite3"
+	_ "modernc.org/sqlite"
 )
 
 // Low level encapsulation of an SQLite cache.
@@ -44,7 +44,7 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 	var err error
 	if name == ":memory:" {
 		opts.DeleteOnClose = false
-		db, err = sql.Open("sqlite3", name)
+		db, err = sql.Open("sqlite", name)
 		if err != nil {
 			return nil, err
 		}
@@ -59,7 +59,7 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 		// and reopen it.
 		if opts.ReadOnly {
 			if _, err := os.Stat(dbpath); errors.Is(err, os.ErrNotExist) {
-				tmpDb, err := sql.Open("sqlite3", "file:"+dbpath)
+				tmpDb, err := sql.Open("sqlite", "file:"+dbpath)
 				if err != nil {
 					return nil, err
 				}
@@ -81,7 +81,7 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 			dbpath += "?mode=ro"
 		}
 
-		db, err = sql.Open("sqlite3", "file:"+dbpath)
+		db, err = sql.Open("sqlite", "file:"+dbpath)
 		if err != nil {
 			return nil, err
 		}
