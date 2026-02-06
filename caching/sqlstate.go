@@ -88,6 +88,10 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 			return nil, err
 		}
 	}
+	if ro {
+		db.SetMaxOpenConns(32)
+		db.SetMaxIdleConns(16)
+	}
 
 	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
 }

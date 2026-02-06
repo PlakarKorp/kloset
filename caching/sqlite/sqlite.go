@@ -55,6 +55,13 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 
 		dbpath := path.Join(dir, name)
 
+		pragmas := "?_pragma=journal_mode(WAL)" +
+			"&_pragma=synchronous(OFF)" +
+			"&_pragma=temp_store(MEMORY)" +
+			"&_pragma=mmap_size(0)" +
+			"&_pragma=cache_size(-20000)" +
+			"&_pragma=busy_timeout(5000)"
+
 		// If ro and the file does not exist, we need to open the db rw close it
 		// and reopen it.
 		if opts.ReadOnly {
@@ -78,10 +85,10 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 				tmpDb.Close()
 			}
 
-			dbpath += "?mode=ro"
+			pragmas += "&mode=ro"
 		}
 
-		db, err = sql.Open("sqlite", "file:"+dbpath)
+		db, err = sql.Open("sqlite", "file:"+dbpath+pragmas)
 		if err != nil {
 			return nil, err
 		}
@@ -89,25 +96,6 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
-
-	pragmas := []string{
-		"PRAGMA journal_mode = WAL;", // one-writer WAL, good for cache
-		"PRAGMA synchronous = OFF;",  // speed; scanlog is scratch
-		"PRAGMA temp_store = MEMORY;",
-		"PRAGMA mmap_size = 0;",
-		"PRAGMA cache_size = -20000;", // ~20MB
-		"PRAGMA busy_timeout = 5000;",
-	}
-
-	if !opts.Shared {
-		pragmas = append(pragmas, "PRAGMA locking_mode = EXCLUSIVE;")
-	}
-
-	for _, p := range pragmas {
-		if _, err := db.Exec(p); err != nil {
-			return nil, fmt.Errorf("pragma %q failed: %w", p, err)
-		}
-	}
 
 	return &SQLiteCache{
 		DB:   db,

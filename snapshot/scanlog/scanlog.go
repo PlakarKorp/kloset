@@ -60,6 +60,11 @@ func New(path string) (*ScanLog, error) {
 	}, nil
 }
 
+func (s *ScanLog) SetMaxConn(n int) {
+	s.db.SetMaxOpenConns(n)
+	s.db.SetMaxIdleConns(n / 2)
+}
+
 func createSchema(db *sqlite.SQLiteCache) error {
 	const schema = `
 	CREATE TABLE IF NOT EXISTS entries (
