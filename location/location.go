@@ -10,10 +10,11 @@ import (
 type Flags uint32
 
 const (
-	FLAG_LOCALFS Flags = 1 << iota // all: dealing with a file (or dir) on the local fs
-	FLAG_FILE                      // storage: kloset is in a single file
-	FLAG_STREAM                    // importer: cannot call Import() more than once
-	FLAG_NEEDACK                   // importer: cares about acknowledgments in Import()
+	FLAG_LOCALFS      Flags = 1 << iota // all: dealing with a file (or dir) on the local fs
+	FLAG_FILE                           // storage: kloset is in a single file
+	FLAG_STREAM                         // importer: cannot call Import() more than once
+	FLAG_NEEDACK                        // importer: cares about acknowledgments in Import()
+	FLAG_SUPPORTS_P4P                   // resilience: this state is used for p4p
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")

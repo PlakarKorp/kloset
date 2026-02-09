@@ -7,6 +7,7 @@ import (
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors/storage"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/repository/packer"
@@ -149,9 +150,11 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 	r.transactionMtx.RLock()
 	for _, ds := range r.deltaState {
 		if packfile, ok := ds.BlobExists(Type, mac); ok {
-			r.muPackfiles.Lock()
-			r.packfiles[packfile] = struct{}{}
-			r.muPackfiles.Unlock()
+			if r.Store().Flags()&location.FLAG_SUPPORTS_P4P != 0 {
+				r.muPackfiles.Lock()
+				r.packfiles[packfile] = struct{}{}
+				r.muPackfiles.Unlock()
+			}
 			r.transactionMtx.RUnlock()
 			return true
 		}
@@ -159,10 +162,12 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 	r.transactionMtx.RUnlock()
 
 	packfile, ok := r.state.BlobExists(Type, mac)
-	if ok {
-		r.muPackfiles.Lock()
-		r.packfiles[packfile] = struct{}{}
-		r.muPackfiles.Unlock()
+	if r.Store().Flags()&location.FLAG_SUPPORTS_P4P != 0 {
+		if ok {
+			r.muPackfiles.Lock()
+			r.packfiles[packfile] = struct{}{}
+			r.muPackfiles.Unlock()
+		}
 	}
 	return ok
 }
@@ -250,9 +255,11 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		return err
 	}
 
-	r.muPackfiles.Lock()
-	r.packfiles[mac] = struct{}{}
-	r.muPackfiles.Unlock()
+	if r.Store().Flags()&location.FLAG_SUPPORTS_P4P != 0 {
+		r.muPackfiles.Lock()
+		r.packfiles[mac] = struct{}{}
+		r.muPackfiles.Unlock()
+	}
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
@@ -331,6 +338,19 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 	}
 
 	return r.currentDeltaState().PutPackfile(r.currentStateID, mac)
+}
+
+func (r *RepositoryWriter) PutResilienceState(mac objects.MAC, rd io.ReadCloser) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "PutResilienceState(%x): %s", r.currentStateID, time.Since(t0))
+	}()
+
+	_, err := r.store.Put(r.appContext, storage.StorageResourceResilienceState, mac, rd)
+	if err != nil {
+		return err
+	}
+	return err
 }
 
 func (r *RepositoryWriter) ListTouchedPackfiles() <-chan objects.MAC {
