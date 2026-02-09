@@ -744,6 +744,8 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 		return nil, err
 	}
 
+	_ = snap.repository.BlobExists(resources.RT_VFS_ENTRY, entry.MAC)
+
 	same := entry.Stat().Equal(&record.FileInfo)
 	if record.FileInfo.Size() == -1 {
 		same = entry.Stat().EqualIgnoreSize(&record.FileInfo)
@@ -762,6 +764,22 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 			FileInfo:    entry.FileInfo,
 			ContentType: "application/x-not-regular-file",
 		}, nil
+	}
+
+	if entry.Object != (objects.MAC{}) {
+		_ = snap.repository.BlobExists(resources.RT_OBJECT, entry.Object)
+		b, err := snap.repository.GetBlobBytes(resources.RT_OBJECT, entry.Object)
+		if err != nil {
+			return nil, err
+		}
+
+		obj, err := objects.NewObjectFromBytes(b)
+		if err != nil {
+			return nil, err
+		}
+		for _, chunk := range obj.Chunks {
+			_ = snap.repository.BlobExists(resources.RT_CHUNK, chunk.ContentMAC)
+		}
 	}
 
 	snap.emitter.FileCached(record.Pathname, entry.FileInfo)

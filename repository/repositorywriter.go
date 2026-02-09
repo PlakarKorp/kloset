@@ -23,6 +23,9 @@ type RepositoryWriter struct {
 
 	PackerManager  packer.PackerManagerInt
 	currentStateID objects.MAC
+
+	muPackfiles sync.Mutex
+	packfiles   map[objects.MAC]struct{}
 }
 
 type RepositoryType int
@@ -45,6 +48,8 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 
 		deltaState:     make(map[objects.MAC]*state.LocalState),
 		currentStateID: id,
+
+		packfiles: make(map[objects.MAC]struct{}),
 	}
 	rw.deltaState[rw.currentStateID] = r.state.Derive(cache)
 
@@ -143,14 +148,23 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 
 	r.transactionMtx.RLock()
 	for _, ds := range r.deltaState {
-		if ds.BlobExists(Type, mac) {
+		if packfile, ok := ds.BlobExists(Type, mac); ok {
+			r.muPackfiles.Lock()
+			r.packfiles[packfile] = struct{}{}
+			r.muPackfiles.Unlock()
 			r.transactionMtx.RUnlock()
 			return true
 		}
 	}
 	r.transactionMtx.RUnlock()
 
-	return r.state.BlobExists(Type, mac)
+	packfile, ok := r.state.BlobExists(Type, mac)
+	if ok {
+		r.muPackfiles.Lock()
+		r.packfiles[packfile] = struct{}{}
+		r.muPackfiles.Unlock()
+	}
+	return ok
 }
 
 func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
@@ -236,6 +250,10 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		return err
 	}
 
+	r.muPackfiles.Lock()
+	r.packfiles[mac] = struct{}{}
+	r.muPackfiles.Unlock()
+
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
 
@@ -313,4 +331,21 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 	}
 
 	return r.currentDeltaState().PutPackfile(r.currentStateID, mac)
+}
+
+func (r *RepositoryWriter) ListTouchedPackfiles() <-chan objects.MAC {
+	r.muPackfiles.Lock()
+	defer r.muPackfiles.Unlock()
+
+	ch := make(chan objects.MAC)
+
+	go func() {
+		defer close(ch)
+
+		for k := range r.packfiles {
+			ch <- k
+		}
+	}()
+
+	return ch
 }

@@ -532,7 +532,7 @@ func TestBlobExists(t *testing.T) {
 	state := NewLocalState(cache)
 
 	// Test with non-existent blob
-	exists := state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
+	_, exists := state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 
 	// Test with existing blob and packfile
@@ -551,12 +551,12 @@ func TestBlobExists(t *testing.T) {
 	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
 
 	// Since our mock returns all deltas regardless of MAC, this should work
-	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
+	_, exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.True(t, exists)
 
 	// Test with deleted packfile
 	state.DeleteResource(resources.RT_PACKFILE, deltaEntry.Location.Packfile)
-	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
+	_, exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
 

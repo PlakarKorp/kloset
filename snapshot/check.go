@@ -66,7 +66,7 @@ func checkChunk(snap *Snapshot, chunk *objects.Chunk, hasher hash.Hash, fast boo
 	emitter.Chunk(chunk.ContentMAC)
 
 	if fast {
-		if !snap.repository.BlobExists(resources.RT_CHUNK, chunk.ContentMAC) {
+		if _, ok := snap.repository.BlobExists(resources.RT_CHUNK, chunk.ContentMAC); !ok {
 			emitter.ChunkError(chunk.ContentMAC, ErrChunkMissing)
 			snap.checkCache.PutChunkStatus(chunk.ContentMAC, []byte(ErrChunkMissing.Error()))
 			return ErrChunkMissing

@@ -46,6 +46,12 @@ type Builder struct {
 	beginTime time.Time
 
 	noSkipSelf bool
+
+	packfilesSeen map[objects.MAC]struct{}
+}
+
+func (snap *Builder) recordPackfile(packfileID objects.MAC) {
+	snap.packfilesSeen[packfileID] = struct{}{}
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
@@ -71,6 +77,8 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 		flushEnded:     make(chan error),
 
 		beginTime: time.Now(),
+
+		packfilesSeen: make(map[objects.MAC]struct{}),
 	}
 
 	snap.Header.SetContext("Hostname", appContext.Hostname)
@@ -478,4 +486,18 @@ func (snap *Builder) Commit() error {
 
 	snap.Logger().Trace("snapshot", "%x: Commit()", snap.Header.GetIndexShortID())
 	return nil
+}
+
+func (snap *Builder) ListPackfiles() <-chan objects.MAC {
+	ch := make(chan objects.MAC)
+
+	go func() {
+		defer close(ch)
+
+		for k := range snap.repository.ListTouchedPackfiles() {
+			ch <- k
+		}
+	}()
+
+	return ch
 }

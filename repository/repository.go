@@ -1181,7 +1181,7 @@ func (r *Repository) GetBlobBytes(Type resources.Type, mac objects.MAC) ([]byte,
 	return io.ReadAll(rd)
 }
 
-func (r *Repository) BlobExists(Type resources.Type, mac objects.MAC) bool {
+func (r *Repository) BlobExists(Type resources.Type, mac objects.MAC) (objects.MAC, bool) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "BlobExists(%s, %x): %s", Type, mac, time.Since(t0))
