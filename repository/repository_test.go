@@ -62,7 +62,7 @@ func TestRepository(t *testing.T) {
 	})
 
 	t.Run("BlobExists", func(t *testing.T) {
-		exists := repo.BlobExists(resources.RT_CONFIG, objects.MAC{})
+		_, exists := repo.BlobExists(resources.RT_CONFIG, objects.MAC{})
 		require.False(t, exists)
 	})
 
