@@ -12,9 +12,11 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/repository/state"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
@@ -26,9 +28,10 @@ type Builder struct {
 	repository *repository.RepositoryWriter
 
 	//This is protecting the above two pointers, not their underlying objects
-	scanCache  *caching.ScanCache
-	deltaCache *caching.ScanCache
-	vfsCache   *vfs.Filesystem
+	scanCache       *caching.ScanCache
+	deltaCache      *caching.ScanCache
+	resilienceState *state.LocalState
+	vfsCache        *vfs.Filesystem
 
 	builderOptions *BuilderOptions
 
@@ -78,7 +81,8 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 
 		beginTime: time.Now(),
 
-		packfilesSeen: make(map[objects.MAC]struct{}),
+		packfilesSeen:   make(map[objects.MAC]struct{}),
+		resilienceState: state.NewLocalState(scanCache),
 	}
 
 	snap.Header.SetContext("Hostname", appContext.Hostname)
@@ -451,6 +455,28 @@ func (snap *Builder) Commit() error {
 	}
 
 	snap.repository.PackerManager.Wait()
+
+	if snap.repository.Store().Flags()&location.FLAG_SUPPORTS_P4P != 0 {
+		for packfileID := range snap.ListPackfiles() {
+			if err := snap.resilienceState.PutPackfile(snap.Header.Identifier, packfileID); err != nil {
+				return err
+			}
+		}
+
+		pw, pr, err := os.Pipe()
+		if err != nil {
+			return err
+		}
+
+		go func() {
+			defer pw.Close()
+			snap.resilienceState.SerializeToStream(pw)
+		}()
+
+		if err := snap.repository.PutResilienceState(snap.Header.Identifier, pr); err != nil {
+			return err
+		}
+	}
 
 	// We are done with packfiles we can flush the last state, either through
 	// the flusher, or manually here.
