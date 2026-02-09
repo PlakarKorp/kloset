@@ -18,7 +18,7 @@ Data and context are stored using [Kloset](https://www.plakar.io/posts/2025-04-2
 
 Plakar's main strengths:
 - **Effortless**: Easy to use, clean default. Check out our [quick start guide](https://docs.plakar.io/en/quickstart/).
-- **Secure**: Provide audited end-to-end encryption for data and metadata. See our latest [crypto audit report](https://www.plakar.io/docs/audits/).
+- **Secure**: Provide audited end-to-end encryption for data and metadata. See our latest [crypto audit report](https://www.plakar.io/posts/2025-02-28/audit-of-plakar-cryptography/).
 - **Reliable**: Backups are stored in Kloset, an open-source immutable data store. Learn more about [Kloset](https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/).
 - **Vertically scalable**: Backup and restore very large datasets with limited RAM usage.
 - **Horizontally scalable**: Support high concurrency and multiple backups type in a single Kloset.
