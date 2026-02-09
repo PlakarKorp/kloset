@@ -11,6 +11,7 @@ import (
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
+	"github.com/google/uuid"
 )
 
 // LocateSnapshotIDs preserves the legacy behavior using policy.FilterAndSort.
@@ -91,10 +92,14 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 			roots := []string{}
 			types := []string{}
 			origins := []string{}
+			sequences := []uuid.UUID{}
+			parents := []string{}
 			for _, src := range h.Sources {
 				roots = append(roots, src.Importer.Directory)
 				types = append(types, src.Importer.Type)
 				origins = append(origins, src.Importer.Origin)
+				sequences = append(sequences, h.Sequence)
+				parents = append(parents, hex.EncodeToString(h.Parent[:]))
 			}
 
 			it := Item{
@@ -110,6 +115,8 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 					Types:       types,
 					Origins:     origins,
 					Roots:       roots,
+					Sequences:   sequences,
+					Parents:     parents,
 				},
 			}
 
