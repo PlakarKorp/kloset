@@ -1356,6 +1356,8 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 		return nil, err
 	}
 
+	sourceCtx.scanLog.SetMaxConn(snap.AppContext().MaxConcurrency)
+
 	// stabilize order of vfsidx inserts early so we can unlock concurrency later
 	// on a 1.000.000 korpus, this takes roughly 2s
 	// /!\ this can't be parallelized with other indexes and must finish first !

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"runtime"
 	"sync"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
@@ -87,6 +88,12 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		if _, err := db.Exec(create); err != nil {
 			return nil, err
 		}
+	}
+	if ro {
+		// This should be ctx.MaxConcurrency, but this is an import cycle and
+		// breaking it is out of the scope.
+		db.SetMaxOpenConns(runtime.NumCPU())
+		db.SetMaxIdleConns(runtime.NumCPU() / 2)
 	}
 
 	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
@@ -177,7 +184,6 @@ func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 
 	return payload, nil
 }
-
 func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 	query := "SELECT mac, payload FROM states;"
 
