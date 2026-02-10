@@ -3,6 +3,7 @@ package snapshot
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"os"
 	"runtime"
 	"strconv"
@@ -463,14 +464,13 @@ func (snap *Builder) Commit() error {
 			}
 		}
 
-		pw, pr, err := os.Pipe()
-		if err != nil {
-			return err
-		}
+		pr, pw := io.Pipe()
 
 		go func() {
 			defer pw.Close()
-			snap.resilienceState.SerializeToStream(pw)
+			if err := snap.resilienceState.SerializeToStream(pw); err != nil {
+				pw.CloseWithError(err)
+			}
 		}()
 
 		if err := snap.repository.PutResilienceState(snap.Header.Identifier, pr); err != nil {
