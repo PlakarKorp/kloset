@@ -26,7 +26,7 @@ var (
 )
 
 func (m MAC) MarshalJSON() ([]byte, error) {
-	return json.Marshal(fmt.Sprintf("%0x", m[:]))
+	return json.Marshal(m.FormatHex())
 }
 
 func (m *MAC) UnmarshalJSON(data []byte) error {
@@ -35,6 +35,14 @@ func (m *MAC) UnmarshalJSON(data []byte) error {
 		return err
 	}
 
+	return m.ParseHex(s)
+}
+
+func (m MAC) FormatHex() string {
+	return hex.EncodeToString(m[:])
+}
+
+func (m *MAC) ParseHex(s string) error {
 	decoded, err := hex.DecodeString(s)
 	if err != nil {
 		return err
