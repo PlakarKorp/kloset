@@ -124,11 +124,6 @@ func TestRepositoryState(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("PutCurrentState", func(t *testing.T) {
-		err := repo.PutCurrentState()
-		require.NoError(t, err)
-	})
-
 	t.Run("ListSnapshots", func(t *testing.T) {
 		snapshots := repo.ListSnapshots()
 		require.NotNil(t, snapshots)

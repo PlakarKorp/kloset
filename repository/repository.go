@@ -13,6 +13,7 @@ import (
 	"math/bits"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -1238,23 +1239,41 @@ func (r *Repository) ListPackfiles() iter.Seq[objects.MAC] {
 
 // Saves the full aggregated state to the repository, might be heavy handed use
 // with care.
-func (r *Repository) PutCurrentState() error {
+func (r *Repository) PutForkedState(st *state.LocalState) error {
 	pr, pw := io.Pipe()
 
 	/* By using a pipe and a goroutine we bound the max size in memory. */
 	go func() {
 		defer pw.Close()
-		if err := r.state.SerializeToStream(pw); err != nil {
+		if err := st.SerializeToStream(pw); err != nil {
 			pw.CloseWithError(err)
 		}
 	}()
 
 	newSerial := uuid.New()
-	r.state.Metadata.Serial = newSerial
-	r.state.Metadata.Timestamp = time.Now()
+	st.Metadata.Serial = newSerial
+	st.Metadata.Timestamp = time.Now()
 	id := r.ComputeMAC(newSerial[:])
 
 	return r.PutState(id, pr)
+}
+
+func (r *Repository) ForkCurrentState() (*state.LocalState, error) {
+	forkPath := filepath.Join(r.stateCacheDir(), fmt.Sprintf("state_fork_%s", uuid.New()))
+	if err := os.MkdirAll(forkPath, 0700); err != nil {
+		return nil, err
+	}
+
+	if err := r.state.Fork(filepath.Join(forkPath, "state.db")); err != nil {
+		return nil, err
+	}
+
+	c, err := caching.NewSQLState(forkPath, false)
+	if err != nil {
+		return nil, err
+	}
+
+	return state.NewLocalState(c), nil
 }
 
 func (r *Repository) Logger() *logging.Logger {

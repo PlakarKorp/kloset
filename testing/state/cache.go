@@ -22,6 +22,10 @@ func newCache() *cache {
 	}
 }
 
+func (c *cache) Copy(string) error {
+	return nil
+}
+
 func (c *cache) PutState(stateID objects.MAC, data []byte) error {
 	c.states[stateID] = data
 	return nil

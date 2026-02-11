@@ -36,6 +36,10 @@ func newMockStateCache() *mockStateCache {
 	}
 }
 
+func (m *mockStateCache) Copy(string) error {
+	return nil
+}
+
 func (m *mockStateCache) PutState(stateID objects.MAC, data []byte) error {
 	m.states[stateID] = data
 	return nil

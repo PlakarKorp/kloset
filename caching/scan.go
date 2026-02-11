@@ -25,6 +25,10 @@ func newScanCache(cons Constructor, snapshotID [32]byte) (*ScanCache, error) {
 	return &ScanCache{kvcache{cache}}, nil
 }
 
+func (c *ScanCache) Copy(string) error {
+	panic("Copy should never be used on the ScanCache backend")
+}
+
 func (c *ScanCache) NewScanBatch() *ScanBatch {
 	return &ScanBatch{c.cache.NewBatch()}
 }

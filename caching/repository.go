@@ -26,6 +26,10 @@ func newRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryC
 	return &_RepositoryCache{kvcache{cache}}, nil
 }
 
+func (c *_RepositoryCache) Copy(string) error {
+	panic("Copy should never be used on the _RepositoryCache backend")
+}
+
 func (c *_RepositoryCache) NewBatch() StateBatch {
 	return &repoBatch{c.cache.NewBatch()}
 }
