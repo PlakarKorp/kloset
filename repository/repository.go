@@ -1258,22 +1258,28 @@ func (r *Repository) PutForkedState(st *state.LocalState) error {
 	return r.PutState(id, pr)
 }
 
-func (r *Repository) ForkCurrentState() (*state.LocalState, error) {
+func (r *Repository) ForkCurrentState() (*state.LocalState, string, error) {
 	forkPath := filepath.Join(r.stateCacheDir(), fmt.Sprintf("state_fork_%s", uuid.New()))
 	if err := os.MkdirAll(forkPath, 0700); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 
 	if err := r.state.Fork(filepath.Join(forkPath, "state.db")); err != nil {
-		return nil, err
+		os.RemoveAll(forkPath)
+		return nil, "", err
 	}
 
 	c, err := caching.NewSQLState(forkPath, false)
 	if err != nil {
-		return nil, err
+		os.RemoveAll(forkPath)
+		return nil, "", err
 	}
 
-	return state.NewLocalState(c), nil
+	return state.NewLocalState(c), forkPath, nil
+}
+
+func (r *Repository) DeleteForkedState(path string) error {
+	return os.RemoveAll(path)
 }
 
 func (r *Repository) Logger() *logging.Logger {
