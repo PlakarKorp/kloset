@@ -120,13 +120,14 @@ const (
 type StorageResource uint32
 
 const (
-	StorageResourceUndefined       StorageResource = 0
-	StorageResourcePackfile        StorageResource = 1
-	StorageResourceState           StorageResource = 2
-	StorageResourceLock            StorageResource = 3
-	StorageResourceECCPackfile     StorageResource = 4
-	StorageResourceECCState        StorageResource = 5
-	StorageResourceResilienceState StorageResource = 6
+	StorageResourceUndefined           StorageResource = 0
+	StorageResourcePackfile            StorageResource = 1
+	StorageResourceState               StorageResource = 2
+	StorageResourceLock                StorageResource = 3
+	StorageResourceECCPackfile         StorageResource = 4
+	StorageResourceECCState            StorageResource = 5
+	StorageResourceResilienceState     StorageResource = 6
+	StorageResourceResilienceSnapshots StorageResource = 7
 )
 
 func (s StorageResource) String() string {
@@ -145,6 +146,8 @@ func (s StorageResource) String() string {
 		return "ECC state"
 	case StorageResourceResilienceState:
 		return "resilience state"
+	case StorageResourceResilienceSnapshots:
+		return "resilience snapshots"
 	default:
 		return "unknown"
 	}
