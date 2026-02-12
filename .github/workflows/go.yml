@@ -1,28 +1,15 @@
-name: Go
+name: Build
 
 on:
   push:
     branches: [ main ]
   pull_request:
+  workflow_disptach:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    strategy:
-      matrix:
-        go: [ '1.23.3' ]
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Go
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.go }}
-
-    - name: Build
-      run: go build -v ./...
-
-    - name: Test
-      run: go test -v -timeout 1m ./...
+    uses: PlakarKorp/ci-workflows/.github/build/go.yml@build-go
+    with:
+      target: ./...
+      test-option-timeout: 30s
+    secrets: inherit
