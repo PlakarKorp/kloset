@@ -8,6 +8,8 @@ import (
 )
 
 type StateCache interface {
+	Copy(name string) error
+
 	PutState(stateID objects.MAC, data []byte) error
 	HasState(stateID objects.MAC) (bool, error)
 	GetState(stateID objects.MAC) ([]byte, error)

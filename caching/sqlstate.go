@@ -99,6 +99,12 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
 }
 
+func (c *SQLState) Copy(name string) error {
+	_, err := c.db.Exec("VACUUM INTO ?;", name)
+
+	return err
+}
+
 func (c *SQLState) NewBatch() StateBatch {
 	return &sqlStateBatch{c, make([]sDelta, 0)}
 }

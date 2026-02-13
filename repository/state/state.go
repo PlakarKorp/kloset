@@ -148,6 +148,11 @@ func (ls *LocalState) Derive(cache caching.StateCache) *LocalState {
 	return st
 }
 
+// Deep copy of the current state to a new one.
+func (ls *LocalState) Fork(name string) error {
+	return ls.cache.Copy(name)
+}
+
 // Finds the latest (current) serial in the aggregate state, and if none sets
 // it to the provided one.
 func (ls *LocalState) UpdateSerialOr(serial uuid.UUID) error {
