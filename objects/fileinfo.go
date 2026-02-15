@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/dustin/go-humanize"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 // Danger: If you add any fields here, be sure to adapt the Equal and
@@ -103,6 +104,10 @@ func NewFileInfo(name string, size int64, mode os.FileMode, modTime time.Time, d
 		Lgid:     gid,
 		Lnlink:   nlink,
 	}
+}
+
+func (fileinfo *FileInfo) ToBytes() ([]byte, error) {
+	return msgpack.Marshal(fileinfo)
 }
 
 func (fileinfo *FileInfo) HumanSize() string {
