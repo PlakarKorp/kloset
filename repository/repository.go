@@ -28,6 +28,7 @@ import (
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/kcontext"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
@@ -1212,6 +1213,24 @@ func (r *Repository) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	defer func() {
 		r.Logger().Trace("repository", "ListSnapshots(): %s", time.Since(t0))
 	}()
+
+	if r.store.Flags()&location.FLAG_SUPPORTS_P4P != 0 {
+		macs, err := r.store.List(r.appContext, storage.StorageResourceResilienceSnapshots)
+		if err != nil {
+			return func(yield func(objects.MAC, error) bool) {
+				yield(objects.NilMac, err)
+			}
+		}
+
+		return func(yield func(objects.MAC, error) bool) {
+			for _, mac := range macs {
+				if !yield(mac, nil) {
+					return
+				}
+			}
+		}
+	}
+
 	return r.state.ListSnapshots()
 }
 
