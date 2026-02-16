@@ -8,7 +8,7 @@ require (
 	github.com/cockroachdb/pebble/v2 v2.1.4
 	github.com/dustin/go-humanize v1.0.1
 	github.com/gabriel-vasile/mimetype v1.4.13
-	github.com/go-git/go-git/v5 v5.16.4
+	github.com/go-git/go-git/v5 v5.16.5
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
 	github.com/nickball/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5
