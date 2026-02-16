@@ -458,6 +458,10 @@ func (snap *Builder) Commit() error {
 	snap.repository.PackerManager.Wait()
 
 	if snap.repository.Store().Flags()&location.FLAG_SUPPORTS_P4P != 0 {
+		if err := snap.resilienceState.SetConfiguration("p4p.header", serializedHdr); err != nil {
+			return err
+		}
+
 		for packfileID := range snap.ListPackfiles() {
 			if err := snap.resilienceState.PutPackfile(snap.Header.Identifier, packfileID); err != nil {
 				return err
