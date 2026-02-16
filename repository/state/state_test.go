@@ -652,7 +652,8 @@ func TestListSnapshots(t *testing.T) {
 
 	// List snapshots
 	var found []objects.MAC
-	for snapshot := range state.ListSnapshots() {
+	for snapshot, err := range state.ListSnapshots() {
+		require.NoError(t, err)
 		found = append(found, snapshot)
 	}
 

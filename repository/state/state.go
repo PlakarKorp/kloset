@@ -828,7 +828,7 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 					return
 				}
 			}
-			if !has {
+			if has {
 				continue
 			}
 
