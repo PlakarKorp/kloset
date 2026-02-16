@@ -626,7 +626,7 @@ func (r *Repository) GetSnapshots() ([]objects.MAC, error) {
 	}()
 
 	ret := make([]objects.MAC, 0)
-	for snapshotID := range r.state.ListSnapshots() {
+	for snapshotID := range r.ListSnapshots() {
 		ret = append(ret, snapshotID)
 	}
 	return ret, nil
@@ -1220,7 +1220,7 @@ func (r *Repository) ListOrphanBlobs() iter.Seq2[state.DeltaEntry, error] {
 	return r.state.ListOrphanDeltas()
 }
 
-func (r *Repository) ListSnapshots() iter.Seq[objects.MAC] {
+func (r *Repository) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "ListSnapshots(): %s", time.Since(t0))
