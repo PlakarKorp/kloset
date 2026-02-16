@@ -802,21 +802,37 @@ func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
 	}
 }
 
-func (ls *LocalState) ListSnapshots() iter.Seq[objects.MAC] {
-	return func(yield func(objects.MAC) bool) {
+func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
+	return func(yield func(objects.MAC, error) bool) {
 		for _, buf := range ls.cache.GetDeltasByType(resources.RT_SNAPSHOT) {
-			de, _ := DeltaEntryFromBytes(buf)
+			de, err := DeltaEntryFromBytes(buf)
+			if err != nil {
+				if !yield(objects.NilMac, err) {
+					return
+				}
+			}
 
 			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
-			if err != nil || !ok {
+			if err != nil {
+				if !yield(objects.NilMac, err) {
+					return
+				}
+			}
+			if !ok {
 				continue
 			}
 
-			if has, _ := ls.cache.HasDeleted(resources.RT_SNAPSHOT, de.Blob); has {
+			has, err := ls.cache.HasDeleted(resources.RT_SNAPSHOT, de.Blob)
+			if err != nil {
+				if !yield(objects.NilMac, err) {
+					return
+				}
+			}
+			if has {
 				continue
 			}
 
-			if !yield(de.Blob) {
+			if !yield(de.Blob, nil) {
 				return
 			}
 		}
