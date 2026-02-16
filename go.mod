@@ -18,7 +18,7 @@ require (
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.48.0
-	golang.org/x/mod v0.32.0
+	golang.org/x/mod v0.33.0
 	golang.org/x/sync v0.19.0
 	modernc.org/sqlite v1.45.0
 )
