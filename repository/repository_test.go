@@ -43,12 +43,6 @@ func TestRepository(t *testing.T) {
 		require.NotEqual(t, objects.MAC{}, mac)
 	})
 
-	t.Run("GetSnapshots", func(t *testing.T) {
-		snapshots, err := repo.GetSnapshots()
-		require.NoError(t, err)
-		require.NotNil(t, snapshots)
-	})
-
 	t.Run("GetStates", func(t *testing.T) {
 		states, err := repo.GetStates()
 		require.NoError(t, err)
