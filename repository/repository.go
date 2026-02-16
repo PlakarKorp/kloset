@@ -619,19 +619,6 @@ func (r *Repository) Configuration() storage.Configuration {
 	return r.configuration
 }
 
-func (r *Repository) GetSnapshots() ([]objects.MAC, error) {
-	t0 := time.Now()
-	defer func() {
-		r.Logger().Trace("repository", "GetSnapshots(): %s", time.Since(t0))
-	}()
-
-	ret := make([]objects.MAC, 0)
-	for snapshotID := range r.ListSnapshots() {
-		ret = append(ret, snapshotID)
-	}
-	return ret, nil
-}
-
 func (r *Repository) DeleteSnapshot(snapshotID objects.MAC) error {
 	t0 := time.Now()
 	defer func() {
