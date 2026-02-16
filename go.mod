@@ -20,7 +20,7 @@ require (
 	golang.org/x/crypto v0.48.0
 	golang.org/x/mod v0.32.0
 	golang.org/x/sync v0.19.0
-	modernc.org/sqlite v1.44.3
+	modernc.org/sqlite v1.45.0
 )
 
 require (
