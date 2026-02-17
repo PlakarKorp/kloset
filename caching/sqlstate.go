@@ -537,7 +537,7 @@ func (c *SQLState) GetConfiguration(key string) ([]byte, error) {
 
 func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 	return func(yield func([]byte) bool) {
-		query := "SELECT mac, payload FROM configurations;"
+		query := "SELECT key, data FROM configurations;"
 
 		rows, err := c.db.Query(query)
 		if err != nil {
