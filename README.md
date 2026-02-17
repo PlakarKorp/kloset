@@ -17,7 +17,7 @@ Plakar goes beyond file-level backups. It captures application data with its ful
 Data and context are stored using [Kloset](https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/), an open-source, immutable data store that enables the implementation of advanced data protection scenarios.
 
 Plakar's main strengths:
-- **Effortless**: Easy to use, clean default. Check out our [quick start guide](https://docs.plakar.io/en/quickstart/).
+- **Effortless**: Easy to use, clean default. Check out our [quick start guide](https://plakar.io/docs/v1.1.0/quickstart/).
 - **Secure**: Provide audited end-to-end encryption for data and metadata. See our latest [crypto audit report](https://www.plakar.io/posts/2025-02-28/audit-of-plakar-cryptography/).
 - **Reliable**: Backups are stored in Kloset, an open-source immutable data store. Learn more about [Kloset](https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/).
 - **Vertically scalable**: Backup and restore very large datasets with limited RAM usage.
@@ -70,7 +70,7 @@ go install github.com/PlakarKorp/plakar/cmd/plakar@latest
 
 ## Quickstart
 
-plakar quickstart: https://docs.plakar.io/en/quickstart/
+plakar quickstart: https://plakar.io/docs/v1.1.0/quickstart/
 
 A taste of plakar (please follow the quickstart to begin):
 ```
@@ -97,7 +97,7 @@ $ plakar at /var/backups sync to @s3                        # Synchronise a back
 ## Documentation
 
 For the latest information,
-you can read the documentation available at https://docs.plakar.io
+you can read the documentation available at https://plakar.io/docs/
 
 ## Community
 
