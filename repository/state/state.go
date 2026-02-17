@@ -921,6 +921,10 @@ func (ls *LocalState) SetConfiguration(key string, value []byte) error {
 	return ls.insertOrUpdateConfiguration(ce)
 }
 
+func (ls *LocalState) GetConfiguration(key string) ([]byte, error) {
+	return ls.cache.GetConfiguration(key)
+}
+
 // Internal function used by deserialization that only updates our local on
 // disk state if the provided configuration is more recent than the stored one
 func (ls *LocalState) insertOrUpdateConfiguration(ce ConfigurationEntry) error {
