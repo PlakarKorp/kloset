@@ -632,7 +632,7 @@ func (r *Repository) DeleteSnapshot(snapshotID objects.MAC) error {
 	}
 	deltaState := r.state.Derive(sc)
 
-	ret := deltaState.DeleteResource(resources.RT_SNAPSHOT, snapshotID)
+	ret := deltaState.ColourResource(resources.RT_SNAPSHOT, snapshotID)
 	if ret != nil {
 		return ret
 	}
@@ -959,7 +959,7 @@ func (r *Repository) HasDeletedPackfile(mac objects.MAC) (bool, error) {
 		r.Logger().Trace("repository", "HasDeletedPackfile(%x): %s", mac, time.Since(t0))
 	}()
 
-	return r.state.HasDeletedResource(resources.RT_PACKFILE, mac)
+	return r.state.HasColouredResource(resources.RT_PACKFILE, mac)
 }
 
 func (r *Repository) ListDeletedPackfiles() iter.Seq2[objects.MAC, time.Time] {
@@ -969,7 +969,7 @@ func (r *Repository) ListDeletedPackfiles() iter.Seq2[objects.MAC, time.Time] {
 	}()
 
 	return func(yield func(objects.MAC, time.Time) bool) {
-		for snap, err := range r.state.ListDeletedResources(resources.RT_PACKFILE) {
+		for snap, err := range r.state.ListColouredResources(resources.RT_PACKFILE) {
 
 			if err != nil {
 				r.Logger().Error("Failed to fetch deleted packfile %s", err)
@@ -989,7 +989,7 @@ func (r *Repository) ListDeletedSnapShots() iter.Seq2[objects.MAC, time.Time] {
 	}()
 
 	return func(yield func(objects.MAC, time.Time) bool) {
-		for snap, err := range r.state.ListDeletedResources(resources.RT_SNAPSHOT) {
+		for snap, err := range r.state.ListColouredResources(resources.RT_SNAPSHOT) {
 
 			if err != nil {
 				r.Logger().Error("Failed to fetch deleted snapshot %s", err)
@@ -1009,7 +1009,7 @@ func (r *Repository) RemoveDeletedPackfile(packfileMAC objects.MAC) error {
 		r.Logger().Trace("repository", "RemoveDeletedPackfile(%x): %s", packfileMAC, time.Since(t0))
 	}()
 
-	return r.state.DelDeletedResource(resources.RT_PACKFILE, packfileMAC)
+	return r.state.DelColouredResource(resources.RT_PACKFILE, packfileMAC)
 }
 
 func (r *Repository) GetPackfileForBlob(Type resources.Type, mac objects.MAC) (objects.MAC, bool, error) {

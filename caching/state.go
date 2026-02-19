@@ -20,11 +20,11 @@ type StateCache interface {
 	GetDeltas() iter.Seq2[objects.MAC, []byte]
 	DelDelta(blobType resources.Type, blobCsum objects.MAC, packfileMAC objects.MAC) error
 
-	PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error
-	HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error)
-	DelDeleted(blobType resources.Type, blobCsum objects.MAC) error
-	GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte]
-	GetDeleteds() iter.Seq2[objects.MAC, []byte]
+	PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error
+	HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error)
+	DelColoured(blobType resources.Type, blobCsum objects.MAC) error
+	GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte]
+	GetColouredEntries() iter.Seq2[objects.MAC, []byte]
 
 	PutPackfile(packfile objects.MAC, data []byte) error
 	DelPackfile(packfile objects.MAC) error

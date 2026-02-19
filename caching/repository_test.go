@@ -116,16 +116,16 @@ func TestRepositoryCache(t *testing.T) {
 		data := []byte("test deleted data")
 
 		// Test PutDeleted
-		err := cache.PutDeleted(blobType, blobCsum, data)
+		err := cache.PutColoured(blobType, blobCsum, data)
 		require.NoError(t, err)
 
 		// Test HasDeleted
-		exists, err := cache.HasDeleted(blobType, blobCsum)
+		exists, err := cache.HasColoured(blobType, blobCsum)
 		require.NoError(t, err)
 		require.True(t, exists)
 
 		// Test GetDeleteds
-		deleteds := cache.GetDeleteds()
+		deleteds := cache.GetColouredEntries()
 		var found bool
 		for mac, deletedData := range deleteds {
 			if mac == blobCsum {
@@ -137,7 +137,7 @@ func TestRepositoryCache(t *testing.T) {
 		require.True(t, found)
 
 		// Test GetDeletedsByType
-		deletedsByType := cache.GetDeletedsByType(blobType)
+		deletedsByType := cache.GetColouredEntriesByType(blobType)
 		found = false
 		for mac, deletedData := range deletedsByType {
 			if mac == blobCsum {
@@ -149,11 +149,11 @@ func TestRepositoryCache(t *testing.T) {
 		require.True(t, found)
 
 		// Test DelDeleted
-		err = cache.DelDeleted(blobType, blobCsum)
+		err = cache.DelColoured(blobType, blobCsum)
 		require.NoError(t, err)
 
 		// Verify deletion
-		exists, err = cache.HasDeleted(blobType, blobCsum)
+		exists, err = cache.HasColoured(blobType, blobCsum)
 		require.NoError(t, err)
 		require.False(t, exists)
 	})

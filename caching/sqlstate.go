@@ -356,15 +356,14 @@ func (c *SQLState) DelDelta(blobType resources.Type, blobCsum, packfileMAC objec
 	return err
 }
 
-// Deleted handling.
-func (c *SQLState) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
+func (c *SQLState) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 
 	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
 	return err
 }
 
-func (c *SQLState) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
+func (c *SQLState) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 
 	query := "SELECT 1 FROM deleteds WHERE mac = ? AND type = ? LIMIT 1;"
@@ -381,7 +380,7 @@ func (c *SQLState) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bo
 	return true, nil
 }
 
-func (c *SQLState) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
+func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
 		query := "SELECT mac, payload FROM deleteds;"
 
@@ -414,7 +413,7 @@ func (c *SQLState) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
 	}
 }
 
-func (c *SQLState) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
+func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
 		query := "SELECT mac, payload  FROM deleteds WHERE type = ?;"
 
@@ -448,7 +447,7 @@ func (c *SQLState) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.
 	}
 }
 
-func (c *SQLState) DelDeleted(blobType resources.Type, blobCsum objects.MAC) error {
+func (c *SQLState) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
 	blobMACHex := hex.EncodeToString(blobCsum[:])
 	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ?;", blobMACHex, blobType)
 	return err

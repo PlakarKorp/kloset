@@ -65,23 +65,23 @@ func (c *cache) DelDelta(blobType resources.Type, blobCsum objects.MAC, packfile
 	return unsupported
 }
 
-func (c *cache) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
+func (c *cache) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	return unsupported
 }
 
-func (c *cache) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
+func (c *cache) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
 	return false, unsupported
 }
 
-func (c *cache) DelDeleted(blobType resources.Type, blobCsum objects.MAC) error {
+func (c *cache) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
 	return unsupported
 }
 
-func (c *cache) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
+func (c *cache) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
 	return nil
 }
 
-func (c *cache) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
+func (c *cache) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 	return nil
 }
 
