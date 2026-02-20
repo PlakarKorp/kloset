@@ -83,23 +83,23 @@ func (c *_RepositoryCache) DelDelta(blobType resources.Type, blobCsum, packfileM
 	return c.delete("__delta__", fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfileMAC))
 }
 
-func (c *_RepositoryCache) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
+func (c *_RepositoryCache) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	return c.put("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum), data)
 }
 
-func (c *_RepositoryCache) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
+func (c *_RepositoryCache) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
 	return c.has("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum))
 }
 
-func (c *_RepositoryCache) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
+func (c *_RepositoryCache) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 	return c.getObjectsWithMAC("__deleted__:")
 }
 
-func (c *_RepositoryCache) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
+func (c *_RepositoryCache) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
 	return c.getObjectsWithMAC(fmt.Sprintf("__deleted__:%d:", blobType))
 }
 
-func (c *_RepositoryCache) DelDeleted(blobType resources.Type, blobCsum objects.MAC) error {
+func (c *_RepositoryCache) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
 	return c.delete("__deleted__", fmt.Sprintf("%d:%x", blobType, blobCsum))
 }
 

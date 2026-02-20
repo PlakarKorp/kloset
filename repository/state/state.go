@@ -43,7 +43,7 @@ type EntryType uint8
 const (
 	ET_METADATA      EntryType = 1
 	ET_LOCATIONS     EntryType = 2
-	ET_DELETED       EntryType = 3
+	ET_COLOURED      EntryType = 3
 	ET_PACKFILE      EntryType = 4
 	ET_CONFIGURATION EntryType = 5
 )
@@ -72,13 +72,13 @@ type DeltaEntry struct {
 
 const DeltaEntrySerializedSize = 1 + 4 + 32 + LocationSerializedSize + 4
 
-type DeletedEntry struct {
+type ColouredEntry struct {
 	Type resources.Type
 	Blob objects.MAC
 	When time.Time
 }
 
-const DeletedEntrySerializedSize = 1 + 32 + 8
+const ColouredEntrySerializedSize = 1 + 32 + 8
 
 type PackfileEntry struct {
 	Packfile  objects.MAC
@@ -273,17 +273,17 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 		}
 	}
 
-	for _, entry := range ls.cache.GetDeleteds() {
-		if _, err := w.Write([]byte{byte(ET_DELETED)}); err != nil {
-			return fmt.Errorf("failed to write deleted entry type: %w", err)
+	for _, entry := range ls.cache.GetColouredEntries() {
+		if _, err := w.Write([]byte{byte(ET_COLOURED)}); err != nil {
+			return fmt.Errorf("failed to write coloured entry type: %w", err)
 		}
 
-		if err := writeUint32(DeletedEntrySerializedSize); err != nil {
-			return fmt.Errorf("failed to write deleted entry length: %w", err)
+		if err := writeUint32(ColouredEntrySerializedSize); err != nil {
+			return fmt.Errorf("failed to write coloured entry length: %w", err)
 		}
 
 		if _, err := w.Write(entry); err != nil {
-			return fmt.Errorf("failed to write deleted entry: %w", err)
+			return fmt.Errorf("failed to write coloured entry: %w", err)
 		}
 	}
 
@@ -428,7 +428,7 @@ func (pe *PackfileEntry) ToBytes() (ret []byte) {
 	return
 }
 
-func DeletedEntryFromBytes(buf []byte) (de DeletedEntry, err error) {
+func ColouredEntryFromBytes(buf []byte) (de ColouredEntry, err error) {
 	bbuf := bytes.NewBuffer(buf)
 
 	typ, err := bbuf.ReadByte()
@@ -443,7 +443,7 @@ func DeletedEntryFromBytes(buf []byte) (de DeletedEntry, err error) {
 		return
 	}
 	if n < len(objects.MAC{}) {
-		return de, fmt.Errorf("Short read while deserializing deleted entry")
+		return de, fmt.Errorf("Short read while deserializing coloured entry")
 	}
 
 	timestamp := binary.LittleEndian.Uint64(bbuf.Next(8))
@@ -452,7 +452,7 @@ func DeletedEntryFromBytes(buf []byte) (de DeletedEntry, err error) {
 	return
 }
 
-func (de *DeletedEntry) _toBytes(buf []byte) {
+func (de *ColouredEntry) _toBytes(buf []byte) {
 	pos := 0
 	buf[pos] = byte(de.Type)
 	pos++
@@ -461,8 +461,8 @@ func (de *DeletedEntry) _toBytes(buf []byte) {
 	binary.LittleEndian.PutUint64(buf[pos:], uint64(de.When.UnixNano()))
 }
 
-func (de *DeletedEntry) ToBytes() (ret []byte) {
-	ret = make([]byte, DeletedEntrySerializedSize)
+func (de *ColouredEntry) ToBytes() (ret []byte) {
+	ret = make([]byte, ColouredEntrySerializedSize)
 	de._toBytes(ret)
 	return
 }
@@ -528,7 +528,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 	/* Deserialize LOCATIONS */
 	et_buf := make([]byte, 1)
 	de_buf := make([]byte, DeltaEntrySerializedSize)
-	deleted_buf := make([]byte, DeletedEntrySerializedSize)
+	coloured_buf := make([]byte, ColouredEntrySerializedSize)
 	pe_buf := make([]byte, PackfileEntrySerializedSize)
 	for {
 		n, err := r.Read(et_buf)
@@ -568,21 +568,21 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return err
 			}
 
-		case ET_DELETED:
-			if length != DeletedEntrySerializedSize {
-				return fmt.Errorf("failed to read deleted entry wrong length got(%d)/expected(%d)", length, DeletedEntrySerializedSize)
+		case ET_COLOURED:
+			if length != ColouredEntrySerializedSize {
+				return fmt.Errorf("failed to read coloured entry wrong length got(%d)/expected(%d)", length, ColouredEntrySerializedSize)
 			}
 
-			if n, err := io.ReadFull(r, deleted_buf); err != nil {
-				return fmt.Errorf("failed to read deleted entry %w, read(%d)/expected(%d)", err, n, length)
+			if n, err := io.ReadFull(r, coloured_buf); err != nil {
+				return fmt.Errorf("failed to read coloured entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			deleted, err := DeletedEntryFromBytes(deleted_buf)
+			coloured, err := ColouredEntryFromBytes(coloured_buf)
 			if err != nil {
-				return fmt.Errorf("failed to deserialize deleted entry %w", err)
+				return fmt.Errorf("failed to deserialize coloured entry %w", err)
 			}
 
-			if err := ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf); err != nil {
+			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
 				return err
 			}
 		case ET_PACKFILE:
@@ -660,13 +660,13 @@ func (ls *LocalState) mergeFromCache(from caching.StateCache) error {
 		}
 	}
 
-	for _, deleted_buf := range from.GetDeleteds() {
-		deleted, err := DeletedEntryFromBytes(deleted_buf)
+	for _, coloured_buf := range from.GetColouredEntries() {
+		coloured, err := ColouredEntryFromBytes(coloured_buf)
 		if err != nil {
-			return fmt.Errorf("failed to deserialize deleted entry %w", err)
+			return fmt.Errorf("failed to deserialize coloured entry %w", err)
 		}
 
-		if err := ls.cache.PutDeleted(deleted.Type, deleted.Blob, deleted_buf); err != nil {
+		if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
 			return err
 		}
 	}
@@ -730,8 +730,8 @@ func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool 
 			continue
 		}
 
-		deleted, _ := ls.HasDeletedResource(resources.RT_PACKFILE, de.Location.Packfile)
-		if ok && !deleted {
+		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, de.Location.Packfile)
+		if ok && !coloured {
 			return true
 		}
 	}
@@ -753,8 +753,8 @@ func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC
 			return Location{}, false, err
 		}
 
-		deleted, _ := ls.HasDeletedResource(resources.RT_PACKFILE, de.Location.Packfile)
-		if ok && !deleted {
+		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, de.Location.Packfile)
+		if ok && !coloured {
 			delta = &de
 			break
 		}
@@ -822,7 +822,7 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 				continue
 			}
 
-			has, err := ls.cache.HasDeleted(resources.RT_SNAPSHOT, de.Blob)
+			has, err := ls.cache.HasColoured(resources.RT_SNAPSHOT, de.Blob)
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
@@ -894,17 +894,17 @@ func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 	}
 }
 
-func (ls *LocalState) DeleteResource(rtype resources.Type, resource objects.MAC) error {
-	de := DeletedEntry{
+func (ls *LocalState) ColourResource(rtype resources.Type, resource objects.MAC) error {
+	de := ColouredEntry{
 		Type: rtype,
 		Blob: resource,
 		When: time.Now(),
 	}
-	return ls.cache.PutDeleted(de.Type, de.Blob, de.ToBytes())
+	return ls.cache.PutColoured(de.Type, de.Blob, de.ToBytes())
 }
 
-func (ls *LocalState) HasDeletedResource(rtype resources.Type, resource objects.MAC) (bool, error) {
-	return ls.cache.HasDeleted(rtype, resource)
+func (ls *LocalState) HasColouredResource(rtype resources.Type, resource objects.MAC) (bool, error) {
+	return ls.cache.HasColoured(rtype, resource)
 }
 
 // Public function to insert a new configuration, beware this is to be
@@ -948,10 +948,10 @@ func (ls *LocalState) insertOrUpdateConfiguration(ce ConfigurationEntry) error {
 	return nil
 }
 
-func (ls *LocalState) ListDeletedResources(rtype resources.Type) iter.Seq2[DeletedEntry, error] {
-	return func(yield func(DeletedEntry, error) bool) {
-		for _, buf := range ls.cache.GetDeletedsByType(rtype) {
-			de, err := DeletedEntryFromBytes(buf)
+func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[ColouredEntry, error] {
+	return func(yield func(ColouredEntry, error) bool) {
+		for _, buf := range ls.cache.GetColouredEntriesByType(rtype) {
+			de, err := ColouredEntryFromBytes(buf)
 
 			if !yield(de, err) {
 				return
@@ -960,8 +960,8 @@ func (ls *LocalState) ListDeletedResources(rtype resources.Type) iter.Seq2[Delet
 	}
 }
 
-func (ls *LocalState) DelDeletedResource(rtype resources.Type, resourceMAC objects.MAC) error {
-	return ls.cache.DelDeleted(rtype, resourceMAC)
+func (ls *LocalState) DelColouredResource(rtype resources.Type, resourceMAC objects.MAC) error {
+	return ls.cache.DelColoured(rtype, resourceMAC)
 }
 
 func (mt *Metadata) ToBytes() ([]byte, error) {

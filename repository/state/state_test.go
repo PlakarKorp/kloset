@@ -117,25 +117,25 @@ func (m *mockStateCache) DelDelta(blobType resources.Type, blobCsum objects.MAC,
 	return nil
 }
 
-func (m *mockStateCache) PutDeleted(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
+func (m *mockStateCache) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
 	m.deleteds[key] = data
 	return nil
 }
 
-func (m *mockStateCache) HasDeleted(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
+func (m *mockStateCache) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
 	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
 	_, exists := m.deleteds[key]
 	return exists, nil
 }
 
-func (m *mockStateCache) DelDeleted(blobType resources.Type, blobCsum objects.MAC) error {
+func (m *mockStateCache) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
 	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
 	delete(m.deleteds, key)
 	return nil
 }
 
-func (m *mockStateCache) GetDeletedsByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
+func (m *mockStateCache) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
 		for key, data := range m.deleteds {
 			parts := strings.Split(key, ":")
@@ -152,7 +152,7 @@ func (m *mockStateCache) GetDeletedsByType(blobType resources.Type) iter.Seq2[ob
 	}
 }
 
-func (m *mockStateCache) GetDeleteds() iter.Seq2[objects.MAC, []byte] {
+func (m *mockStateCache) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
 		for key, data := range m.deleteds {
 			parts := strings.Split(key, ":")
@@ -406,12 +406,12 @@ func TestSerializeToStream(t *testing.T) {
 	}
 	state.PutDelta(deltaEntry)
 
-	deletedEntry := &DeletedEntry{
+	deletedEntry := &ColouredEntry{
 		Type: resources.RT_OBJECT,
 		Blob: objects.MAC{9, 10, 11, 12},
 		When: time.Now(),
 	}
-	state.DeleteResource(deletedEntry.Type, deletedEntry.Blob)
+	state.ColourResource(deletedEntry.Type, deletedEntry.Blob)
 
 	packfileEntry := &PackfileEntry{
 		Packfile:  objects.MAC{13, 14, 15, 16},
@@ -487,7 +487,7 @@ func TestPackfileEntrySerialization(t *testing.T) {
 }
 
 func TestDeletedEntrySerialization(t *testing.T) {
-	original := &DeletedEntry{
+	original := &ColouredEntry{
 		Type: resources.RT_OBJECT,
 		Blob: objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
 		When: time.Now().Truncate(time.Nanosecond),
@@ -495,10 +495,10 @@ func TestDeletedEntrySerialization(t *testing.T) {
 
 	// Serialize
 	data := original.ToBytes()
-	require.Len(t, data, DeletedEntrySerializedSize)
+	require.Len(t, data, ColouredEntrySerializedSize)
 
 	// Deserialize
-	deserialized, err := DeletedEntryFromBytes(data)
+	deserialized, err := ColouredEntryFromBytes(data)
 	require.NoError(t, err)
 
 	// Verify
@@ -555,7 +555,7 @@ func TestBlobExists(t *testing.T) {
 	require.True(t, exists)
 
 	// Test with deleted packfile
-	state.DeleteResource(resources.RT_PACKFILE, deltaEntry.Location.Packfile)
+	state.ColourResource(resources.RT_PACKFILE, deltaEntry.Location.Packfile)
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
@@ -744,11 +744,11 @@ func TestDeleteResource(t *testing.T) {
 	state := NewLocalState(cache)
 
 	resource := objects.MAC{1, 2, 3, 4}
-	err := state.DeleteResource(resources.RT_OBJECT, resource)
+	err := state.ColourResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 
 	// Verify resource is marked as deleted
-	hasDeleted, err := state.HasDeletedResource(resources.RT_OBJECT, resource)
+	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 	require.True(t, hasDeleted)
 }
@@ -760,15 +760,15 @@ func TestHasDeletedResource(t *testing.T) {
 	resource := objects.MAC{1, 2, 3, 4}
 
 	// Test non-existent deleted resource
-	hasDeleted, err := state.HasDeletedResource(resources.RT_OBJECT, resource)
+	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 	require.False(t, hasDeleted)
 
 	// Delete the resource
-	state.DeleteResource(resources.RT_OBJECT, resource)
+	state.ColourResource(resources.RT_OBJECT, resource)
 
 	// Test existing deleted resource
-	hasDeleted, err = state.HasDeletedResource(resources.RT_OBJECT, resource)
+	hasDeleted, err = state.HasColouredResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 	require.True(t, hasDeleted)
 }
@@ -803,12 +803,12 @@ func TestListDeletedResources(t *testing.T) {
 	resource1 := objects.MAC{1, 2, 3, 4}
 	resource2 := objects.MAC{5, 6, 7, 8}
 
-	state.DeleteResource(resources.RT_OBJECT, resource1)
-	state.DeleteResource(resources.RT_OBJECT, resource2)
+	state.ColourResource(resources.RT_OBJECT, resource1)
+	state.ColourResource(resources.RT_OBJECT, resource2)
 
 	// List deleted resources
-	var found []DeletedEntry
-	for deleted, err := range state.ListDeletedResources(resources.RT_OBJECT) {
+	var found []ColouredEntry
+	for deleted, err := range state.ListColouredResources(resources.RT_OBJECT) {
 		require.NoError(t, err)
 		found = append(found, deleted)
 	}
@@ -827,19 +827,19 @@ func TestDelDeletedResource(t *testing.T) {
 	resource := objects.MAC{1, 2, 3, 4}
 
 	// Delete resource
-	state.DeleteResource(resources.RT_OBJECT, resource)
+	state.ColourResource(resources.RT_OBJECT, resource)
 
 	// Verify it's deleted
-	hasDeleted, err := state.HasDeletedResource(resources.RT_OBJECT, resource)
+	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 	require.True(t, hasDeleted)
 
 	// Remove deleted resource
-	err = state.DelDeletedResource(resources.RT_OBJECT, resource)
+	err = state.DelColouredResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 
 	// Verify it's no longer marked as deleted
-	hasDeleted, err = state.HasDeletedResource(resources.RT_OBJECT, resource)
+	hasDeleted, err = state.HasColouredResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 	require.False(t, hasDeleted)
 }
@@ -887,7 +887,7 @@ func TestPackfileEntryFromBytesError(t *testing.T) {
 
 func TestDeletedEntryFromBytesError(t *testing.T) {
 	// Test with insufficient data
-	_, err := DeletedEntryFromBytes([]byte{1, 2, 3}) // Too short
+	_, err := ColouredEntryFromBytes([]byte{1, 2, 3}) // Too short
 	require.Error(t, err)
 }
 
