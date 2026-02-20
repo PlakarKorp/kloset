@@ -48,6 +48,11 @@ const (
 	ET_CONFIGURATION EntryType = 5
 )
 
+type Header struct {
+	parent objects.MAC
+	// XXX: Do we want somet padding in there?
+}
+
 type Metadata struct {
 	Version   versioning.Version `msgpack:"version"`
 	Timestamp time.Time          `msgpack:"timestamp"`
@@ -100,6 +105,7 @@ type ConfigurationEntry struct {
 //   - Delta entries are stored under another dedicated prefix and are keyed by
 //     their issuing state.
 type LocalState struct {
+	Header   Header
 	Metadata Metadata
 
 	// Contains live configuration values (most up to date loaded from
@@ -119,6 +125,11 @@ type LocalState struct {
 	cache caching.StateCache
 }
 
+// XXX: Needs a big refactoring to split this into three different concepts:
+// 1- A "LocalState" representing an unitary state but loaded in cache.
+// 2- The local aggregated state (aka the collection of "LocalState")
+// 3- A delta state, which is a special version of the LocalState that is being
+// mutated in order to be serialized.
 func NewLocalState(cache caching.StateCache) *LocalState {
 	return &LocalState{
 		Metadata: Metadata{
@@ -143,6 +154,7 @@ func FromStream(rd io.Reader, cache caching.StateCache) (*LocalState, error) {
 // Mainly used to construct Delta states when backing up.
 func (ls *LocalState) Derive(cache caching.StateCache) *LocalState {
 	st := NewLocalState(cache)
+	st.Header.parent = ls.Header.parent
 	st.Metadata.Serial = ls.Metadata.Serial
 
 	return st
@@ -193,6 +205,9 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader) error {
 		return nil
 	}
 
+	// This implicitely sets the parent, see the note about refactoring, and
+	// since we Derive() to construct Delta streams this will set the correct
+	// parent. This is all way too intricated and will be fixed by a refacto.
 	err = ls.deserializeFromStream(rd)
 	if err != nil {
 		return err
@@ -257,6 +272,11 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 		binary.LittleEndian.PutUint32(buf, value)
 		_, err := w.Write(buf)
 		return err
+	}
+
+	// First put the header
+	if _, err := w.Write(ls.Header.parent[:]); err != nil {
+		return fmt.Errorf("failed to write header parent %w", err)
 	}
 
 	for _, entry := range ls.cache.GetDeltas() {
@@ -523,6 +543,11 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 			return 0, err
 		}
 		return binary.LittleEndian.Uint32(buf), nil
+	}
+
+	n, err := r.Read(ls.Header.parent[:])
+	if err != nil || n != len(objects.MAC{}) {
+		return fmt.Errorf("failed to read header %w", err)
 	}
 
 	/* Deserialize LOCATIONS */
