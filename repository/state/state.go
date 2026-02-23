@@ -48,12 +48,14 @@ const (
 	ET_CONFIGURATION EntryType = 5
 )
 
-type Header struct {
-	parent objects.MAC
-	// XXX: Do we want somet padding in there?
-}
-
+// In the loaded format, both header and trailer are loaded inside the same
+// byte array and same column.
+// On disk they are split.
 type Metadata struct {
+	// Header part of the on disk format.
+	Parent objects.MAC `msgpack:"parent"`
+
+	// Prelude part of the on disk format.
 	Version   versioning.Version `msgpack:"version"`
 	Timestamp time.Time          `msgpack:"timestamp"`
 	Serial    uuid.UUID          `msgpack:"serial"`
@@ -105,7 +107,6 @@ type ConfigurationEntry struct {
 //   - Delta entries are stored under another dedicated prefix and are keyed by
 //     their issuing state.
 type LocalState struct {
-	Header   Header
 	Metadata Metadata
 
 	// Contains live configuration values (most up to date loaded from
@@ -130,15 +131,21 @@ type LocalState struct {
 // 2- The local aggregated state (aka the collection of "LocalState")
 // 3- A delta state, which is a special version of the LocalState that is being
 // mutated in order to be serialized.
-func NewLocalState(cache caching.StateCache) *LocalState {
+func NewLocalState(cache caching.StateCache) (*LocalState, error) {
+	parentState, err := cache.GetLatestState()
+	if err != nil {
+		return nil, err
+	}
+
 	return &LocalState{
 		Metadata: Metadata{
+			Parent:    parentState,
 			Version:   versioning.FromString(VERSION),
 			Timestamp: time.Now(),
 		},
 		configuration: make(map[string]ConfigurationEntry),
 		cache:         cache,
-	}
+	}, nil
 }
 
 func FromStream(rd io.Reader, cache caching.StateCache) (*LocalState, error) {
@@ -153,11 +160,16 @@ func FromStream(rd io.Reader, cache caching.StateCache) (*LocalState, error) {
 // Derive constructs a new state backed by *cache*, keeping the same serial as previous one.
 // Mainly used to construct Delta states when backing up.
 func (ls *LocalState) Derive(cache caching.StateCache) *LocalState {
-	st := NewLocalState(cache)
-	st.Header.parent = ls.Header.parent
-	st.Metadata.Serial = ls.Metadata.Serial
-
-	return st
+	return &LocalState{
+		Metadata: Metadata{
+			Parent:    ls.Metadata.Parent,
+			Version:   versioning.FromString(VERSION),
+			Timestamp: time.Now(),
+			Serial:    ls.Metadata.Serial,
+		},
+		configuration: make(map[string]ConfigurationEntry),
+		cache:         cache,
+	}
 }
 
 // Finds the latest (current) serial in the aggregate state, and if none sets
@@ -191,6 +203,19 @@ func (ls *LocalState) UpdateSerialOr(serial uuid.UUID) error {
 	}
 
 	return nil
+}
+
+// Reads only the Header part of the Metadata structure, the rest will be
+// uninitialized.
+func ReadHeader(rd io.Reader) (*Metadata, error) {
+	hdr := &Metadata{}
+
+	n, err := rd.Read(hdr.Parent[:])
+	if err != nil || n != len(objects.MAC{}) {
+		return nil, fmt.Errorf("failed to read header %w", err)
+	}
+
+	return hdr, nil
 }
 
 /* Insert the state denotated by stateID and its associated delta entries read
@@ -255,7 +280,7 @@ func (ls *LocalState) GetStates() (map[objects.MAC][]byte, error) {
 	return ls.cache.GetStates()
 }
 
-/* On disk format is <EntryType><EntryLength><Entry>...N<header>
+/* On disk format is <Header><EntryType><EntryLength><Entry>...N<Metadata>
  * Counting keys would mean iterating twice so we reverse the format and add a
  * type.
  */
@@ -275,7 +300,7 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 	}
 
 	// First put the header
-	if _, err := w.Write(ls.Header.parent[:]); err != nil {
+	if _, err := w.Write(ls.Metadata.Parent[:]); err != nil {
 		return fmt.Errorf("failed to write header parent %w", err)
 	}
 
@@ -545,7 +570,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 		return binary.LittleEndian.Uint32(buf), nil
 	}
 
-	n, err := r.Read(ls.Header.parent[:])
+	n, err := r.Read(ls.Metadata.Parent[:])
 	if err != nil || n != len(objects.MAC{}) {
 		return fmt.Errorf("failed to read header %w", err)
 	}

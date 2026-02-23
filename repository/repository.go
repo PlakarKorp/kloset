@@ -155,7 +155,10 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		return nil, err
 	}
 
-	r.state = state.NewLocalState(cacheInstance)
+	r.state, err = state.NewLocalState(cacheInstance)
+	if err != nil {
+		return nil, err
+	}
 
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
 		hasher := r.GetMACHasher()
@@ -218,7 +221,10 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		return nil, err
 	}
 
-	r.state = state.NewLocalState(cacheInstance)
+	r.state, err = state.NewLocalState(cacheInstance)
+	if err != nil {
+		return nil, err
+	}
 
 	r.macHasherPool = NewHasherPool(func() hash.Hash {
 		hasher := r.GetMACHasher()
@@ -351,7 +357,10 @@ func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) err
 	}()
 
 	/* Use on-disk local state, and merge it with repository's own state */
-	aggregatedState := state.NewLocalState(cacheInstance)
+	aggregatedState, err := state.NewLocalState(cacheInstance)
+	if err != nil {
+		return err
+	}
 
 	// identify local states
 	localStates, err := cacheInstance.GetStates()

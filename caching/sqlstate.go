@@ -201,6 +201,27 @@ func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 
 	return payload, nil
 }
+
+func (c *SQLState) GetLatestState() (objects.MAC, error) {
+	query := "SELECT mac FROM states ORDER BY ROWID DESC LIMIT 1"
+	var strMac string
+	err := c.db.QueryRow(query).Scan(&strMac)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return objects.NilMac, nil
+		}
+
+		return objects.NilMac, err
+	}
+
+	mac, err := hex.DecodeString(strMac)
+	if err != nil {
+		return objects.NilMac, err
+	}
+
+	return objects.MAC(mac), nil
+}
+
 func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 	query := "SELECT mac, payload FROM states;"
 

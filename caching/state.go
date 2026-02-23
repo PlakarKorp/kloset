@@ -11,6 +11,7 @@ type StateCache interface {
 	PutState(stateID objects.MAC, data []byte) error
 	HasState(stateID objects.MAC) (bool, error)
 	GetState(stateID objects.MAC) ([]byte, error)
+	GetLatestState() (objects.MAC, error)
 	DelState(stateID objects.MAC) error
 	GetStates() (map[objects.MAC][]byte, error)
 

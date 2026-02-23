@@ -42,6 +42,10 @@ func (c *_RepositoryCache) GetState(stateID objects.MAC) ([]byte, error) {
 	return c.get("__state__", fmt.Sprintf("%x", stateID))
 }
 
+func (c *_RepositoryCache) GetLatestState() (objects.MAC, error) {
+	panic("GetLatestState should never be used on the ScanCache backend")
+}
+
 func (c *_RepositoryCache) DelState(stateID objects.MAC) error {
 	return c.delete("__state__", fmt.Sprintf("%x", stateID))
 }
