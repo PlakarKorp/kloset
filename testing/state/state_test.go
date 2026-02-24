@@ -47,7 +47,7 @@ func TestRebuildWithRemoteStates(t *testing.T) {
 		data = append(data, []byte{byte(state.ET_METADATA)}...)
 		data = append(data, b...)
 
-		err = repo.PutState(objects.MAC{byte(i)}, bytes.NewReader(data))
+		err = repo.PutState(objects.MAC{byte(i + 1)}, bytes.NewReader(data))
 		require.NoError(t, err)
 	}
 
@@ -66,7 +66,7 @@ func TestRebuildWithLocalState(t *testing.T) {
 	cache := newCache()
 
 	for i := range 3 {
-		cache.states = append(cache.states, &stateEntry{id: objects.MAC{byte(i)}, data: nil})
+		cache.states = append(cache.states, &stateEntry{id: objects.MAC{byte(i + 1)}, data: nil})
 	}
 
 	for i := range 5 {
@@ -83,7 +83,7 @@ func TestRebuildWithLocalState(t *testing.T) {
 		data = append(data, []byte{byte(state.ET_METADATA)}...)
 		data = append(data, b...)
 
-		err = repo.PutState(objects.MAC{byte(i)}, bytes.NewReader(data))
+		err = repo.PutState(objects.MAC{byte(i + 1)}, bytes.NewReader(data))
 		require.NoError(t, err)
 	}
 
@@ -108,7 +108,7 @@ func TestRebuildNewLayout(t *testing.T) {
 	cache := newCache()
 
 	for i := range 3 {
-		cache.states = append(cache.states, &stateEntry{id: objects.MAC{byte(i)}, data: nil})
+		cache.states = append(cache.states, &stateEntry{id: objects.MAC{byte(i + 1)}, data: nil})
 	}
 
 	for i := range 5 {
@@ -130,7 +130,7 @@ func TestRebuildNewLayout(t *testing.T) {
 		data = append(data, []byte{byte(state.ET_METADATA)}...)
 		data = append(data, b...)
 
-		err = repo.PutState(objects.MAC{byte(i)}, bytes.NewReader(data))
+		err = repo.PutState(objects.MAC{byte(i + 1)}, bytes.NewReader(data))
 		require.NoError(t, err)
 	}
 

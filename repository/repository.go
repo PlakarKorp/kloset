@@ -249,6 +249,58 @@ func (r *Repository) getStateFilePath(stateID objects.MAC) string {
 	return path.Join(r.stateCacheDir(), fmt.Sprintf("%x.state", stateID))
 }
 
+func TopoSort(states []objects.MAC, getParent func(stateID objects.MAC) (objects.MAC, error)) ([]objects.MAC, error) {
+	// Parent to children map, we reverse the arrows of the graph because it
+	// makes it way easier given the kind of graph we deal with (only one
+	// parent)
+	dag := map[objects.MAC][]objects.MAC{}
+	S := []objects.MAC{}
+	for _, stateID := range states {
+		p, err := getParent(stateID)
+		if err != nil {
+			return nil, err
+		}
+
+		// There are two ways to be a "root", either the state is a true root
+		// (on a fresh repository for example), and its parent is Nil, or it's a
+		// so called  "subroot" because we are processing a sub part of the
+		// graph. If we already have ingested states, and we ingest a bunch more
+		// we do not consider the full graph, only the graph that is composed of
+		// the current states we ingest. As such a "pseudo root" is a state for
+		// which its parent is not part of the set of states we are ingesting.
+		if p == objects.NilMac {
+			S = append(S, stateID)
+		} else {
+			found := false
+			for _, otherState := range states {
+				if p == otherState {
+					found = true
+					break
+				}
+			}
+
+			if !found {
+				S = append(S, stateID)
+			}
+		}
+
+		dag[p] = append(dag[p], stateID)
+	}
+
+	orderedStates := make([]objects.MAC, 0, len(states))
+	for len(S) != 0 {
+		n := S[len(S)-1]
+		S = S[:len(S)-1]
+
+		orderedStates = append(orderedStates, n)
+		// We can simply do this (as opposed to the more complex Kahn's
+		// algorithm because by definition our states only have one parent.
+		S = append(S, dag[n]...)
+	}
+
+	return orderedStates, nil
+}
+
 func (r *Repository) RebuildState() error {
 	t0 := time.Now()
 	defer func() {
@@ -290,8 +342,32 @@ func (r *Repository) RebuildState() error {
 		}
 	}
 
+	// We need to order the states in a "partial topological order". Same parent
+	// state can be in any order.
+	// When ingesting state onto an existing local tree of states we just build
+	// a "partial topological order" out of that subtree not the full tree, this
+	// is safe for reasons outside the scope of this comment, but basically the
+	// Lock that maintenance is taking is enough to guarantee it.
+	orderedStates, err := TopoSort(missingStates, func(stateID objects.MAC) (objects.MAC, error) {
+		remoteStateRd, v, err := r.GetState(stateID)
+		if err != nil {
+			return objects.NilMac, err
+		}
+
+		hdr, err := state.ReadHeader(remoteStateRd, v)
+		remoteStateRd.Close()
+		if err != nil {
+			return objects.NilMac, err
+		}
+
+		return hdr.Parent, nil
+	})
+	if err != nil {
+		return err
+	}
+
 	rebuilt := false
-	for _, stateID := range missingStates {
+	for _, stateID := range orderedStates {
 		remoteStateRd, v, err := r.GetState(stateID)
 		if err != nil {
 			return err
@@ -397,8 +473,26 @@ func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) err
 		}
 	}
 
+	orderedStates, err := TopoSort(missingStates, func(stateID objects.MAC) (objects.MAC, error) {
+		remoteStateRd, v, err := r.GetState(stateID)
+		if err != nil {
+			return objects.NilMac, err
+		}
+
+		hdr, err := state.ReadHeader(remoteStateRd, v)
+		remoteStateRd.Close()
+		if err != nil {
+			return objects.NilMac, err
+		}
+
+		return hdr.Parent, nil
+	})
+	if err != nil {
+		return err
+	}
+
 	rebuilt := false
-	for _, stateID := range missingStates {
+	for _, stateID := range orderedStates {
 		remoteStateRd, v, err := r.GetState(stateID)
 		if err != nil {
 			return err
