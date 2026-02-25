@@ -34,7 +34,6 @@ import (
 	"github.com/PlakarKorp/kloset/repository/state"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
-	"github.com/google/uuid"
 )
 
 var (
@@ -1346,27 +1345,6 @@ func (r *Repository) ListPackfiles() iter.Seq[objects.MAC] {
 		r.Logger().Trace("repository", "ListPackfiles(): %s", time.Since(t0))
 	}()
 	return r.state.ListPackfiles()
-}
-
-// Saves the full aggregated state to the repository, might be heavy handed use
-// with care.
-func (r *Repository) PutCurrentState() error {
-	pr, pw := io.Pipe()
-
-	/* By using a pipe and a goroutine we bound the max size in memory. */
-	go func() {
-		defer pw.Close()
-		if err := r.state.SerializeToStream(pw); err != nil {
-			pw.CloseWithError(err)
-		}
-	}()
-
-	newSerial := uuid.New()
-	r.state.Metadata.Serial = newSerial
-	r.state.Metadata.Timestamp = time.Now()
-	id := r.ComputeMAC(newSerial[:])
-
-	return r.PutState(id, pr)
 }
 
 func (r *Repository) Logger() *logging.Logger {
