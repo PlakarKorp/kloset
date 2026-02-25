@@ -603,3 +603,13 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 		}
 	}
 }
+
+// Those two are only to construct deltas, when working with the local state we
+// do the actual deletion.
+func (c *SQLState) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
+	panic("PutDeleted is not to be used with local state")
+}
+
+func (c *SQLState) GetDeletedEntries() iter.Seq[[]byte] {
+	panic("PutDeleted is not to be used with local state")
+}

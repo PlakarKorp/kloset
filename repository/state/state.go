@@ -46,6 +46,7 @@ const (
 	ET_COLOURED      EntryType = 3
 	ET_PACKFILE      EntryType = 4
 	ET_CONFIGURATION EntryType = 5
+	ET_DELETE        EntryType = 6
 )
 
 // In the loaded format, both header and trailer are loaded inside the same
@@ -100,6 +101,15 @@ type ConfigurationEntry struct {
 	Value     []byte
 	CreatedAt time.Time
 }
+
+type DeleteEntry struct {
+	Type     EntryType
+	BlobType resources.Type
+	Blob     objects.MAC
+	Packfile objects.MAC
+}
+
+const DeleteEntrySerializedSize = 1 + 32 + 1 + 32
 
 // A local version of the state, possibly aggregated, that uses on-disk storage.
 //   - States are stored under a dedicated prefix key, with their data being the
@@ -318,6 +328,20 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 		return fmt.Errorf("failed to write header parent %w", err)
 	}
 
+	for entry := range ls.cache.GetDeletedEntries() {
+		if _, err := w.Write([]byte{byte(ET_DELETE)}); err != nil {
+			return fmt.Errorf("failed to write delete entry type: %w", err)
+		}
+
+		if err := writeUint32(DeleteEntrySerializedSize); err != nil {
+			return fmt.Errorf("failed to write delete entry length: %w", err)
+		}
+
+		if _, err := w.Write(entry); err != nil {
+			return fmt.Errorf("failed to write delete entry: %w", err)
+		}
+	}
+
 	for _, entry := range ls.cache.GetDeltas() {
 		if _, err := w.Write([]byte{byte(ET_LOCATIONS)}); err != nil {
 			return fmt.Errorf("failed to write delta entry type: %w", err)
@@ -391,6 +415,58 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 
 	return nil
 
+}
+
+func DeleteEntryFromBytes(buf []byte) (del DeleteEntry, err error) {
+	bbuf := bytes.NewBuffer(buf)
+
+	typ, err := bbuf.ReadByte()
+	if err != nil {
+		return
+	}
+	del.Type = EntryType(typ)
+
+	typ, err = bbuf.ReadByte()
+	if err != nil {
+		return
+	}
+	del.BlobType = resources.Type(typ)
+
+	n, err := bbuf.Read(del.Blob[:])
+	if err != nil {
+		return
+	}
+	if n < len(objects.MAC{}) {
+		return del, fmt.Errorf("short read while deserializing delete entry")
+	}
+
+	n, err = bbuf.Read(del.Packfile[:])
+	if err != nil {
+		return
+	}
+	if n < len(objects.MAC{}) {
+		return del, fmt.Errorf("short read while deserializing delete entry")
+	}
+
+	return
+}
+
+func (del *DeleteEntry) _toBytes(buf []byte) {
+	pos := 0
+	buf[pos] = byte(del.Type)
+	pos++
+
+	buf[pos] = byte(del.BlobType)
+	pos++
+
+	pos += copy(buf[pos:], del.Blob[:])
+	pos += copy(buf[pos:], del.Packfile[:])
+}
+
+func (de *DeleteEntry) ToBytes() (ret []byte) {
+	ret = make([]byte, DeleteEntrySerializedSize)
+	de._toBytes(ret)
+	return
 }
 
 func DeltaEntryFromBytes(buf []byte) (de DeltaEntry, err error) {
@@ -592,6 +668,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 	/* Deserialize LOCATIONS */
 	et_buf := make([]byte, 1)
 	de_buf := make([]byte, DeltaEntrySerializedSize)
+	del_buf := make([]byte, DeleteEntrySerializedSize)
 	coloured_buf := make([]byte, ColouredEntrySerializedSize)
 	pe_buf := make([]byte, PackfileEntrySerializedSize)
 	for {
@@ -612,6 +689,30 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 
 		//XXX: This is screaming refactorization, but is a bit subtil.
 		switch entryType {
+		case ET_DELETE:
+			if length != DeleteEntrySerializedSize {
+				return fmt.Errorf("failed to read delete entry wrong length got(%d)/expected(%d)", length, DeltaEntrySerializedSize)
+			}
+
+			if n, err := io.ReadFull(r, del_buf); err != nil {
+				return fmt.Errorf("failed to read delete entry %w, read(%d)/expected(%d)", err, n, length)
+			}
+
+			toDel, err := DeleteEntryFromBytes(del_buf)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize delta entry %w", err)
+			}
+
+			switch toDel.Type {
+			case ET_LOCATIONS:
+				ls.cache.DelDelta(toDel.BlobType, toDel.Blob, toDel.Packfile)
+			case ET_COLOURED:
+				ls.cache.DelColoured(toDel.BlobType, toDel.Blob)
+			case ET_PACKFILE:
+				ls.cache.DelPackfile(toDel.Packfile)
+			default:
+				return fmt.Errorf("invalid delete Type %d", toDel.Type)
+			}
 		case ET_LOCATIONS:
 			if length != DeltaEntrySerializedSize {
 				return fmt.Errorf("failed to read delta entry wrong length got(%d)/expected(%d)", length, DeltaEntrySerializedSize)
@@ -687,7 +788,6 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 			// Our version doesn't know this entry type, just skip it.
 			io.CopyN(io.Discard, r, int64(length))
 		}
-
 	}
 
 	/* Deserialize Metadata */
@@ -917,13 +1017,19 @@ func (ls *LocalState) PutDelta(de *DeltaEntry) error {
 }
 
 func (ls *LocalState) DelDelta(Type resources.Type, blobMAC, packfileMAC objects.MAC) error {
-	return ls.cache.DelDelta(Type, blobMAC, packfileMAC)
+	del := DeleteEntry{
+		Type:     ET_LOCATIONS,
+		BlobType: Type,
+		Blob:     blobMAC,
+		Packfile: packfileMAC,
+	}
+
+	return ls.cache.PutDeleted(uint8(ET_LOCATIONS), blobMAC, del.ToBytes())
 }
 
 func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool {
 	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
 		de, err := DeltaEntryFromBytes(buf)
-
 		if err != nil {
 			continue
 		}
@@ -981,7 +1087,14 @@ func (ls *LocalState) PutPackfile(stateId, packfile objects.MAC) error {
 }
 
 func (ls *LocalState) DelPackfile(packfile objects.MAC) error {
-	return ls.cache.DelPackfile(packfile)
+	del := DeleteEntry{
+		Type:     ET_PACKFILE,
+		BlobType: 0,
+		Blob:     objects.NilMac,
+		Packfile: packfile,
+	}
+
+	return ls.cache.PutDeleted(uint8(ET_PACKFILE), packfile, del.ToBytes())
 }
 
 func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
@@ -1164,7 +1277,14 @@ func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[Colo
 }
 
 func (ls *LocalState) DelColouredResource(rtype resources.Type, resourceMAC objects.MAC) error {
-	return ls.cache.DelColoured(rtype, resourceMAC)
+	del := DeleteEntry{
+		Type:     ET_COLOURED,
+		BlobType: rtype,
+		Blob:     resourceMAC,
+		Packfile: objects.NilMac,
+	}
+
+	return ls.cache.PutDeleted(uint8(ET_COLOURED), resourceMAC, del.ToBytes())
 }
 
 func (mt *Metadata) ToBytes() ([]byte, error) {
