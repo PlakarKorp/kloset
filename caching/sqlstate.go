@@ -518,6 +518,17 @@ func (c *SQLState) HasPackfile(packfile objects.MAC) (bool, error) {
 func (c *SQLState) DelPackfile(packfile objects.MAC) error {
 	packMACHex := hex.EncodeToString(packfile[:])
 	_, err := c.db.Exec("DELETE FROM packfiles WHERE mac = ?;", packMACHex)
+
+	if err != nil {
+		return err
+	}
+
+	// XXX: This is a big layer violation, but the common interface is getting
+	// out of hand. When we end up splitting the various State implementation
+	// the local state will deal with cascading deletion of packfiles into the
+	// blob it contained. For now we do it here to ease the implementation.
+	_, err = c.db.Exec("DELETE FROM deltas WHERE packfile = ?;", packMACHex)
+
 	return err
 }
 
