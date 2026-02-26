@@ -1285,7 +1285,7 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 	}
 
 	if !exists {
-		return nil, ErrPackfileNotFound
+		return nil, ErrBlobNotFound
 	}
 
 	return r.GetPackfileBlob(loc)
