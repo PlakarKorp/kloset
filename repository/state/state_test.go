@@ -887,31 +887,6 @@ func TestListDeletedResources(t *testing.T) {
 	require.Contains(t, []objects.MAC{found[0].Blob, found[1].Blob}, resource2)
 }
 
-func TestDelDeletedResource(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
-
-	resource := objects.MAC{1, 2, 3, 4}
-
-	// Delete resource
-	state.ColourResource(resources.RT_OBJECT, resource)
-
-	// Verify it's deleted
-	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-	require.True(t, hasDeleted)
-
-	// Remove deleted resource
-	err = state.DelColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-
-	// Verify it's no longer marked as deleted
-	hasDeleted, err = state.HasColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-	require.False(t, hasDeleted)
-}
-
 func TestMetadataSerialization(t *testing.T) {
 	original := &Metadata{
 		Version:   versioning.FromString("1.0.0"),

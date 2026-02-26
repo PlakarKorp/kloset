@@ -66,13 +66,13 @@ func TestRepository(t *testing.T) {
 	t.Run("GetBlob", func(t *testing.T) {
 		_, err := repo.GetBlob(resources.RT_CONFIG, objects.MAC{})
 		require.Error(t, err)
-		require.Equal(t, repository.ErrPackfileNotFound, err)
+		require.Equal(t, repository.ErrBlobNotFound, err)
 	})
 
 	t.Run("GetBlobBytes", func(t *testing.T) {
 		_, err := repo.GetBlobBytes(resources.RT_CONFIG, objects.MAC{})
 		require.Error(t, err)
-		require.Equal(t, repository.ErrPackfileNotFound, err)
+		require.Equal(t, repository.ErrBlobNotFound, err)
 	})
 
 	t.Run("GetLocks", func(t *testing.T) {
@@ -136,8 +136,8 @@ func TestRepositoryState(t *testing.T) {
 		require.NotNil(t, orphans)
 	})
 
-	t.Run("ListDeletedPackfiles", func(t *testing.T) {
-		deleted := repo.ListDeletedPackfiles()
+	t.Run("ListColouredPackfiles", func(t *testing.T) {
+		deleted := repo.ListColouredPackfiles()
 		require.NotNil(t, deleted)
 	})
 
@@ -160,20 +160,10 @@ func TestRepositoryPackfileOperations(t *testing.T) {
 		require.NoError(t, err)
 	})
 
-	t.Run("RemovePackfile", func(t *testing.T) {
-		err := repo.RemovePackfile(objects.MAC{})
-		require.NoError(t, err)
-	})
-
 	t.Run("HasDeletedPackfile", func(t *testing.T) {
 		has, err := repo.HasDeletedPackfile(objects.MAC{})
 		require.NoError(t, err)
 		require.False(t, has)
-	})
-
-	t.Run("RemoveDeletedPackfile", func(t *testing.T) {
-		err := repo.RemoveDeletedPackfile(objects.MAC{})
-		require.NoError(t, err)
 	})
 
 	t.Run("GetPackfileForBlob", func(t *testing.T) {
@@ -275,15 +265,6 @@ func TestRepositoryStateOperations(t *testing.T) {
 
 	t.Run("DeleteState", func(t *testing.T) {
 		err := repo.DeleteState(objects.MAC{})
-		require.NoError(t, err)
-	})
-}
-
-func TestRepositoryBlobOperations(t *testing.T) {
-	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-
-	t.Run("RemoveBlob", func(t *testing.T) {
-		err := repo.RemoveBlob(resources.RT_CONFIG, objects.MAC{}, objects.MAC{})
 		require.NoError(t, err)
 	})
 }
