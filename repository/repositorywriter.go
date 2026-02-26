@@ -197,25 +197,55 @@ func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []
 	return r.PackerManager.Put(-1, Type, mac, data)
 }
 
+// State manipulation function.
 func (r *RepositoryWriter) DeleteStateResource(Type resources.Type, mac objects.MAC) error {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "DeleteStateResource(%s, %x): %s", Type.String(), mac, time.Since(t0))
+		r.Logger().Trace("repositorywriter", "DeleteStateResource(%s, %x): %s", Type.String(), mac, time.Since(t0))
 	}()
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()
-	if err := r.currentDeltaState().ColourResource(Type, mac); err != nil {
-		return err
-	}
+	return r.currentDeltaState().ColourResource(Type, mac)
+}
 
-	return r.state.ColourResource(Type, mac)
+func (r *RepositoryWriter) RemovePackfile(packfileMAC objects.MAC) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repositorywriter", "RemovePackfile(%x): %s", packfileMAC, time.Since(t0))
+	}()
+
+	r.transactionMtx.RLock()
+	defer r.transactionMtx.RUnlock()
+	return r.currentDeltaState().DelPackfile(packfileMAC)
+}
+
+func (r *RepositoryWriter) UncolourPackfile(packfileMAC objects.MAC) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repositorywriter", "UncolourPackfile(%x): %s", packfileMAC, time.Since(t0))
+	}()
+
+	r.transactionMtx.RLock()
+	defer r.transactionMtx.RUnlock()
+	return r.currentDeltaState().DelColouredResource(resources.RT_PACKFILE, packfileMAC)
+}
+
+func (r *RepositoryWriter) RemoveBlob(Type resources.Type, mac, packfileMAC objects.MAC) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repositorywriter", "RemoveBlob(%s, %x, %x): %s", Type, mac, packfileMAC, time.Since(t0))
+	}()
+
+	r.transactionMtx.RLock()
+	defer r.transactionMtx.RUnlock()
+	return r.currentDeltaState().DelDelta(Type, mac, packfileMAC)
 }
 
 func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "PutPackfile(%x): %s", r.currentStateID, time.Since(t0))
+		r.Logger().Trace("repositorywriter", "PutPackfile(%x): %s", r.currentStateID, time.Since(t0))
 	}()
 
 	serializedPackfile, mac, err := pfile.Serialize(r.encode)

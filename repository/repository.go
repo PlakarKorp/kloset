@@ -1068,15 +1068,6 @@ func (r *Repository) DeletePackfile(mac objects.MAC) error {
 	return r.store.Delete(r.appContext, storage.StorageResourcePackfile, mac)
 }
 
-// Removes the packfile from the state, making it unreachable.
-func (r *Repository) RemovePackfile(packfileMAC objects.MAC) error {
-	t0 := time.Now()
-	defer func() {
-		r.Logger().Trace("repository", "RemovePackfile(%x): %s", packfileMAC, time.Since(t0))
-	}()
-	return r.state.DelPackfile(packfileMAC)
-}
-
 func (r *Repository) HasDeletedPackfile(mac objects.MAC) (bool, error) {
 	t0 := time.Now()
 	defer func() {
@@ -1086,10 +1077,10 @@ func (r *Repository) HasDeletedPackfile(mac objects.MAC) (bool, error) {
 	return r.state.HasColouredResource(resources.RT_PACKFILE, mac)
 }
 
-func (r *Repository) ListDeletedPackfiles() iter.Seq2[objects.MAC, time.Time] {
+func (r *Repository) ListColouredPackfiles() iter.Seq2[objects.MAC, time.Time] {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "ListDeletedPackfiles(): %s", time.Since(t0))
+		r.Logger().Trace("repository", "ListColouredPackfiles(): %s", time.Since(t0))
 	}()
 
 	return func(yield func(objects.MAC, time.Time) bool) {
@@ -1124,16 +1115,6 @@ func (r *Repository) ListDeletedSnapShots() iter.Seq2[objects.MAC, time.Time] {
 			}
 		}
 	}
-}
-
-// Removes the deleted packfile entry from the state.
-func (r *Repository) RemoveDeletedPackfile(packfileMAC objects.MAC) error {
-	t0 := time.Now()
-	defer func() {
-		r.Logger().Trace("repository", "RemoveDeletedPackfile(%x): %s", packfileMAC, time.Since(t0))
-	}()
-
-	return r.state.DelColouredResource(resources.RT_PACKFILE, packfileMAC)
 }
 
 func (r *Repository) GetPackfileForBlob(Type resources.Type, mac objects.MAC) (objects.MAC, bool, error) {
@@ -1312,15 +1293,6 @@ func (r *Repository) BlobExists(Type resources.Type, mac objects.MAC) bool {
 	}()
 
 	return r.state.BlobExists(Type, mac)
-}
-
-// Removes the provided blob from our state, making it unreachable
-func (r *Repository) RemoveBlob(Type resources.Type, mac, packfileMAC objects.MAC) error {
-	t0 := time.Now()
-	defer func() {
-		r.Logger().Trace("repository", "DeleteBlob(%s, %x, %x): %s", Type, mac, packfileMAC, time.Since(t0))
-	}()
-	return r.state.DelDelta(Type, mac, packfileMAC)
 }
 
 func (r *Repository) ListOrphanBlobs() iter.Seq2[state.DeltaEntry, error] {
