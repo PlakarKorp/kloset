@@ -35,6 +35,12 @@ type sqlStateBatch struct {
 	deltas []sDelta
 }
 
+// Used to flatten a map, because go is go.
+type kv struct {
+	mac  string
+	data []byte
+}
+
 func NewSQLState(path string, ro bool) (*SQLState, error) {
 	db, err := sqlite.New(path, "state.db", &sqlite.Options{
 		DeleteOnClose: false,
@@ -194,7 +200,6 @@ func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 
 	defer rows.Close()
 
-	// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 	result := make(map[objects.MAC][]byte)
 	for rows.Next() {
 		var strMac string
@@ -250,7 +255,7 @@ func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([]kv, 0)
 		for rows.Next() {
 			var mac string
 			var payload []byte
@@ -260,13 +265,13 @@ func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.
 				continue
 			}
 
-			result[mac] = payload
+			result = append(result, kv{mac, payload})
 		}
-
 		rows.Close()
-		for hexMac, payload := range result {
-			mac, _ := hex.DecodeString(hexMac)
-			if !yield(objects.MAC(mac), payload) {
+
+		for _, r := range result {
+			mac, _ := hex.DecodeString(r.mac)
+			if !yield(objects.MAC(mac), r.data) {
 				return
 			}
 		}
@@ -293,7 +298,7 @@ func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MA
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([]kv, 0)
 		for rows.Next() {
 			var mac string
 			var payload []byte
@@ -303,13 +308,13 @@ func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MA
 				continue
 			}
 
-			result[mac] = payload
+			result = append(result, kv{mac, payload})
 		}
 		rows.Close()
 
-		for hexMac, payload := range result {
-			mac, _ := hex.DecodeString(hexMac)
-			if !yield(objects.MAC(mac), payload) {
+		for _, r := range result {
+			mac, _ := hex.DecodeString(r.mac)
+			if !yield(objects.MAC(mac), r.data) {
 				return
 			}
 		}
@@ -326,7 +331,7 @@ func (c *SQLState) GetDeltas() iter.Seq2[objects.MAC, []byte] {
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([]kv, 0)
 		for rows.Next() {
 			var mac string
 			var payload []byte
@@ -336,13 +341,13 @@ func (c *SQLState) GetDeltas() iter.Seq2[objects.MAC, []byte] {
 				continue
 			}
 
-			result[mac] = payload
+			result = append(result, kv{mac, payload})
 		}
 		rows.Close()
 
-		for hexMac, payload := range result {
-			mac, _ := hex.DecodeString(hexMac)
-			if !yield(objects.MAC(mac), payload) {
+		for _, r := range result {
+			mac, _ := hex.DecodeString(r.mac)
+			if !yield(objects.MAC(mac), r.data) {
 				return
 			}
 		}
@@ -390,7 +395,7 @@ func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([]kv, 0)
 		for rows.Next() {
 			var mac string
 			var payload []byte
@@ -400,13 +405,13 @@ func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 				continue
 			}
 
-			result[mac] = payload
+			result = append(result, kv{mac, payload})
 		}
 		rows.Close()
 
-		for hexMac, payload := range result {
-			mac, _ := hex.DecodeString(hexMac)
-			if !yield(objects.MAC(mac), payload) {
+		for _, r := range result {
+			mac, _ := hex.DecodeString(r.mac)
+			if !yield(objects.MAC(mac), r.data) {
 				return
 			}
 		}
@@ -423,7 +428,7 @@ func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[o
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([]kv, 0)
 		for rows.Next() {
 			var mac string
 			var payload []byte
@@ -433,14 +438,14 @@ func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[o
 				continue
 			}
 
-			result[mac] = payload
+			result = append(result, kv{mac, payload})
 		}
 
 		rows.Close()
 
-		for hexMac, payload := range result {
-			mac, _ := hex.DecodeString(hexMac)
-			if !yield(objects.MAC(mac), payload) {
+		for _, r := range result {
+			mac, _ := hex.DecodeString(r.mac)
+			if !yield(objects.MAC(mac), r.data) {
 				return
 			}
 		}
@@ -494,7 +499,7 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([]kv, 0)
 		for rows.Next() {
 			var mac string
 			var payload []byte
@@ -504,14 +509,14 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 				continue
 			}
 
-			result[mac] = payload
+			result = append(result, kv{mac, payload})
 		}
 
 		rows.Close()
 
-		for hexMac, payload := range result {
-			mac, _ := hex.DecodeString(hexMac)
-			if !yield(objects.MAC(mac), payload) {
+		for _, r := range result {
+			mac, _ := hex.DecodeString(r.mac)
+			if !yield(objects.MAC(mac), r.data) {
 				return
 			}
 		}
@@ -544,7 +549,7 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make(map[string][]byte)
+		result := make([][]byte, 0)
 		for rows.Next() {
 			var key string
 			var data []byte
@@ -554,13 +559,13 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 				continue
 			}
 
-			result[key] = data
+			result = append(result, data)
 		}
 
 		rows.Close()
 
-		for _, v := range result {
-			if !yield(v) {
+		for _, d := range result {
+			if !yield(d) {
 				return
 			}
 		}
