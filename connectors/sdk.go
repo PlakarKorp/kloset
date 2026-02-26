@@ -14,6 +14,7 @@ type Options struct {
 	CWD             string
 	MaxConcurrency  int
 	Excludes        []string
+	NoXattr         bool
 
 	Stdin  io.Reader `msgpack:"-"`
 	Stdout io.Writer `msgpack:"-"`
