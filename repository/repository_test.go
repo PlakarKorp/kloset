@@ -198,7 +198,7 @@ func TestRepositoryStateOperations(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 
 	t.Run("GetState", func(t *testing.T) {
-		_, err := repo.GetState(objects.MAC{})
+		_, _, err := repo.GetState(objects.MAC{})
 		require.Error(t, err)
 	})
 

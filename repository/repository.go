@@ -292,12 +292,12 @@ func (r *Repository) RebuildState() error {
 
 	rebuilt := false
 	for _, stateID := range missingStates {
-		remoteStateRd, err := r.GetState(stateID)
+		remoteStateRd, v, err := r.GetState(stateID)
 		if err != nil {
 			return err
 		}
 
-		err = r.state.MergeState(stateID, remoteStateRd)
+		err = r.state.MergeState(stateID, remoteStateRd, v)
 		remoteStateRd.Close()
 
 		if err != nil {
@@ -328,12 +328,12 @@ func (r *Repository) RebuildState() error {
 
 func (r *Repository) IngestStateFile(stateID objects.MAC) error {
 	statePath := r.getStateFilePath(stateID)
-	rd, err := r.OpenStateFromStateFile(statePath)
+	rd, v, err := r.OpenStateFromStateFile(statePath)
 	if err != nil {
 		return err
 	}
 
-	if err = r.state.MergeState(stateID, rd); err != nil {
+	if err = r.state.MergeState(stateID, rd, v); err != nil {
 		rd.Close()
 		return err
 	}
@@ -399,12 +399,12 @@ func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) err
 
 	rebuilt := false
 	for _, stateID := range missingStates {
-		remoteStateRd, err := r.GetState(stateID)
+		remoteStateRd, v, err := r.GetState(stateID)
 		if err != nil {
 			return err
 		}
 
-		err = aggregatedState.MergeState(stateID, remoteStateRd)
+		err = aggregatedState.MergeState(stateID, remoteStateRd, v)
 		remoteStateRd.Close()
 
 		if err != nil {
@@ -680,7 +680,7 @@ func (r *Repository) GetStates() ([]objects.MAC, error) {
 	return r.store.List(r.appContext, storage.StorageResourceState)
 }
 
-func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, error) {
+func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, versioning.Version, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "OpenStateFromStateFile(%s): %s", file, time.Since(t0))
@@ -688,25 +688,31 @@ func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, error) 
 
 	tmpStateFile, err := os.Open(file)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, tmpStateFile)
 	if err != nil {
 		tmpStateFile.Close()
-		return nil, err
+		return nil, 0, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
 		tmpStateFile.Close()
-		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
+		return nil, 0, fmt.Errorf("state(%x) version %q is newer than current version %q",
 			file, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
 
-	return r.decode(rd)
+	rd, err = r.decode(rd)
+	if err != nil {
+		tmpStateFile.Close()
+		return nil, 0, err
+	}
+
+	return rd, version, nil
 }
 
-func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
+func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, versioning.Version, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
@@ -714,22 +720,28 @@ func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
 
 	raw, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, raw)
 	if err != nil {
 		raw.Close()
-		return nil, err
+		return nil, 0, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
-		rd.Close()
-		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
+		raw.Close()
+		return nil, 0, fmt.Errorf("state(%x) version %q is newer than current version %q",
 			mac, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
 
-	return r.decode(rd)
+	rd, err = r.decode(rd)
+	if err != nil {
+		raw.Close()
+		return nil, 0, err
+	}
+
+	return rd, version, err
 }
 
 func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {

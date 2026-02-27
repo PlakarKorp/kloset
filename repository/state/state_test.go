@@ -311,7 +311,7 @@ func TestFromStream(t *testing.T) {
 	require.NoError(t, err)
 
 	// Deserialize from stream
-	deserializedState, err := FromStream(&buf, cache)
+	deserializedState, err := FromStream(&buf, versioning.FromString("1.1.0"), cache)
 	require.NoError(t, err)
 	require.NotNil(t, deserializedState)
 
@@ -405,7 +405,7 @@ func TestMergeState(t *testing.T) {
 	require.NoError(t, err)
 
 	// Merge the state
-	err = state.MergeState(stateID, &buf)
+	err = state.MergeState(stateID, &buf, versioning.FromString("1.1.0"))
 	require.NoError(t, err)
 
 	// Verify the state was merged

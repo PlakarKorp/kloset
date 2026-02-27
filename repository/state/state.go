@@ -148,9 +148,17 @@ func NewLocalState(cache caching.StateCache) (*LocalState, error) {
 	}, nil
 }
 
-func FromStream(rd io.Reader, cache caching.StateCache) (*LocalState, error) {
+func FromStream(rd io.Reader, ver versioning.Version, cache caching.StateCache) (*LocalState, error) {
 	st := &LocalState{cache: cache}
-	if err := st.deserializeFromStream(rd); err != nil {
+
+	var err error
+	if ver.Equals(versioning.FromString("1.1.0")) {
+		err = st.deserializeFromStream(rd)
+	} else {
+		err = st.deserializeFromStreamv100(rd)
+	}
+
+	if err != nil {
 		return nil, err
 	} else {
 		return st, nil
@@ -207,12 +215,14 @@ func (ls *LocalState) UpdateSerialOr(serial uuid.UUID) error {
 
 // Reads only the Header part of the Metadata structure, the rest will be
 // uninitialized.
-func ReadHeader(rd io.Reader) (*Metadata, error) {
+func ReadHeader(rd io.Reader, ver versioning.Version) (*Metadata, error) {
 	hdr := &Metadata{}
 
-	n, err := rd.Read(hdr.Parent[:])
-	if err != nil || n != len(objects.MAC{}) {
-		return nil, fmt.Errorf("failed to read header %w", err)
+	if ver.Equals(versioning.FromString("1.1.0")) {
+		n, err := rd.Read(hdr.Parent[:])
+		if err != nil || n != len(objects.MAC{}) {
+			return nil, fmt.Errorf("failed to read header %w", err)
+		}
 	}
 
 	return hdr, nil
@@ -220,7 +230,7 @@ func ReadHeader(rd io.Reader) (*Metadata, error) {
 
 /* Insert the state denotated by stateID and its associated delta entries read
  * from rd into the local aggregated version of the state. */
-func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader) error {
+func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioning.Version) error {
 	has, err := ls.HasState(stateID)
 	if err != nil {
 		return err
@@ -233,7 +243,11 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader) error {
 	// This implicitely sets the parent, see the note about refactoring, and
 	// since we Derive() to construct Delta streams this will set the correct
 	// parent. This is all way too intricated and will be fixed by a refacto.
-	err = ls.deserializeFromStream(rd)
+	if ver.Equals(versioning.FromString("1.1.0")) {
+		err = ls.deserializeFromStream(rd)
+	} else {
+		err = ls.deserializeFromStreamv100(rd)
+	}
 	if err != nil {
 		return err
 	}
@@ -674,6 +688,145 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 			io.CopyN(io.Discard, r, int64(length))
 		}
 
+	}
+
+	/* Deserialize Metadata */
+	version, err := readUint32()
+	if err != nil {
+		return fmt.Errorf("failed to read version: %w", err)
+	}
+	ls.Metadata.Version = versioning.Version(version)
+
+	timestamp, err := readUint64()
+	if err != nil {
+		return fmt.Errorf("failed to read timestamp: %w", err)
+	}
+	ls.Metadata.Timestamp = time.Unix(0, int64(timestamp))
+
+	serial := make([]byte, len(uuid.UUID{}))
+	if _, err := io.ReadFull(r, serial); err != nil {
+		return fmt.Errorf("failed to read serial: %w", err)
+	}
+	ls.Metadata.Serial = uuid.UUID(serial)
+
+	return nil
+}
+
+func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
+	readUint64 := func() (uint64, error) {
+		buf := make([]byte, 8)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return 0, err
+		}
+		return binary.LittleEndian.Uint64(buf), nil
+	}
+
+	readUint32 := func() (uint32, error) {
+		buf := make([]byte, 4)
+		if _, err := io.ReadFull(r, buf); err != nil {
+			return 0, err
+		}
+		return binary.LittleEndian.Uint32(buf), nil
+	}
+
+	/* Deserialize LOCATIONS */
+	et_buf := make([]byte, 1)
+	de_buf := make([]byte, DeltaEntrySerializedSize)
+	coloured_buf := make([]byte, ColouredEntrySerializedSize)
+	pe_buf := make([]byte, PackfileEntrySerializedSize)
+	for {
+		n, err := r.Read(et_buf)
+		if err != nil || n != len(et_buf) {
+			return fmt.Errorf("failed to read entry type %w", err)
+		}
+
+		entryType := EntryType(et_buf[0])
+		if entryType == ET_METADATA {
+			break
+		}
+
+		length, err := readUint32()
+		if err != nil {
+			return fmt.Errorf("failed to read entry length %w", err)
+		}
+
+		//XXX: This is screaming refactorization, but is a bit subtil.
+		switch entryType {
+		case ET_LOCATIONS:
+			if length != DeltaEntrySerializedSize {
+				return fmt.Errorf("failed to read delta entry wrong length got(%d)/expected(%d)", length, DeltaEntrySerializedSize)
+			}
+
+			if n, err := io.ReadFull(r, de_buf); err != nil {
+				return fmt.Errorf("failed to read delta entry %w, read(%d)/expected(%d)", err, n, length)
+			}
+
+			// We need to decode just to make the key, but we can reuse the buffer
+			// to put inside the data part of the cache.
+			delta, err := DeltaEntryFromBytes(de_buf)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize delta entry %w", err)
+			}
+
+			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
+				return err
+			}
+
+		case ET_COLOURED:
+			if length != ColouredEntrySerializedSize {
+				return fmt.Errorf("failed to read coloured entry wrong length got(%d)/expected(%d)", length, ColouredEntrySerializedSize)
+			}
+
+			if n, err := io.ReadFull(r, coloured_buf); err != nil {
+				return fmt.Errorf("failed to read coloured entry %w, read(%d)/expected(%d)", err, n, length)
+			}
+
+			coloured, err := ColouredEntryFromBytes(coloured_buf)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize coloured entry %w", err)
+			}
+
+			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+				return err
+			}
+		case ET_PACKFILE:
+			if length != PackfileEntrySerializedSize {
+				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d)", length, PackfileEntrySerializedSize)
+			}
+
+			if n, err := io.ReadFull(r, pe_buf); err != nil {
+				return fmt.Errorf("failed to read packfile entry %w, read(%d)/expected(%d)", err, n, length)
+			}
+
+			pe, err := PackfileEntryFromBytes(pe_buf)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize packfile entry %w", err)
+			}
+
+			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+				return err
+			}
+
+		case ET_CONFIGURATION:
+			ce_buf := make([]byte, length)
+
+			if n, err := io.ReadFull(r, ce_buf); err != nil {
+				return fmt.Errorf("failed to read configuration entry %w, read(%d)/expected(%d)", err, n, length)
+			}
+
+			ce, err := ConfigurationEntryFromBytes(ce_buf)
+			if err != nil {
+				return fmt.Errorf("failed to deserialize configuration entry %w", err)
+			}
+
+			err = ls.insertOrUpdateConfiguration(ce)
+			if err != nil {
+				return fmt.Errorf("failed to insert/update configuration entry %w", err)
+			}
+		default:
+			// Our version doesn't know this entry type, just skip it.
+			io.CopyN(io.Discard, r, int64(length))
+		}
 	}
 
 	/* Deserialize Metadata */
