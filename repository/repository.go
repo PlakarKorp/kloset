@@ -802,7 +802,6 @@ func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, version
 		tmpStateFile.Close()
 		return nil, 0, err
 	}
-
 	return rd, version, nil
 }
 
