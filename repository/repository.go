@@ -720,11 +720,7 @@ func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
 			mac, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
 
-	rd, err = r.decode(rd)
-	if err != nil {
-		return nil, err
-	}
-	return rd, err
+	return r.decode(rd)
 }
 
 func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
@@ -1295,11 +1291,7 @@ func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 			version, versioning.GetCurrentVersion(resources.RT_LOCK))
 	}
 
-	rd, err = r.decode(rd)
-	if err != nil {
-		return nil, err
-	}
-	return rd, err
+	return r.decode(rd)
 }
 
 func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
