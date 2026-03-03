@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -17,9 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+type stateEntry struct {
+	id   objects.MAC
+	data []byte
+}
+
 // mockStateCache implements caching.StateCache for testing
 type mockStateCache struct {
-	states         map[objects.MAC][]byte
+	states         []*stateEntry
 	deltas         map[string][]byte // key: "type:blob:packfile"
 	deleteds       map[string][]byte // key: "type:blob"
 	packfiles      map[objects.MAC][]byte
@@ -28,7 +34,7 @@ type mockStateCache struct {
 
 func newMockStateCache() *mockStateCache {
 	return &mockStateCache{
-		states:         make(map[objects.MAC][]byte),
+		states:         make([]*stateEntry, 0),
 		deltas:         make(map[string][]byte),
 		deleteds:       make(map[string][]byte),
 		packfiles:      make(map[objects.MAC][]byte),
@@ -37,26 +43,56 @@ func newMockStateCache() *mockStateCache {
 }
 
 func (m *mockStateCache) PutState(stateID objects.MAC, data []byte) error {
-	m.states[stateID] = data
+	m.states = append(m.states, &stateEntry{stateID, data})
 	return nil
 }
 
+func (m *mockStateCache) GetLatestState() (objects.MAC, error) {
+	if len(m.states) == 0 {
+		return objects.NilMac, nil
+	}
+
+	return m.states[len(m.states)-1].id, nil
+}
+
 func (m *mockStateCache) HasState(stateID objects.MAC) (bool, error) {
-	_, exists := m.states[stateID]
-	return exists, nil
+	for _, se := range m.states {
+		if se.id == stateID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (m *mockStateCache) GetState(stateID objects.MAC) ([]byte, error) {
-	return m.states[stateID], nil
+	for _, se := range m.states {
+		if se.id == stateID {
+			return se.data, nil
+		}
+	}
+
+	return nil, nil
 }
 
 func (m *mockStateCache) DelState(stateID objects.MAC) error {
-	delete(m.states, stateID)
+	for idx, se := range m.states {
+		if se.id == stateID {
+			slices.Delete(m.states, idx, idx+1)
+			return nil
+		}
+	}
+
 	return nil
 }
 
 func (m *mockStateCache) GetStates() (map[objects.MAC][]byte, error) {
-	return m.states, nil
+	ret := make(map[objects.MAC][]byte)
+
+	for _, se := range m.states {
+		ret[se.id] = se.data
+	}
+
+	return ret, nil
 }
 
 func (m *mockStateCache) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
@@ -237,8 +273,9 @@ func (b *mockStateBatch) Count() uint32 {
 
 func TestNewLocalState(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
 
+	require.NoError(t, err)
 	require.NotNil(t, state)
 	require.Equal(t, versioning.FromString(VERSION), state.Metadata.Version)
 	require.NotZero(t, state.Metadata.Timestamp)
@@ -250,7 +287,8 @@ func TestFromStream(t *testing.T) {
 	cache := newMockStateCache()
 
 	// Create a test state with some data
-	originalState := NewLocalState(cache)
+	originalState, err := NewLocalState(cache)
+	require.NoError(t, err)
 	originalState.Metadata.Serial = uuid.New()
 
 	// Add some test data
@@ -269,11 +307,11 @@ func TestFromStream(t *testing.T) {
 
 	// Serialize to stream
 	var buf bytes.Buffer
-	err := originalState.SerializeToStream(&buf)
+	err = originalState.SerializeToStream(&buf)
 	require.NoError(t, err)
 
 	// Deserialize from stream
-	deserializedState, err := FromStream(&buf, cache)
+	deserializedState, err := FromStream(&buf, versioning.FromString("1.1.0"), cache)
 	require.NoError(t, err)
 	require.NotNil(t, deserializedState)
 
@@ -286,7 +324,8 @@ func TestDerive(t *testing.T) {
 	cache1 := newMockStateCache()
 	cache2 := newMockStateCache()
 
-	originalState := NewLocalState(cache1)
+	originalState, err := NewLocalState(cache1)
+	require.NoError(t, err)
 	originalState.Metadata.Serial = uuid.New()
 
 	derivedState := originalState.Derive(cache2)
@@ -300,11 +339,12 @@ func TestDerive(t *testing.T) {
 
 func TestUpdateSerialOr(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Test with no existing states
 	testSerial := uuid.New()
-	err := state.UpdateSerialOr(testSerial)
+	err = state.UpdateSerialOr(testSerial)
 	require.NoError(t, err)
 	require.Equal(t, testSerial, state.Metadata.Serial)
 
@@ -328,7 +368,8 @@ func TestUpdateSerialOr(t *testing.T) {
 
 func TestMergeState(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Test merging non-existent state
 	stateID := objects.MAC{1, 2, 3, 4}
@@ -354,16 +395,17 @@ func TestMergeState(t *testing.T) {
 	}
 
 	// Serialize the test state
-	testState := NewLocalState(cache)
+	testState, err := NewLocalState(cache)
+	require.NoError(t, err)
 	testState.Metadata = testMetadata
 	testState.PutDelta(deltaEntry)
 
 	var buf bytes.Buffer
-	err := testState.SerializeToStream(&buf)
+	err = testState.SerializeToStream(&buf)
 	require.NoError(t, err)
 
 	// Merge the state
-	err = state.MergeState(stateID, &buf)
+	err = state.MergeState(stateID, &buf, versioning.FromString("1.1.0"))
 	require.NoError(t, err)
 
 	// Verify the state was merged
@@ -374,11 +416,12 @@ func TestMergeState(t *testing.T) {
 
 func TestPutState(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 	state.Metadata.Serial = uuid.New()
 
 	stateID := objects.MAC{1, 2, 3, 4}
-	err := state.PutState(stateID)
+	err = state.PutState(stateID)
 	require.NoError(t, err)
 
 	// Verify state was stored
@@ -389,7 +432,8 @@ func TestPutState(t *testing.T) {
 
 func TestSerializeToStream(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 	state.Metadata.Serial = uuid.New()
 
 	// Add test data
@@ -429,7 +473,7 @@ func TestSerializeToStream(t *testing.T) {
 
 	// Serialize
 	var buf bytes.Buffer
-	err := state.SerializeToStream(&buf)
+	err = state.SerializeToStream(&buf)
 	require.NoError(t, err)
 
 	// Verify serialized data is not empty
@@ -529,7 +573,8 @@ func TestConfigurationEntrySerialization(t *testing.T) {
 
 func TestBlobExists(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Test with non-existent blob
 	exists := state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
@@ -562,7 +607,8 @@ func TestBlobExists(t *testing.T) {
 
 func TestGetSubpartForBlob(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Test with non-existent blob
 	location, exists, err := state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
@@ -595,7 +641,8 @@ func TestGetSubpartForBlob(t *testing.T) {
 
 func TestListPackfiles(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Add some packfiles
 	packfile1 := objects.MAC{1, 2, 3, 4}
@@ -616,7 +663,8 @@ func TestListPackfiles(t *testing.T) {
 
 func TestListSnapshots(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Add snapshot delta entries
 	snapshot1 := objects.MAC{1, 2, 3, 4}
@@ -664,7 +712,8 @@ func TestListSnapshots(t *testing.T) {
 
 func TestListObjectsOfType(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Add objects of different types
 	object1 := objects.MAC{1, 2, 3, 4}
@@ -712,7 +761,8 @@ func TestListObjectsOfType(t *testing.T) {
 
 func TestListOrphanDeltas(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Add delta with missing packfile (orphan)
 	orphanDelta := &DeltaEntry{
@@ -741,10 +791,11 @@ func TestListOrphanDeltas(t *testing.T) {
 
 func TestDeleteResource(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	resource := objects.MAC{1, 2, 3, 4}
-	err := state.ColourResource(resources.RT_OBJECT, resource)
+	err = state.ColourResource(resources.RT_OBJECT, resource)
 	require.NoError(t, err)
 
 	// Verify resource is marked as deleted
@@ -755,7 +806,8 @@ func TestDeleteResource(t *testing.T) {
 
 func TestHasDeletedResource(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	resource := objects.MAC{1, 2, 3, 4}
 
@@ -775,12 +827,13 @@ func TestHasDeletedResource(t *testing.T) {
 
 func TestSetConfiguration(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	key := "test_key"
 	value := []byte("test_value")
 
-	err := state.SetConfiguration(key, value)
+	err = state.SetConfiguration(key, value)
 	require.NoError(t, err)
 
 	// Verify configuration was set
@@ -797,7 +850,8 @@ func TestSetConfiguration(t *testing.T) {
 
 func TestListDeletedResources(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Delete some resources
 	resource1 := objects.MAC{1, 2, 3, 4}
@@ -822,7 +876,8 @@ func TestListDeletedResources(t *testing.T) {
 
 func TestDelDeletedResource(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	resource := objects.MAC{1, 2, 3, 4}
 
@@ -893,24 +948,26 @@ func TestDeletedEntryFromBytesError(t *testing.T) {
 
 func TestDeserializeFromStreamError(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Test with invalid stream
 	invalidData := []byte{byte(ET_LOCATIONS), 0, 0, 0, 1} // Invalid length
 	reader := bytes.NewReader(invalidData)
 
-	err := state.deserializeFromStream(reader)
+	err = state.deserializeFromStream(reader)
 	require.Error(t, err)
 }
 
 func TestSerializeToStreamError(t *testing.T) {
 	cache := newMockStateCache()
-	state := NewLocalState(cache)
+	state, err := NewLocalState(cache)
+	require.NoError(t, err)
 
 	// Create a writer that will fail
 	failingWriter := &failingWriter{}
 
-	err := state.SerializeToStream(failingWriter)
+	err = state.SerializeToStream(failingWriter)
 	require.Error(t, err)
 }
 

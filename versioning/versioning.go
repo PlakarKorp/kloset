@@ -30,6 +30,10 @@ func (v Version) String() string {
 	return fmt.Sprintf("v%d.%d.%d", v.Major(), v.Minor(), v.Patch())
 }
 
+func (v Version) Equals(with Version) bool {
+	return semver.Compare(v.String(), with.String()) == 0
+}
+
 func FromString(s string) Version {
 	var major, minor, patch uint32
 	_, err := fmt.Sscanf(s, "%d.%d.%d", &major, &minor, &patch)

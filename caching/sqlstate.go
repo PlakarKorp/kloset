@@ -45,57 +45,68 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 	db, err := sqlite.New(path, "state.db", &sqlite.Options{
 		DeleteOnClose: false,
 		Compressed:    true,
-		ReadOnly:      ro,
+		ReadOnly:      false,
 		Shared:        true,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if !ro {
-		for _, typ := range []string{"states", "packfiles"} {
-			create := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
+	for _, typ := range []string{"states", "packfiles"} {
+		create := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
 			mac TEXT NOT NULL PRIMARY KEY,
 			payload BLOB NOT NULL
 		);`, typ)
 
-			if _, err := db.Exec(create); err != nil {
-				return nil, err
-			}
+		if _, err := db.Exec(create); err != nil {
+			return nil, err
 		}
+	}
 
-		create := `CREATE TABLE IF NOT EXISTS deltas (
+	create := `CREATE TABLE IF NOT EXISTS deltas (
 			mac TEXT NOT NULL,
 			type INTEGER NOT NULL,
 			packfile TEXT NOT NULL,
 			payload BLOB NOT NULL,
 			UNIQUE(type, mac, packfile)
 		);`
-		if _, err := db.Exec(create); err != nil {
-			return nil, err
-		}
+	if _, err := db.Exec(create); err != nil {
+		return nil, err
+	}
 
-		create = `CREATE TABLE IF NOT EXISTS deleteds (
+	create = `CREATE TABLE IF NOT EXISTS deleteds (
 			mac TEXT NOT NULL,
 			type INTEGER NOT NULL,
 			payload BLOB NOT NULL,
 			UNIQUE(type, mac)
 		);`
 
-		if _, err := db.Exec(create); err != nil {
-			return nil, err
-		}
+	if _, err := db.Exec(create); err != nil {
+		return nil, err
+	}
 
-		create = `CREATE TABLE IF NOT EXISTS configurations (
+	create = `CREATE TABLE IF NOT EXISTS configurations (
 		key TEXT NOT NULL PRIMARY KEY,
 		data BLOB NOT NULL
 	);`
 
-		if _, err := db.Exec(create); err != nil {
+	if _, err := db.Exec(create); err != nil {
+		return nil, err
+	}
+
+	if ro {
+		db.Close()
+
+		db, err = sqlite.New(path, "state.db", &sqlite.Options{
+			DeleteOnClose: false,
+			Compressed:    true,
+			ReadOnly:      true,
+			Shared:        true,
+		})
+		if err != nil {
 			return nil, err
 		}
-	}
-	if ro {
+
 		// This should be ctx.MaxConcurrency, but this is an import cycle and
 		// breaking it is out of the scope.
 		db.SetMaxOpenConns(runtime.NumCPU())
@@ -182,7 +193,7 @@ func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 	err := c.db.QueryRow(query, stateHex).Scan(&payload)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, err
+			return nil, nil
 		}
 
 		return nil, err
@@ -190,6 +201,27 @@ func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 
 	return payload, nil
 }
+
+func (c *SQLState) GetLatestState() (objects.MAC, error) {
+	query := "SELECT mac FROM states ORDER BY ROWID DESC LIMIT 1"
+	var strMac string
+	err := c.db.QueryRow(query).Scan(&strMac)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return objects.NilMac, nil
+		}
+
+		return objects.NilMac, err
+	}
+
+	mac, err := hex.DecodeString(strMac)
+	if err != nil {
+		return objects.NilMac, err
+	}
+
+	return objects.MAC(mac), nil
+}
+
 func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 	query := "SELECT mac, payload FROM states;"
 

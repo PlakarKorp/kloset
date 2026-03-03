@@ -3,6 +3,7 @@ package state
 import (
 	"errors"
 	"iter"
+	"slices"
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
@@ -11,38 +12,73 @@ import (
 
 var unsupported = errors.ErrUnsupported
 
+type stateEntry struct {
+	id   objects.MAC
+	data []byte
+}
+
 // cache implements StateCache
 type cache struct {
-	states map[objects.MAC][]byte
+	states []*stateEntry
 }
 
 func newCache() *cache {
 	return &cache{
-		states: make(map[objects.MAC][]byte),
+		states: make([]*stateEntry, 0),
 	}
 }
 
-func (c *cache) PutState(stateID objects.MAC, data []byte) error {
-	c.states[stateID] = data
+func (m *cache) PutState(stateID objects.MAC, data []byte) error {
+	m.states = append(m.states, &stateEntry{stateID, data})
 	return nil
 }
 
-func (c *cache) HasState(stateID objects.MAC) (bool, error) {
-	_, ok := c.states[stateID]
-	return ok, nil
+func (m *cache) GetLatestState() (objects.MAC, error) {
+	if len(m.states) == 0 {
+		return objects.NilMac, nil
+	}
+
+	return m.states[len(m.states)-1].id, nil
 }
 
-func (c *cache) GetState(stateID objects.MAC) ([]byte, error) {
-	return c.states[stateID], nil
+func (m *cache) HasState(stateID objects.MAC) (bool, error) {
+	for _, se := range m.states {
+		if se.id == stateID {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
-func (c *cache) DelState(stateID objects.MAC) error {
-	delete(c.states, stateID)
+func (m *cache) GetState(stateID objects.MAC) ([]byte, error) {
+	for _, se := range m.states {
+		if se.id == stateID {
+			return se.data, nil
+		}
+	}
+
+	return nil, nil
+}
+
+func (m *cache) DelState(stateID objects.MAC) error {
+	for idx, se := range m.states {
+		if se.id == stateID {
+			slices.Delete(m.states, idx, idx+1)
+			return nil
+		}
+	}
+
 	return nil
 }
 
-func (c *cache) GetStates() (map[objects.MAC][]byte, error) {
-	return c.states, nil
+func (m *cache) GetStates() (map[objects.MAC][]byte, error) {
+	ret := make(map[objects.MAC][]byte)
+
+	for _, se := range m.states {
+		ret[se.id] = se.data
+	}
+
+	return ret, nil
 }
 
 func (c *cache) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
