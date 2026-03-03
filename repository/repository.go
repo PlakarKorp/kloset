@@ -684,10 +684,12 @@ func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, error) 
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, tmpStateFile)
 	if err != nil {
+		tmpStateFile.Close()
 		return nil, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
+		tmpStateFile.Close()
 		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
 			file, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
@@ -701,17 +703,19 @@ func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
 	}()
 
-	rd, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
+	raw, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, rd)
+	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, raw)
 	if err != nil {
+		raw.Close()
 		return nil, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
+		rd.Close()
 		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
 			mac, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
@@ -1274,17 +1278,19 @@ func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
 	}()
 
-	rd, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil)
+	raw, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_LOCK, rd)
+	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_LOCK, raw)
 	if err != nil {
+		raw.Close()
 		return nil, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_LOCK, version) {
+		rd.Close()
 		return nil, fmt.Errorf("lock version %q is newer than current version %q",
 			version, versioning.GetCurrentVersion(resources.RT_LOCK))
 	}
