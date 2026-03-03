@@ -2,8 +2,11 @@ package repository_test
 
 import (
 	"bytes"
+	"fmt"
 	"io"
+	"maps"
 	"os"
+	"slices"
 	"testing"
 
 	"github.com/PlakarKorp/kloset/connectors/storage"
@@ -192,6 +195,73 @@ func TestRepositorySnapshotOperations(t *testing.T) {
 		err := repo.DeleteSnapshot(objects.MAC{})
 		require.NoError(t, err)
 	})
+}
+
+func TestTopoSortBasic(t *testing.T) {
+	statesIn := map[objects.MAC]objects.MAC{
+		objects.MAC{0x2}: objects.MAC{0x1},
+		objects.MAC{0x1}: objects.NilMac,
+		objects.MAC{0x4}: objects.MAC{0x3},
+		objects.MAC{0x3}: objects.MAC{0x2},
+	}
+	states, err := repository.TopoSort(slices.Collect(maps.Keys(statesIn)), func(stateID objects.MAC) (objects.MAC, error) {
+		if v, ok := statesIn[stateID]; ok {
+			return v, nil
+		} else {
+			return objects.NilMac, fmt.Errorf("not found")
+		}
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, len(statesIn), len(states))
+	require.Equal(t, slices.SortedFunc(maps.Keys(statesIn), func(a, b objects.MAC) int { return bytes.Compare(a[:], b[:]) }), states)
+}
+
+func TestTopoSortWithExisting(t *testing.T) {
+	statesIn := map[objects.MAC]objects.MAC{
+		objects.MAC{0x4}: objects.MAC{0x3},
+		objects.MAC{0x3}: objects.MAC{0x2},
+	}
+	states, err := repository.TopoSort(slices.Collect(maps.Keys(statesIn)), func(stateID objects.MAC) (objects.MAC, error) {
+		if v, ok := statesIn[stateID]; ok {
+			return v, nil
+		} else {
+			return objects.NilMac, fmt.Errorf("not found")
+		}
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, len(statesIn), len(states))
+	require.Equal(t, slices.SortedFunc(maps.Keys(statesIn), func(a, b objects.MAC) int { return bytes.Compare(a[:], b[:]) }), states)
+}
+
+func TestTopoSortPartialOrder(t *testing.T) {
+	statesIn := map[objects.MAC]objects.MAC{
+		objects.MAC{0x2}: objects.MAC{0x1},
+		objects.MAC{0x1}: objects.NilMac,
+		objects.MAC{0x4}: objects.MAC{0x2},
+		objects.MAC{0x3}: objects.MAC{0x2},
+		objects.MAC{0x5}: objects.MAC{0x3},
+	}
+	states, err := repository.TopoSort(slices.Collect(maps.Keys(statesIn)), func(stateID objects.MAC) (objects.MAC, error) {
+		if v, ok := statesIn[stateID]; ok {
+			return v, nil
+		} else {
+			return objects.NilMac, fmt.Errorf("not found")
+		}
+	})
+
+	for i, cur := range states {
+		parent := statesIn[cur]
+
+		needle := slices.IndexFunc(states, func(s objects.MAC) bool { return bytes.Equal(s[:], parent[:]) })
+		if needle >= i {
+			t.Errorf("Invalid ordering %x is before its parent %x (pos: %d)", cur, parent, i)
+		}
+	}
+
+	require.NoError(t, err)
+	require.Equal(t, len(statesIn), len(states))
 }
 
 func TestRepositoryStateOperations(t *testing.T) {
