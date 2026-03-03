@@ -153,6 +153,14 @@ func (c *cache) NewBatch() caching.StateBatch {
 	return &batch{cache: c}
 }
 
+func (c *cache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
+	panic("nop")
+}
+
+func (c *cache) GetDeletedEntries() iter.Seq[[]byte] {
+	panic("nop")
+}
+
 type batch struct {
 	cache *cache
 }

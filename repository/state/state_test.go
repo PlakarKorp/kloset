@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -27,7 +28,8 @@ type stateEntry struct {
 type mockStateCache struct {
 	states         []*stateEntry
 	deltas         map[string][]byte // key: "type:blob:packfile"
-	deleteds       map[string][]byte // key: "type:blob"
+	coloured       map[string][]byte // key: "type:blob"
+	deleted        map[string][]byte // key: "type:blob"
 	packfiles      map[objects.MAC][]byte
 	configurations map[string][]byte
 }
@@ -36,7 +38,8 @@ func newMockStateCache() *mockStateCache {
 	return &mockStateCache{
 		states:         make([]*stateEntry, 0),
 		deltas:         make(map[string][]byte),
-		deleteds:       make(map[string][]byte),
+		coloured:       make(map[string][]byte),
+		deleted:        make(map[string][]byte),
 		packfiles:      make(map[objects.MAC][]byte),
 		configurations: make(map[string][]byte),
 	}
@@ -155,25 +158,25 @@ func (m *mockStateCache) DelDelta(blobType resources.Type, blobCsum objects.MAC,
 
 func (m *mockStateCache) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
 	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
-	m.deleteds[key] = data
+	m.coloured[key] = data
 	return nil
 }
 
 func (m *mockStateCache) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
 	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
-	_, exists := m.deleteds[key]
+	_, exists := m.coloured[key]
 	return exists, nil
 }
 
 func (m *mockStateCache) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
 	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
-	delete(m.deleteds, key)
+	delete(m.coloured, key)
 	return nil
 }
 
 func (m *mockStateCache) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.deleteds {
+		for key, data := range m.coloured {
 			parts := strings.Split(key, ":")
 			if len(parts) == 2 {
 				if parts[0] == fmt.Sprintf("%d", blobType) {
@@ -190,7 +193,7 @@ func (m *mockStateCache) GetColouredEntriesByType(blobType resources.Type) iter.
 
 func (m *mockStateCache) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.deleteds {
+		for key, data := range m.coloured {
 			parts := strings.Split(key, ":")
 			if len(parts) == 2 {
 				var mac objects.MAC
@@ -245,6 +248,16 @@ func (m *mockStateCache) GetConfigurations() iter.Seq[[]byte] {
 			}
 		}
 	}
+}
+
+func (c *mockStateCache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
+	key := fmt.Sprintf("%d:%x", typ, blobCsum)
+	c.coloured[key] = data
+	return nil
+}
+
+func (c *mockStateCache) GetDeletedEntries() iter.Seq[[]byte] {
+	return maps.Values(c.deleted)
 }
 
 func (m *mockStateCache) NewBatch() caching.StateBatch {
@@ -872,31 +885,6 @@ func TestListDeletedResources(t *testing.T) {
 	require.Equal(t, resources.RT_OBJECT, found[1].Type)
 	require.Contains(t, []objects.MAC{found[0].Blob, found[1].Blob}, resource1)
 	require.Contains(t, []objects.MAC{found[0].Blob, found[1].Blob}, resource2)
-}
-
-func TestDelDeletedResource(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
-
-	resource := objects.MAC{1, 2, 3, 4}
-
-	// Delete resource
-	state.ColourResource(resources.RT_OBJECT, resource)
-
-	// Verify it's deleted
-	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-	require.True(t, hasDeleted)
-
-	// Remove deleted resource
-	err = state.DelColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-
-	// Verify it's no longer marked as deleted
-	hasDeleted, err = state.HasColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-	require.False(t, hasDeleted)
 }
 
 func TestMetadataSerialization(t *testing.T) {

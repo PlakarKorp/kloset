@@ -150,3 +150,13 @@ func (c *_RepositoryCache) GetSnapshot(stateID objects.MAC) ([]byte, error) {
 func (c *_RepositoryCache) DelSnapshot(stateID objects.MAC) error {
 	return c.delete("__snapshot__", fmt.Sprintf("%x", stateID))
 }
+
+// Those two are only to construct deltas, when working with the local state we
+// do the actual deletion.
+func (c *_RepositoryCache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
+	panic("PutDeleted is not to be used with local state")
+}
+
+func (c *_RepositoryCache) GetDeletedEntries() iter.Seq[[]byte] {
+	panic("PutDeleted is not to be used with local state")
+}

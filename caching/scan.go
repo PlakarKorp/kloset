@@ -164,3 +164,13 @@ func (c *ScanCache) EnumerateKeysWithPrefix(prefix string, reverse bool) iter.Se
 		}
 	}
 }
+
+// Those two are only to construct deltas, when working with the local state we
+// do the actual deletion.
+func (c *ScanCache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
+	return c.put("__deleted2__", fmt.Sprintf("%d:%x", typ, blobCsum), data)
+}
+
+func (c *ScanCache) GetDeletedEntries() iter.Seq[[]byte] {
+	return c.getObjects("__deleted2__:")
+}
