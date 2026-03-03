@@ -468,6 +468,14 @@ func (r *Repository) Close() error {
 	return nil
 }
 
+type closerWrapper struct {
+	reader io.Reader
+	closer io.Closer
+}
+
+func (c *closerWrapper) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *closerWrapper) Close() error               { return c.closer.Close() }
+
 func (r *Repository) decode(input io.ReadCloser) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
@@ -491,7 +499,10 @@ func (r *Repository) decode(input io.ReadCloser) (io.ReadCloser, error) {
 		stream = tmp
 	}
 
-	return stream, nil
+	return &closerWrapper{
+		reader: stream,
+		closer: input,
+	}, nil
 }
 
 func (r *Repository) encode(input io.Reader) (io.Reader, error) {
@@ -673,10 +684,12 @@ func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, error) 
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, tmpStateFile)
 	if err != nil {
+		tmpStateFile.Close()
 		return nil, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
+		tmpStateFile.Close()
 		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
 			file, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
@@ -690,26 +703,24 @@ func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, error) {
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
 	}()
 
-	rd, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
+	raw, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, rd)
+	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, raw)
 	if err != nil {
+		raw.Close()
 		return nil, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_STATE, version) {
+		rd.Close()
 		return nil, fmt.Errorf("state(%x) version %q is newer than current version %q",
 			mac, version, versioning.GetCurrentVersion(resources.RT_STATE))
 	}
 
-	rd, err = r.decode(rd)
-	if err != nil {
-		return nil, err
-	}
-	return rd, err
+	return r.decode(rd)
 }
 
 func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
@@ -1263,26 +1274,24 @@ func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
 	}()
 
-	rd, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil)
+	raw, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_LOCK, rd)
+	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_LOCK, raw)
 	if err != nil {
+		raw.Close()
 		return nil, err
 	}
 
 	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_LOCK, version) {
+		rd.Close()
 		return nil, fmt.Errorf("lock version %q is newer than current version %q",
 			version, versioning.GetCurrentVersion(resources.RT_LOCK))
 	}
 
-	rd, err = r.decode(rd)
-	if err != nil {
-		return nil, err
-	}
-	return rd, err
+	return r.decode(rd)
 }
 
 func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
