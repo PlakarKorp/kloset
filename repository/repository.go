@@ -468,6 +468,14 @@ func (r *Repository) Close() error {
 	return nil
 }
 
+type closerWrapper struct {
+	reader io.Reader
+	closer io.Closer
+}
+
+func (c *closerWrapper) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *closerWrapper) Close() error               { return c.closer.Close() }
+
 func (r *Repository) decode(input io.ReadCloser) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
@@ -491,7 +499,10 @@ func (r *Repository) decode(input io.ReadCloser) (io.ReadCloser, error) {
 		stream = tmp
 	}
 
-	return stream, nil
+	return &closerWrapper{
+		reader: stream,
+		closer: input,
+	}, nil
 }
 
 func (r *Repository) encode(input io.Reader) (io.Reader, error) {
