@@ -26,9 +26,6 @@ type KContext struct {
 	Stdout io.Writer `msgpack:"-"`
 	Stderr io.Writer `msgpack:"-"`
 
-	Quiet  bool
-	Silent bool
-
 	Username    string
 	Hostname    string
 	CommandLine string
