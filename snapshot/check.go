@@ -268,6 +268,7 @@ func (snap *Snapshot) Check(pathname string, opts *CheckOptions) error {
 	err = fs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 		if err != nil {
 			emitter.PathError(entrypath, err)
+			checkCtx.errors.Add(1)
 			return err
 		}
 
