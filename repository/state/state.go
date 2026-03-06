@@ -142,10 +142,14 @@ type LocalState struct {
 // 3- A delta state, which is a special version of the LocalState that is being
 // mutated in order to be serialized.
 func NewLocalState(cache caching.StateCache) (*LocalState, error) {
-	parentState, err := cache.GetLatestState()
-	if err != nil {
-		return nil, err
-	}
+	// Sadly we have to ignore the error here because:
+	// 1- If we are on a new repository, the database schema hasn't been created
+	// yet, leading to an error.
+	// 2- Sadly the error used is generic (SQL logic error) with a custom string,
+	// so we just can't match on a specific error, hence we ignore everything.
+	// It's safe to ignore everything here, worst case we have no parent, and
+	// it'll fail right after on the first usage of sqlite.
+	parentState, _ := cache.GetLatestState()
 
 	return &LocalState{
 		Metadata: Metadata{
