@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"os"
 	"strings"
 	"sync/atomic"
@@ -118,20 +119,38 @@ func checkObject(snap *Snapshot, fileEntry *vfs.Entry, fast bool, checkCtx *chec
 
 	emmiter := checkCtx.emitter
 
-	object, err := snap.LookupObject(fileEntry.Object)
-	if err != nil {
-		emmiter.ObjectError(fileEntry.Object, err)
-		snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectMissing.Error()))
-		return ErrObjectMissing
+	object := fileEntry.ResolvedObject
+	if object == nil {
+		panic("no resolved object???")
 	}
+
+	// object, err := snap.LookupObject(fileEntry.Object)
+	// if err != nil {
+	// 	emmiter.ObjectError(fileEntry.Object, err)
+	// 	snap.checkCache.PutObjectStatus(fileEntry.Object, []byte(ErrObjectMissing.Error()))
+	// 	return ErrObjectMissing
+	// }
 
 	hasher := snap.repository.GetMACHasher()
 	emmiter.Object(object.ContentMAC)
 
 	var failed bool
-	for i := range object.Chunks {
-		if err := checkChunk(snap, &object.Chunks[i], hasher, fast, checkCtx); err != nil {
+
+	if true {
+		fp, err := fileEntry.Open(snap.filesystem)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(hasher, fp)
+		fp.Close()
+		if err != nil {
 			failed = true
+		}
+	} else {
+		for i := range object.Chunks {
+			if err := checkChunk(snap, &object.Chunks[i], hasher, fast, checkCtx); err != nil {
+				failed = true
+			}
 		}
 	}
 
@@ -203,7 +222,15 @@ func checkEntry(snap *Snapshot, opts *CheckOptions, entrypath string, e *vfs.Ent
 	emitter.File(entrypath)
 
 	wg.Go(func() error {
-		err := checkObject(snap, e, opts.FastCheck, checkCtx)
+		fp, err := e.Open(snap.filesystem)
+		if err != nil {
+			emitter.FileError(entrypath, err)
+			checkCtx.errors.Add(1)
+			snap.checkCache.PutVFSEntryStatus(entryMAC, []byte(err.Error()))
+			return err
+		}
+		_, err = io.Copy(io.Discard, fp)
+		fp.Close()
 		if err != nil {
 			emitter.FileError(entrypath, err)
 			checkCtx.errors.Add(1)
