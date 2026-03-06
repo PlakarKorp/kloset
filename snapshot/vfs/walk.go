@@ -40,7 +40,7 @@ func (fsc *Filesystem) walkdir(entry *Entry, fn WalkDirFunc) error {
 func (fsc *Filesystem) WalkDir(root string, fn WalkDirFunc) error {
 	entry, err := fsc.GetEntry(root)
 	if err != nil {
-		return err
+		return fn(root, nil, err)
 	}
 
 	if err = fsc.walkdir(entry, fn); err != nil {
