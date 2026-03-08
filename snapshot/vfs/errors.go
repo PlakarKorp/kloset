@@ -51,7 +51,7 @@ func NewErrorItem(path, error string) *ErrorItem {
 	}
 }
 
-func (fsc *Filesystem) Errors(beneath string) (iter.Seq2[*ErrorItem, error], error) {
+func (fsc *Filesystem) Errors(beneath string) iter.Seq2[*ErrorItem, error] {
 	if !strings.HasSuffix(beneath, "/") {
 		beneath += "/"
 	}
@@ -95,7 +95,7 @@ func (fsc *Filesystem) Errors(beneath string) (iter.Seq2[*ErrorItem, error], err
 			yield(&ErrorItem{}, err)
 			return
 		}
-	}, nil
+	}
 }
 
 func (fsc *Filesystem) IterErrorNodes() iterator.Iterator[objects.MAC, *btree.Node[string, objects.MAC, objects.MAC]] {
