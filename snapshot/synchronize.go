@@ -38,11 +38,6 @@ func (p *syncImporter) Close(ctx context.Context) error {
 func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
 	defer close(records)
 
-	erriter, err := p.fs.Errors("/")
-	if err != nil {
-		return err
-	}
-
 	_, _, xattrtree := p.fs.BTrees()
 	xattriter, err := xattrtree.ScanFrom("/")
 	if err != nil {
@@ -50,7 +45,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 	}
 
 	i := 0
-	for erritem, err := range erriter {
+	for erritem, err := range p.fs.Errors("/") {
 		if i%1024 == 0 {
 			if err := ctx.Err(); err != nil {
 				return err
