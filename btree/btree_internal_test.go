@@ -1,6 +1,7 @@
 package btree
 
 import (
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,41 @@ func cmp(a, b rune) int {
 		return 0
 	}
 	return +1
+}
+
+func TestFromStorage_RootMustExists(t *testing.T) {
+	root := 999
+
+	calls := 0
+	var firstCall int
+	storage := InMemoryStore[rune, string]{}
+	storage.getFn = func(ptr int) (*Node[rune, int, string], error) {
+		if calls == 0 {
+			firstCall = ptr
+		}
+		calls++
+		if ptr >= len(storage.store) {
+			return nil, notfound
+		}
+		return &storage.store[ptr], nil
+	}
+
+	tree := FromStorage(root, &storage, cmp, 2)
+	node, path, err := tree.findleaf(12)
+
+	if calls == 0 {
+		t.Fatal("expected Get to be called at least once")
+	}
+	if firstCall != root {
+		t.Fatalf("expected first Get(%d), got Get(%d)", root, firstCall)
+	}
+
+	if err == nil {
+		t.Fatalf("expected error, got nil (node=%v path=%v)", node, path)
+	}
+	if !errors.Is(err, notfound) {
+		t.Fatalf("expected error notfound, got %v", err)
+	}
 }
 
 func TestBTree(t *testing.T) {
