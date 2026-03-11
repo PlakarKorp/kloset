@@ -8,7 +8,7 @@ import (
 )
 
 func TestBTree(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
+	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -67,7 +67,7 @@ func TestBTree(t *testing.T) {
 }
 
 func TestInsert(t *testing.T) {
-	store := InMemoryStore[string, int]{}
+	store := InMemoryStore_t[string, int]{}
 	tree, err := New(&store, strings.Compare, 30)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -106,7 +106,7 @@ func TestInsert(t *testing.T) {
 }
 
 func TestScanAll(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
+	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -143,7 +143,7 @@ func TestScanAll(t *testing.T) {
 }
 
 func TestScanFrom(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
+	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 8)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -181,7 +181,7 @@ func TestScanFrom(t *testing.T) {
 }
 
 func TestScanAllReverse(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
+	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -220,7 +220,7 @@ func TestScanAllReverse(t *testing.T) {
 
 func TestPersist(t *testing.T) {
 	order := 3
-	store := InMemoryStore[rune, int]{}
+	store := InMemoryStore_t[rune, int]{}
 	tree1, err := New(&store, cmp.Compare, order)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
@@ -233,7 +233,7 @@ func TestPersist(t *testing.T) {
 		}
 	}
 
-	store2 := InMemoryStore[rune, int]{}
+	store2 := InMemoryStore_t[rune, int]{}
 	root, err := Persist(tree1, &store2, func(e int) (int, error) { return e, nil })
 	if err != nil {
 		t.Fatalf("Failed to persist the tree: %v", err)
@@ -286,7 +286,7 @@ func TestPersist(t *testing.T) {
 }
 
 func TestVisitDFS(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
+	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
