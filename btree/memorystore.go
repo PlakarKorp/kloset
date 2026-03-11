@@ -28,24 +28,15 @@ func cloneNode[K any, P comparable, V any](n *Node[K, P, V]) *Node[K, P, V] {
 	}
 }
 
-func (s *InMemoryStore[K, V]) get(ptr int) (*Node[K, int, V], error) {
+func (s *InMemoryStore[K, V]) Get(ptr int) (n *Node[K, int, V], err error) {
 	if ptr >= len(s.store) {
 		return nil, notfound
 	}
-
 	return &s.store[ptr], nil
 }
 
-func (s *InMemoryStore[K, V]) Get(ptr int) (n *Node[K, int, V], err error) {
-	node, err := s.get(ptr)
-	if err != nil {
-		return
-	}
-	return node, nil
-}
-
 func (s *InMemoryStore[K, V]) Update(ptr int, n *Node[K, int, V]) error {
-	_, err := s.get(ptr)
+	_, err := s.Get(ptr)
 	if err != nil {
 		return err
 	}
