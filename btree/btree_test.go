@@ -1,12 +1,16 @@
 package btree_test
 
 import (
+	"bytes"
 	"cmp"
+	"io"
 	"runtime"
 	"testing"
+	"testing/iotest"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/stretchr/testify/require"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestNew_NilStore(t *testing.T) {
@@ -33,5 +37,61 @@ func TestFromStorage(t *testing.T) {
 		require.NotNil(t, tree)
 		require.Equal(t, tree.Root, 42)
 		require.Equal(t, tree.Order, 3)
+	})
+}
+
+func TestDeserialize(t *testing.T) {
+	t.Run("Reader Nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				e, _ := r.(runtime.Error)
+				require.Errorf(t, e, "Expected panic: %v", e)
+			}
+		}()
+		storage := btree.InMemoryStore_t[rune, string]{}
+		btree.Deserialize(nil, &storage, cmp.Compare)
+	})
+
+	t.Run("Invalid Reader", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, string]{}
+		rd := iotest.ErrReader(io.ErrUnexpectedEOF)
+
+		tree, err := btree.Deserialize(rd, &storage, cmp.Compare)
+
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.Nil(t, tree)
+	})
+
+	t.Run("Invalid Byte Encoding", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, string]{}
+
+		rd := bytes.NewReader([]byte{0x00, 0x01, 0x02})
+		tree, err := btree.Deserialize(rd, &storage, cmp.Compare)
+
+		require.Error(t, err)
+		require.Nil(t, tree)
+	})
+
+	t.Run("Valid Deserialize", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		payload := struct {
+			Root  int
+			Order int
+		}{
+			Root:  123,
+			Order: 3,
+		}
+
+		var buf bytes.Buffer
+		enc := msgpack.NewEncoder(&buf)
+		err := enc.Encode(&payload)
+		require.NoError(t, err)
+
+		tree, err := btree.Deserialize(&buf, &storage, cmp.Compare)
+		require.NoError(t, err)
+		require.NotNil(t, tree)
+		require.Equal(t, tree.Root, payload.Root)
+		require.Equal(t, tree.Order, payload.Order)
 	})
 }
