@@ -1,24 +1,15 @@
 package btree
 
 import (
+	"cmp"
 	"slices"
 	"strings"
 	"testing"
 )
 
-func cmp(a, b rune) int {
-	if a < b {
-		return -1
-	}
-	if a == b {
-		return 0
-	}
-	return +1
-}
-
 func TestBTree(t *testing.T) {
 	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
+	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -116,7 +107,7 @@ func TestInsert(t *testing.T) {
 
 func TestScanAll(t *testing.T) {
 	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
+	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -153,7 +144,7 @@ func TestScanAll(t *testing.T) {
 
 func TestScanFrom(t *testing.T) {
 	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 8)
+	tree, err := New(&store, cmp.Compare, 8)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -191,7 +182,7 @@ func TestScanFrom(t *testing.T) {
 
 func TestScanAllReverse(t *testing.T) {
 	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
+	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -230,7 +221,7 @@ func TestScanAllReverse(t *testing.T) {
 func TestPersist(t *testing.T) {
 	order := 3
 	store := InMemoryStore[rune, int]{}
-	tree1, err := New(&store, cmp, order)
+	tree1, err := New(&store, cmp.Compare, order)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
@@ -248,7 +239,7 @@ func TestPersist(t *testing.T) {
 		t.Fatalf("Failed to persist the tree: %v", err)
 	}
 
-	tree2 := FromStorage(root, &store2, cmp, order)
+	tree2 := FromStorage(root, &store2, cmp.Compare, order)
 	for i, r := range alphabet {
 		v, found, err := tree2.Find(r)
 		if err != nil {
@@ -296,7 +287,7 @@ func TestPersist(t *testing.T) {
 
 func TestVisitDFS(t *testing.T) {
 	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
+	tree, err := New(&store, cmp.Compare, 3)
 	if err != nil {
 		t.Fatalf("New failed: %v", err)
 	}
