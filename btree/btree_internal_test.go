@@ -27,39 +27,23 @@ func TestBTree(t *testing.T) {
 
 	for i, r := range alphabet {
 		v, found, err := tree.Find(r)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", r)
-		}
-		if !found {
-			t.Fatalf("Find(%v) unexpectedly not found", r)
-		}
-		if v != i {
-			t.Fatalf("Find(%v) yielded %v, want %v", r, v, i)
-		}
+		require.NoError(t, err)
+		require.True(t, found)
+		require.EqualValues(t, v, i)
 	}
 
 	for i := len(alphabet) - 1; i >= 0; i-- {
 		r := alphabet[i]
 		v, found, err := tree.Find(r)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", r)
-		}
-		if !found {
-			t.Fatalf("Find(%v) unexpectedly not found", r)
-		}
-		if v != i {
-			t.Fatalf("Find(%v) yielded %v, want %v", r, v, i)
-		}
+		require.NoError(t, err)
+		require.True(t, found)
+		require.EqualValues(t, v, i)
 	}
 
 	nonexist := 'A'
-	v, found, err := tree.Find(nonexist)
-	if err != nil {
-		t.Fatalf("Find(%v) unexpectedly failed", nonexist)
-	}
-	if found {
-		t.Fatalf("Find(%v) unexpectedly found %v", nonexist, v)
-	}
+	_, found, err := tree.Find(nonexist)
+	require.NoError(t, err)
+	require.False(t, found)
 }
 
 func TestInsert(t *testing.T) {
@@ -86,15 +70,9 @@ func TestInsert(t *testing.T) {
 
 	for _, u := range unique {
 		v, found, err := tree.Find(u.key)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", u.key)
-		}
-		if !found {
-			t.Errorf("Find(%v) unexpectedly not found", u.key)
-		}
-		if v != u.val {
-			t.Errorf("Find(%v) yielded %v, want %v", u.key, v, u.val)
-		}
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, v, u.val)
 	}
 }
 
@@ -215,25 +193,15 @@ func TestPersist(t *testing.T) {
 	tree2 := FromStorage(root, &store2, cmp.Compare, order)
 	for i, r := range alphabet {
 		v, found, err := tree2.Find(r)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", r)
-		}
-		if !found {
-			t.Fatalf("Find(%v) unexpectedly not found", r)
-		}
-		if v != i {
-			t.Fatalf("Find(%v) yielded %v, want %v", r, v, i)
-		}
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, v, i)
 	}
 
 	nonexist := 'A'
-	v, found, err := tree2.Find(nonexist)
-	if err != nil {
-		t.Fatalf("Find(%v) unexpectedly failed", nonexist)
-	}
-	if found {
-		t.Fatalf("Find(%v) unexpectedly found %v", nonexist, v)
-	}
+	_, found, err := tree2.Find(nonexist)
+	require.NoError(t, err)
+	require.False(t, found)
 
 	iter, err := tree2.ScanAll()
 	require.NoError(t, err)
