@@ -16,9 +16,8 @@ func TestBTree(t *testing.T) {
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree.Insert(r, i)
+		require.NoError(t, err)
 	}
 
 	for i, r := range alphabet {
@@ -73,9 +72,8 @@ func TestInsert(t *testing.T) {
 
 	items := []string{"e", "z", "a", "b", "a", "a", "b", "b", "a", "c", "d"}
 	for i, r := range items {
-		if err := tree.Insert(r, i); err != nil && err != ErrExists {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree.Insert(r, i)
+		require.True(t, err == nil || err == ErrExists)
 	}
 
 	unique := []struct {
@@ -110,9 +108,8 @@ func TestScanAll(t *testing.T) {
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree.Insert(r, i)
+		require.NoError(t, err)
 	}
 
 	iter, err := tree.ScanAll()
@@ -143,9 +140,8 @@ func TestScanFrom(t *testing.T) {
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree.Insert(r, i)
+		require.NoError(t, err)
 	}
 
 	iter, err := tree.ScanFrom(rune('e'))
@@ -177,9 +173,8 @@ func TestScanAllReverse(t *testing.T) {
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree.Insert(r, i)
+		require.NoError(t, err)
 	}
 
 	iter, err := tree.ScanAllReverse()
@@ -212,9 +207,8 @@ func TestPersist(t *testing.T) {
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
-		if err := tree1.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree1.Insert(r, i)
+		require.NoError(t, err)
 	}
 
 	store2 := InMemoryStore_t[rune, int]{}
@@ -272,9 +266,8 @@ func TestVisitDFS(t *testing.T) {
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
+		err := tree.Insert(r, i)
+		require.NoError(t, err)
 	}
 
 	keySaw := []rune{}
