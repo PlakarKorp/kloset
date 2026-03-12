@@ -5,14 +5,14 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 )
 
 func TestBTree(t *testing.T) {
 	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
@@ -69,9 +69,7 @@ func TestBTree(t *testing.T) {
 func TestInsert(t *testing.T) {
 	store := InMemoryStore_t[string, int]{}
 	tree, err := New(&store, strings.Compare, 30)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	items := []string{"e", "z", "a", "b", "a", "a", "b", "b", "a", "c", "d"}
 	for i, r := range items {
@@ -108,9 +106,7 @@ func TestInsert(t *testing.T) {
 func TestScanAll(t *testing.T) {
 	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
@@ -120,9 +116,7 @@ func TestScanAll(t *testing.T) {
 	}
 
 	iter, err := tree.ScanAll()
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	for i, r := range alphabet {
 		if !iter.Next() {
@@ -145,9 +139,7 @@ func TestScanAll(t *testing.T) {
 func TestScanFrom(t *testing.T) {
 	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 8)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
@@ -157,9 +149,7 @@ func TestScanFrom(t *testing.T) {
 	}
 
 	iter, err := tree.ScanFrom(rune('e'))
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	for i := 4; i < len(alphabet); i++ {
 		r := alphabet[i]
@@ -183,9 +173,7 @@ func TestScanFrom(t *testing.T) {
 func TestScanAllReverse(t *testing.T) {
 	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
@@ -195,9 +183,7 @@ func TestScanAllReverse(t *testing.T) {
 	}
 
 	iter, err := tree.ScanAllReverse()
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	for i := len(alphabet) - 1; i >= 0; i-- {
 		r := alphabet[i]
@@ -222,9 +208,7 @@ func TestPersist(t *testing.T) {
 	order := 3
 	store := InMemoryStore_t[rune, int]{}
 	tree1, err := New(&store, cmp.Compare, order)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
@@ -235,9 +219,7 @@ func TestPersist(t *testing.T) {
 
 	store2 := InMemoryStore_t[rune, int]{}
 	root, err := Persist(tree1, &store2, func(e int) (int, error) { return e, nil })
-	if err != nil {
-		t.Fatalf("Failed to persist the tree: %v", err)
-	}
+	require.NoError(t, err)
 
 	tree2 := FromStorage(root, &store2, cmp.Compare, order)
 	for i, r := range alphabet {
@@ -263,9 +245,7 @@ func TestPersist(t *testing.T) {
 	}
 
 	iter, err := tree2.ScanAll()
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	for i, r := range alphabet {
 		if !iter.Next() {
@@ -288,9 +268,7 @@ func TestPersist(t *testing.T) {
 func TestVisitDFS(t *testing.T) {
 	store := InMemoryStore_t[rune, int]{}
 	tree, err := New(&store, cmp.Compare, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
 	for i, r := range alphabet {
