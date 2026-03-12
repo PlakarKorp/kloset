@@ -91,21 +91,13 @@ func TestScanAll(t *testing.T) {
 	require.NoError(t, err)
 
 	for i, r := range alphabet {
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early!")
-		}
+		require.True(t, iter.Next())
 		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %v; want %v", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
+		require.Equal(t, k, r)
+		require.Equal(t, v, i)
 	}
 
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
+	require.False(t, iter.Next())
 }
 
 func TestScanFrom(t *testing.T) {
@@ -124,21 +116,13 @@ func TestScanFrom(t *testing.T) {
 
 	for i := 4; i < len(alphabet); i++ {
 		r := alphabet[i]
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early!")
-		}
+		require.True(t, iter.Next())
 		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %c; want %c", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
+		require.Equal(t, k, r)
+		require.Equal(t, v, i)
 	}
 
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
+	require.False(t, iter.Next())
 }
 
 func TestScanAllReverse(t *testing.T) {
@@ -157,21 +141,13 @@ func TestScanAllReverse(t *testing.T) {
 
 	for i := len(alphabet) - 1; i >= 0; i-- {
 		r := alphabet[i]
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early at %v (%c)", i, r)
-		}
+		require.True(t, iter.Next())
 		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %c; want %c", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
+		require.Equal(t, k, r)
+		require.Equal(t, v, i)
 	}
 
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
+	require.False(t, iter.Next())
 }
 
 func TestPersist(t *testing.T) {
@@ -207,21 +183,13 @@ func TestPersist(t *testing.T) {
 	require.NoError(t, err)
 
 	for i, r := range alphabet {
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early!")
-		}
+		require.True(t, iter.Next())
 		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %v; want %v", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
+		require.Equal(t, k, r)
+		require.Equal(t, v, i)
 	}
 
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
+	require.False(t, iter.Next())
 }
 
 func TestVisitDFS(t *testing.T) {
@@ -245,12 +213,6 @@ func TestVisitDFS(t *testing.T) {
 			}
 		}
 	}
-	if err := it.Err(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
-
-	if slices.Compare(alphabet, keySaw) != 0 {
-		t.Errorf("some keys weren't seen; got %v but want %v",
-			keySaw, alphabet)
-	}
+	require.NoError(t, it.Err())
+	require.Zero(t, slices.Compare(alphabet, keySaw))
 }
