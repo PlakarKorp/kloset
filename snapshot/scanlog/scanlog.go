@@ -32,6 +32,8 @@ type ScanBatch struct {
 type batchRec struct {
 	kind    EntryKind
 	path    string
+	ctype   string
+	mac     objects.MAC
 	payload []byte
 	summary []byte
 }
@@ -71,6 +73,8 @@ func createSchema(db *sqlite.SQLiteCache) error {
 		kind    INTEGER NOT NULL, -- 1 = dir, 2 = file
 		path    TEXT    NOT NULL,
 		parent  TEXT    NOT NULL,
+		ctype 	TEXT,
+		mac     BLOB 	NOT NULL,
 		payload BLOB    NOT NULL,
 		summary BLOB,
 		PRIMARY KEY (kind, path)
@@ -103,15 +107,15 @@ func (s *ScanLog) Close() error {
 	return s.db.Close()
 }
 
-func (s *ScanLog) PutDirectory(p string, payload []byte) error {
-	return s.put(KindDirectory, p, payload, nil)
+func (s *ScanLog) PutDirectory(p string, mac objects.MAC, payload []byte) error {
+	return s.put(KindDirectory, p, "", mac, payload, nil)
 }
 
-func (s *ScanLog) PutFile(p string, payload []byte, summary []byte) error {
-	return s.put(KindFile, p, payload, summary)
+func (s *ScanLog) PutFile(p string, ctype string, mac objects.MAC, payload []byte, summary []byte) error {
+	return s.put(KindFile, p, ctype, mac, payload, summary)
 }
 
-func (s *ScanLog) put(kind EntryKind, p string, payload []byte, summary []byte) error {
+func (s *ScanLog) put(kind EntryKind, p string, ctype string, mac objects.MAC, payload []byte, summary []byte) error {
 	parent := path.Dir(p)
 	storedPayload := s.db.Encode(payload)
 	storedSummary := summary
@@ -120,8 +124,8 @@ func (s *ScanLog) put(kind EntryKind, p string, payload []byte, summary []byte) 
 	}
 
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`,
-		int(kind), p, parent, storedPayload, storedSummary,
+		`INSERT OR REPLACE INTO entries (kind, path, parent, ctype, mac, payload, summary) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		int(kind), p, parent, ctype, mac[:], storedPayload, storedSummary,
 	)
 	return err
 }
@@ -158,15 +162,15 @@ func (s *ScanLog) NewBatch() *ScanBatch {
 	return &ScanBatch{db: s.db}
 }
 
-func (b *ScanBatch) PutDirectory(p string, payload []byte) error {
-	return b.put(KindDirectory, p, payload, nil)
+func (b *ScanBatch) PutDirectory(p string, mac objects.MAC, payload []byte) error {
+	return b.put(KindDirectory, p, "", mac, payload, nil)
 }
 
-func (b *ScanBatch) PutFile(p string, payload []byte, summary []byte) error {
-	return b.put(KindFile, p, payload, summary)
+func (b *ScanBatch) PutFile(p, ctype string, mac objects.MAC, payload []byte, summary []byte) error {
+	return b.put(KindFile, p, ctype, mac, payload, summary)
 }
 
-func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte) error {
+func (b *ScanBatch) put(kind EntryKind, p string, ctype string, mac objects.MAC, payload []byte, summary []byte) error {
 	storedPayload := b.db.Encode(payload)
 	storedSummary := summary
 	if summary != nil {
@@ -175,6 +179,8 @@ func (b *ScanBatch) put(kind EntryKind, p string, payload []byte, summary []byte
 	b.recs = append(b.recs, batchRec{
 		kind:    kind,
 		path:    p,
+		ctype:   ctype,
+		mac:     mac,
 		payload: storedPayload,
 		summary: storedSummary,
 	})
@@ -195,7 +201,7 @@ func (b *ScanBatch) Commit() error {
 		return err
 	}
 
-	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, payload, summary) VALUES (?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO entries (kind, path, parent, ctype, mac, payload, summary) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		_ = tx.Rollback()
 		return err
@@ -204,7 +210,7 @@ func (b *ScanBatch) Commit() error {
 
 	for _, rec := range b.recs {
 		parent := path.Dir(rec.path)
-		if _, err := stmt.Exec(int(rec.kind), rec.path, parent, rec.payload, rec.summary); err != nil {
+		if _, err := stmt.Exec(int(rec.kind), rec.path, parent, rec.ctype, rec.mac[:], rec.payload, rec.summary); err != nil {
 			_ = tx.Rollback()
 			return err
 		}
@@ -220,6 +226,8 @@ func (b *ScanBatch) Commit() error {
 
 type Entry struct {
 	Kind    EntryKind
+	Ctype   string
+	MAC     objects.MAC
 	Path    string
 	Payload []byte
 	Summary []byte
@@ -237,13 +245,13 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bo
 		var query string
 		if !withEntry {
 			query = `
-		SELECT kind, path
+		SELECT kind, path, ctype, mac
 		FROM entries
 		WHERE path >= ? AND path < ?
 		`
 		} else {
 			query = `
-		SELECT kind, path, payload
+		SELECT kind, path, ctype, mac, payload
 		FROM entries
 		WHERE path >= ? AND path < ?
 		`
@@ -266,15 +274,17 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bo
 		for rows.Next() {
 			var kInt int
 			var p string
+			var ctype string
+			var mac []byte
 			var payload []byte
 			var storedPayload []byte
 
 			if !withEntry {
-				if err := rows.Scan(&kInt, &p); err != nil {
+				if err := rows.Scan(&kInt, &p, &ctype, &mac); err != nil {
 					return
 				}
 			} else {
-				if err := rows.Scan(&kInt, &p, &storedPayload); err != nil {
+				if err := rows.Scan(&kInt, &p, &ctype, &mac, &storedPayload); err != nil {
 					return
 				}
 				payload, err = s.db.Decode(storedPayload)
@@ -286,6 +296,8 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bo
 			if !yield(Entry{
 				Kind:    EntryKind(kInt),
 				Path:    p,
+				Ctype:   ctype,
+				MAC:     objects.MAC(mac[:]),
 				Payload: payload,
 			}) {
 				return
