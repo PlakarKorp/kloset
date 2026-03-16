@@ -43,7 +43,7 @@ func (c *_RepositoryCache) GetState(stateID objects.MAC) ([]byte, error) {
 }
 
 func (c *_RepositoryCache) GetLatestState() (objects.MAC, error) {
-	panic("GetLatestState should never be used on the ScanCache backend")
+	return objects.NilMac, nil
 }
 
 func (c *_RepositoryCache) DelState(stateID objects.MAC) error {
