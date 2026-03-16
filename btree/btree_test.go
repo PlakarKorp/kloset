@@ -1,329 +1,97 @@
-package btree
+package btree_test
 
 import (
-	"slices"
-	"strings"
+	"bytes"
+	"cmp"
+	"io"
+	"runtime"
 	"testing"
+	"testing/iotest"
+
+	"github.com/PlakarKorp/kloset/btree"
+	"github.com/stretchr/testify/require"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
-func cmp(a, b rune) int {
-	if a < b {
-		return -1
-	}
-	if a == b {
-		return 0
-	}
-	return +1
+func TestNew_NilStore(t *testing.T) {
+	empty, err := btree.New[rune, int, string](nil, cmp.Compare, 2)
+	require.Error(t, err)
+	require.Nil(t, empty)
 }
 
-func TestBTree(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != ErrExists {
-			t.Fatalf("insertion of (%v, %v) failed with unexpected error: %v", r, i, err)
-		} else if err != ErrExists {
-			t.Fatalf("insertion of (%v, %v) failed with unexpected succeeded", r, i)
-		}
-	}
-
-	for i, r := range alphabet {
-		v, found, err := tree.Find(r)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", r)
-		}
-		if !found {
-			t.Fatalf("Find(%v) unexpectedly not found", r)
-		}
-		if v != i {
-			t.Fatalf("Find(%v) yielded %v, want %v", r, v, i)
-		}
-	}
-
-	for i := len(alphabet) - 1; i >= 0; i-- {
-		r := alphabet[i]
-		v, found, err := tree.Find(r)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", r)
-		}
-		if !found {
-			t.Fatalf("Find(%v) unexpectedly not found", r)
-		}
-		if v != i {
-			t.Fatalf("Find(%v) yielded %v, want %v", r, v, i)
-		}
-	}
-
-	nonexist := 'A'
-	v, found, err := tree.Find(nonexist)
-	if err != nil {
-		t.Fatalf("Find(%v) unexpectedly failed", nonexist)
-	}
-	if found {
-		t.Fatalf("Find(%v) unexpectedly found %v", nonexist, v)
-	}
-}
-
-func TestInsert(t *testing.T) {
-	store := InMemoryStore[string, int]{}
-	tree, err := New(&store, strings.Compare, 30)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	items := []string{"e", "z", "a", "b", "a", "a", "b", "b", "a", "c", "d"}
-	for i, r := range items {
-		if err := tree.Insert(r, i); err != nil && err != ErrExists {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	unique := []struct {
-		key string
-		val int
-	}{
-		{"a", 2},
-		{"b", 3},
-		{"c", 9},
-		{"d", 10},
-		{"e", 0},
-	}
-
-	for _, u := range unique {
-		v, found, err := tree.Find(u.key)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", u.key)
-		}
-		if !found {
-			t.Errorf("Find(%v) unexpectedly not found", u.key)
-		}
-		if v != u.val {
-			t.Errorf("Find(%v) yielded %v, want %v", u.key, v, u.val)
-		}
-	}
-}
-
-func TestScanAll(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	iter, err := tree.ScanAll()
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
-
-	for i, r := range alphabet {
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early!")
-		}
-		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %v; want %v", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
-	}
-
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
-}
-
-func TestScanFrom(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 8)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	iter, err := tree.ScanFrom(rune('e'))
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
-
-	for i := 4; i < len(alphabet); i++ {
-		r := alphabet[i]
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early!")
-		}
-		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %c; want %c", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
-	}
-
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
-}
-
-func TestScanAllReverse(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	iter, err := tree.ScanAllReverse()
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
-
-	for i := len(alphabet) - 1; i >= 0; i-- {
-		r := alphabet[i]
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early at %v (%c)", i, r)
-		}
-		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %c; want %c", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
-	}
-
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
-}
-
-func TestPersist(t *testing.T) {
-	order := 3
-	store := InMemoryStore[rune, int]{}
-	tree1, err := New(&store, cmp, order)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		if err := tree1.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	store2 := InMemoryStore[rune, int]{}
-	root, err := Persist(tree1, &store2, func(e int) (int, error) { return e, nil })
-	if err != nil {
-		t.Fatalf("Failed to persist the tree: %v", err)
-	}
-
-	tree2 := FromStorage(root, &store2, cmp, order)
-	for i, r := range alphabet {
-		v, found, err := tree2.Find(r)
-		if err != nil {
-			t.Fatalf("Find(%v) unexpectedly failed", r)
-		}
-		if !found {
-			t.Fatalf("Find(%v) unexpectedly not found", r)
-		}
-		if v != i {
-			t.Fatalf("Find(%v) yielded %v, want %v", r, v, i)
-		}
-	}
-
-	nonexist := 'A'
-	v, found, err := tree2.Find(nonexist)
-	if err != nil {
-		t.Fatalf("Find(%v) unexpectedly failed", nonexist)
-	}
-	if found {
-		t.Fatalf("Find(%v) unexpectedly found %v", nonexist, v)
-	}
-
-	iter, err := tree2.ScanAll()
-	if err != nil {
-		t.Fatalf("ScanAll failed: %v", err)
-	}
-
-	for i, r := range alphabet {
-		if !iter.Next() {
-			t.Fatalf("iterator stopped too early!")
-		}
-		k, v := iter.Current()
-		if k != r {
-			t.Errorf("Got key %v; want %v", k, r)
-		}
-		if v != i {
-			t.Errorf("Got value %v; want %v", v, i)
-		}
-	}
-
-	if iter.Next() {
-		t.Fatalf("iterator could unexpectedly continue")
-	}
-}
-
-func TestVisitDFS(t *testing.T) {
-	store := InMemoryStore[rune, int]{}
-	tree, err := New(&store, cmp, 3)
-	if err != nil {
-		t.Fatalf("New failed: %v", err)
-	}
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		if err := tree.Insert(r, i); err != nil {
-			t.Fatalf("Failed to insert(%v, %v): %v", r, i, err)
-		}
-	}
-
-	keySaw := []rune{}
-	it := tree.IterDFS()
-	for it.Next() {
-		_, node := it.Current()
-		if node.isleaf() {
-			for i := range node.Keys {
-				keySaw = append(keySaw, node.Keys[i])
+func TestFromStorage(t *testing.T) {
+	t.Run("Storage Nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				e, _ := r.(runtime.Error)
+				require.Errorf(t, e, "Expected panic: %v", e)
 			}
-		}
-	}
-	if err := it.Err(); err != nil {
-		t.Fatalf("unexpected error: %s", err)
-	}
+		}()
+		btree.FromStorage[rune, int, string](42, nil, cmp.Compare, 3)
+	})
 
-	if slices.Compare(alphabet, keySaw) != 0 {
-		t.Errorf("some keys weren't seen; got %v but want %v",
-			keySaw, alphabet)
-	}
+	t.Run("Empty Storage", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, string]{}
+		tree := btree.FromStorage[rune, int, string](42, &storage, cmp.Compare, 3)
+		require.NotNil(t, tree)
+		require.Equal(t, tree.Root, 42)
+		require.Equal(t, tree.Order, 3)
+	})
+}
+
+func TestDeserialize(t *testing.T) {
+	t.Run("Reader Nil", func(t *testing.T) {
+		defer func() {
+			r := recover()
+			if r != nil {
+				e, _ := r.(runtime.Error)
+				require.Errorf(t, e, "Expected panic: %v", e)
+			}
+		}()
+		storage := btree.InMemoryStore_t[rune, string]{}
+		btree.Deserialize(nil, &storage, cmp.Compare)
+	})
+
+	t.Run("Invalid Reader", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, string]{}
+		rd := iotest.ErrReader(io.ErrUnexpectedEOF)
+
+		tree, err := btree.Deserialize(rd, &storage, cmp.Compare)
+
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+		require.Nil(t, tree)
+	})
+
+	t.Run("Invalid Byte Encoding", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, string]{}
+
+		rd := bytes.NewReader([]byte{0x00, 0x01, 0x02})
+		tree, err := btree.Deserialize(rd, &storage, cmp.Compare)
+
+		require.Error(t, err)
+		require.Nil(t, tree)
+	})
+
+	t.Run("Valid Deserialize", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		payload := struct {
+			Root  int
+			Order int
+		}{
+			Root:  123,
+			Order: 3,
+		}
+
+		var buf bytes.Buffer
+		enc := msgpack.NewEncoder(&buf)
+		err := enc.Encode(&payload)
+		require.NoError(t, err)
+
+		tree, err := btree.Deserialize(&buf, &storage, cmp.Compare)
+		require.NoError(t, err)
+		require.NotNil(t, tree)
+		require.Equal(t, tree.Root, payload.Root)
+		require.Equal(t, tree.Order, payload.Order)
+	})
 }

@@ -1,6 +1,9 @@
 package btree
 
-import "errors"
+import (
+	"errors"
+	"slices"
+)
 
 var (
 	notfound = errors.New("item not found")
@@ -10,36 +13,42 @@ type InMemoryStore[K any, V any] struct {
 	store []Node[K, int, V]
 }
 
-func (s *InMemoryStore[K, V]) get(ptr int) (*Node[K, int, V], error) {
-	if ptr >= len(s.store) {
-		return nil, notfound
+func cloneNode[K any, P comparable, V any](n *Node[K, P, V]) *Node[K, P, V] {
+	if n == nil {
+		return nil
 	}
 
-	return &s.store[ptr], nil
+	return &Node[K, P, V]{
+		Version:  n.Version,
+		Keys:     slices.Clone(n.Keys),
+		Pointers: slices.Clone(n.Pointers),
+		Values:   slices.Clone(n.Values),
+		Prev:     n.Prev,
+		Next:     n.Next,
+	}
 }
 
 func (s *InMemoryStore[K, V]) Get(ptr int) (n *Node[K, int, V], err error) {
-	node, err := s.get(ptr)
-	if err != nil {
-		return
+	if ptr >= len(s.store) {
+		return nil, notfound
 	}
-	return node, nil
+	return &s.store[ptr], nil
 }
 
 func (s *InMemoryStore[K, V]) Update(ptr int, n *Node[K, int, V]) error {
-	_, err := s.get(ptr)
+	_, err := s.Get(ptr)
 	if err != nil {
 		return err
 	}
 
-	dup := newNodeFrom(n.Keys, n.Pointers, n.Values)
+	dup := cloneNode(n)
 	dup.Next = n.Next
 	s.store[ptr] = *dup
 	return nil
 }
 
 func (s *InMemoryStore[K, V]) Put(n *Node[K, int, V]) (int, error) {
-	dup := newNodeFrom(n.Keys, n.Pointers, n.Values)
+	dup := cloneNode(n)
 	dup.Next = n.Next
 	s.store = append(s.store, *dup)
 	return len(s.store) - 1, nil
