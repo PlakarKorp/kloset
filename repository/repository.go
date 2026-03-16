@@ -862,7 +862,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 		rd = io.TeeReader(rd, tmpStateFile)
 	}
 
-	span := r.ioStats.GetReadSpan()
+	span := r.ioStats.GetWriteSpan()
 	nbytes, err := r.store.Put(r.appContext, storage.StorageResourceState, mac, rd)
 	if nbytes > 0 {
 		span.Add(nbytes)
