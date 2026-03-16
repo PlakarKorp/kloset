@@ -66,6 +66,9 @@ type BTree[K any, P comparable, V any] struct {
 
 // New returns a new, empty tree.
 func New[K any, P comparable, V any](store Storer[K, P, V], compare func(K, K) int, order int) (*BTree[K, P, V], error) {
+	if store == nil {
+		return nil, errors.New("can not create a tree from invalid storage")
+	}
 	root := Node[K, P, V]{
 		Version: versioning.FromString(NODE_VERSION),
 	}
