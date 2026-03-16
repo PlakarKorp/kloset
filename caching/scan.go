@@ -74,7 +74,7 @@ func (c *ScanCache) GetState(stateID objects.MAC) ([]byte, error) {
 }
 
 func (c *ScanCache) GetLatestState() (objects.MAC, error) {
-	panic("GetLatestState should never be used on the ScanCache backend")
+	return objects.NilMac, nil
 }
 
 func (c *ScanCache) GetStates() (map[objects.MAC][]byte, error) {
