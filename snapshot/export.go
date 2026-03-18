@@ -107,6 +107,10 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)
 			} else if e.FileInfo.Mode().IsRegular() {
+				// This is a shortcut, but it's safe, integrated plugins are
+				// controlled by us and consume everything, and external plugins
+				// go over grpc which consumes everything.
+				snap.repository.ExportStats.GetWriteSpan().Add(e.FileInfo.Size())
 				emitter.File(entrypath)
 			}
 			records <- connectors.NewRecord(entrypath, e.SymlinkTarget, e.FileInfo, e.ExtendedAttributes,
