@@ -82,6 +82,11 @@ type Repository struct {
 
 	ioStats *iostat.IOTracker
 
+	// XXX: Maybe find a better place for those, right now it's here because
+	// it's the omni present object.
+	ImportStats *iostat.IOTracker
+	ExportStats *iostat.IOTracker
+
 	storageSize      int64
 	storageSizeDirty bool
 
@@ -103,6 +108,8 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 		storageSize:      -1,
 		storageSizeDirty: true,
 		ioStats:          iostat.New(),
+		ImportStats:      iostat.New(),
+		ExportStats:      iostat.New(),
 	}, nil
 }
 
@@ -147,6 +154,8 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		storageSize:      -1,
 		storageSizeDirty: true,
 		ioStats:          iostat.New(),
+		ImportStats:      iostat.New(),
+		ExportStats:      iostat.New(),
 	}
 
 	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), false)
@@ -213,6 +222,8 @@ func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, co
 		storageSize:      -1,
 		storageSizeDirty: true,
 		ioStats:          iostat.New(),
+		ImportStats:      iostat.New(),
+		ExportStats:      iostat.New(),
 	}
 
 	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), readonlyCache)

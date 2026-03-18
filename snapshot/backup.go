@@ -19,6 +19,7 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/importer"
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
@@ -341,6 +342,8 @@ func (snap *Builder) Import(source *Source) error {
 
 func (snap *Builder) Backup(source *Source) error {
 	/* phase 0: setup - prepare source context and indexes */
+	snap.repository.ImportStats = iostat.New()
+
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -547,6 +550,8 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 		if err != nil && err != io.EOF {
 			return nil, objects.MAC{}, -1, err
 		}
+
+		snap.repository.ImportStats.GetReadSpan().Add(int64(len(cdcChunk)))
 
 		if cdcChunk != nil {
 			chunkCopy := make([]byte, len(cdcChunk))
