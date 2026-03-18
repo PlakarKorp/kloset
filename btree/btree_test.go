@@ -42,15 +42,10 @@ func TestFromStorage(t *testing.T) {
 
 func TestDeserialize(t *testing.T) {
 	t.Run("Reader Nil", func(t *testing.T) {
-		defer func() {
-			r := recover()
-			if r != nil {
-				e, _ := r.(runtime.Error)
-				require.Errorf(t, e, "Expected panic: %v", e)
-			}
-		}()
 		storage := btree.InMemoryStore_t[rune, string]{}
-		btree.Deserialize(nil, &storage, cmp.Compare)
+		require.Panics(t, func() {
+			btree.Deserialize(nil, &storage, cmp.Compare)
+		})
 	})
 
 	t.Run("Invalid Reader", func(t *testing.T) {
