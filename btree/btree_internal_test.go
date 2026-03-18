@@ -27,7 +27,9 @@ func TestFromStorage_RootMustExists(t *testing.T) {
 		return &storage.store[ptr], nil
 	}
 
-	tree := FromStorage(root, &storage, cmp.Compare, 2)
+	tree, err := FromStorage(root, &storage, cmp.Compare, 3)
+	require.NoError(t, err)
+	require.NotNil(t, tree)
 	node, path, err := tree.findleaf(12)
 
 	if calls == 0 {
@@ -202,7 +204,9 @@ func TestPersist(t *testing.T) {
 	root, err := Persist(tree1, &store2, func(e int) (int, error) { return e, nil })
 	require.NoError(t, err)
 
-	tree2 := FromStorage(root, &store2, cmp.Compare, order)
+	tree2, err := FromStorage(root, &store2, cmp.Compare, order)
+	require.NoError(t, err)
+	require.NotNil(t, tree2)
 	for i, r := range alphabet {
 		v, found, err := tree2.Find(r)
 		require.NoError(t, err)
