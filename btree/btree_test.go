@@ -3,8 +3,8 @@ package btree_test
 import (
 	"bytes"
 	"cmp"
+	"errors"
 	"io"
-	"runtime"
 	"testing"
 	"testing/iotest"
 
@@ -16,7 +16,7 @@ import (
 func TestNew(t *testing.T) {
 	t.Run("Storage Nil", func(t *testing.T) {
 		empty, err := btree.New[rune, int, string](nil, cmp.Compare, 3)
-		require.Error(t, err)
+		require.ErrorIs(t, err, btree.ErrStore)
 		require.Nil(t, empty)
 	})
 
@@ -26,18 +26,24 @@ func TestNew(t *testing.T) {
 		require.ErrorIs(t, err, btree.ErrOrder)
 		require.Nil(t, empty)
 	})
+
+	t.Run("NewFails_BecauseStoreFails", func(t *testing.T) {
+		putErr := errors.New("Store.Put() failed")
+		storage := btree.InMemoryStore_t[rune, string]{}
+		storage.PutFn = func(*btree.Node[rune, int, string]) (int, error) {
+			return 0, putErr
+		}
+		empty, err := btree.New(&storage, cmp.Compare, 5)
+		require.ErrorIs(t, err, putErr)
+		require.Nil(t, empty)
+	})
 }
 
 func TestFromStorage(t *testing.T) {
 	t.Run("Storage Nil", func(t *testing.T) {
-		defer func() {
-			r := recover()
-			if r != nil {
-				e, _ := r.(runtime.Error)
-				require.Errorf(t, e, "Expected panic: %v", e)
-			}
-		}()
-		btree.FromStorage[rune, int, string](42, nil, cmp.Compare, 3)
+		tree, err := btree.FromStorage[rune, int, string](42, nil, cmp.Compare, 3)
+		require.ErrorIs(t, err, btree.ErrStore)
+		require.Nil(t, tree)
 	})
 
 	t.Run("Invalid Order", func(t *testing.T) {

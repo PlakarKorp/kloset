@@ -13,6 +13,7 @@ import (
 
 var (
 	ErrOrder  = errors.New("btree: order must be >= 3")
+	ErrStore  = errors.New("btree: storage can not be nil")
 	ErrExists = errors.New("Item already exists")
 )
 
@@ -73,7 +74,7 @@ func New[K any, P comparable, V any](store Storer[K, P, V], compare func(K, K) i
 		return nil, ErrOrder
 	}
 	if store == nil {
-		return nil, errors.New("can not create a tree from invalid storage")
+		return nil, ErrStore
 	}
 	root := Node[K, P, V]{
 		Version: versioning.FromString(NODE_VERSION),
@@ -97,6 +98,9 @@ func New[K any, P comparable, V any](store Storer[K, P, V], compare func(K, K) i
 func FromStorage[K any, P comparable, V any](root P, store Storer[K, P, V], compare func(K, K) int, order int) (*BTree[K, P, V], error) {
 	if order < 3 {
 		return nil, ErrOrder
+	}
+	if store == nil {
+		return nil, ErrStore
 	}
 	return &BTree[K, P, V]{
 		Version: versioning.FromString(BTREE_VERSION),
