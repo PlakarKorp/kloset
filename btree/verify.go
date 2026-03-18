@@ -160,6 +160,7 @@ func (b *BTree[K, P, V]) verifyNode(cur, parent *Node[K, P, V], ptrIdx int, stat
 
 func (b *BTree[K, P, V]) Dot(w io.Writer, showNextPtrs bool) error {
 	iter := b.IterDFS()
+	fmt.Fprintln(w, "digraph G {")
 	for iter.Next() {
 		ptr, n := iter.Current()
 
@@ -172,5 +173,6 @@ func (b *BTree[K, P, V]) Dot(w io.Writer, showNextPtrs bool) error {
 		}
 	}
 
+	fmt.Fprintln(w, "}")
 	return iter.Err()
 }
