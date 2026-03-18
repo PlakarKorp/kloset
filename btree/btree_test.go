@@ -35,8 +35,8 @@ func TestFromStorage(t *testing.T) {
 		storage := btree.InMemoryStore_t[rune, string]{}
 		tree := btree.FromStorage[rune, int, string](42, &storage, cmp.Compare, 3)
 		require.NotNil(t, tree)
-		require.Equal(t, tree.Root, 42)
-		require.Equal(t, tree.Order, 3)
+		require.Equal(t, 42, tree.Root)
+		require.Equal(t, 3, tree.Order)
 	})
 }
 
@@ -91,7 +91,7 @@ func TestDeserialize(t *testing.T) {
 		tree, err := btree.Deserialize(&buf, &storage, cmp.Compare)
 		require.NoError(t, err)
 		require.NotNil(t, tree)
-		require.Equal(t, tree.Root, payload.Root)
-		require.Equal(t, tree.Order, payload.Order)
+		require.Equal(t, payload.Root, tree.Root)
+		require.Equal(t, payload.Order, tree.Order)
 	})
 }
