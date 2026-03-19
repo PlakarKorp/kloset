@@ -261,3 +261,90 @@ func TestInsert(t *testing.T) {
 		require.ErrorIs(t, err, putErr)
 	})
 }
+
+func TestFind(t *testing.T) {
+	t.Run("EmptyTree", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		_, found, err := tree.Find('a')
+		require.NoError(t, err)
+		require.False(t, found)
+	})
+
+	t.Run("Find_MatchValues_AfterInsert", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('k', 11))
+
+		v, found, err := tree.Find('k')
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 11, v)
+	})
+
+	t.Run("MissingKeyNotFound", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Insert('z', 26))
+
+		_, found, err := tree.Find('A')
+		require.NoError(t, err)
+		require.False(t, found)
+	})
+
+	t.Run("FindAllInsertedKeys", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
+		for i, r := range alphabet {
+			require.NoError(t, tree.Insert(r, i))
+		}
+
+		for i, r := range alphabet {
+			v, found, err := tree.Find(r)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, i, v)
+		}
+
+		slices.Reverse(alphabet)
+		lastIdx := len(alphabet) - 1
+		for i, r := range alphabet {
+			v, found, err := tree.Find(r)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, lastIdx-i, v)
+		}
+	})
+
+	t.Run("FindFails_BecauseStoreFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+		require.NoError(t, tree.Insert('a', 1))
+
+		// New Tree with an empty cache in order to get store.Get() called
+		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		call := 0
+		storage.GetFn = func(int) (*btree.Node[rune, int, int], error) {
+			call++
+			return nil, getErr
+		}
+
+		_, _, err = fresh.Find('a')
+		require.Equal(t, call, 1)
+		require.ErrorIs(t, err, getErr)
+	})
+}
