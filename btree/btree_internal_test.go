@@ -16,7 +16,7 @@ func TestFromStorage_RootMustExists(t *testing.T) {
 	calls := 0
 	var firstCall int
 	storage := InMemoryStore_t[rune, string]{}
-	storage.getFn = func(ptr int) (*Node[rune, int, string], error) {
+	storage.GetFn = func(ptr int) (*Node[rune, int, string], error) {
 		if calls == 0 {
 			firstCall = ptr
 		}

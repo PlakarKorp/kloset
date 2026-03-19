@@ -229,4 +229,18 @@ func TestInsert(t *testing.T) {
 			require.Equal(t, i, v)
 		}
 	})
+
+	t.Run("InsertFails_BecauseStoreGetFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		storage.GetFn = func(ptr int) (*btree.Node[rune, int, int], error) {
+			return nil, getErr
+		}
+
+		err = tree.Insert('x', 99)
+		require.ErrorIs(t, err, getErr)
+	})
 }

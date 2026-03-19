@@ -2,13 +2,13 @@ package btree
 
 type InMemoryStore_t[K any, V any] struct {
 	InMemoryStore[K, V]
-	getFn func(int) (*Node[K, int, V], error)
+	GetFn func(int) (*Node[K, int, V], error)
 	PutFn func(*Node[K, int, V]) (int, error)
 }
 
 func (s *InMemoryStore_t[K, V]) Get(ptr int) (n *Node[K, int, V], err error) {
-	if s.getFn != nil {
-		return s.getFn(ptr)
+	if s.GetFn != nil {
+		return s.GetFn(ptr)
 	}
 
 	if ptr >= len(s.store) {
