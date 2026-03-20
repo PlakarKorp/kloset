@@ -520,3 +520,74 @@ func TestUpdate(t *testing.T) {
 		require.ErrorIs(t, err, updateErr)
 	})
 }
+
+func TestCount(t *testing.T) {
+	t.Run("EmptyTree", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New(storage, cmp.Compare, 3)
+		require.NoError(t, err)
+		require.Equal(t, 0, tree.Count)
+	})
+
+	t.Run("Insert_onlyNewKeys", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
+		for i, r := range alphabet {
+			require.NoError(t, tree.Insert(r, i))
+			require.Equal(t, i+1, tree.Count)
+		}
+	})
+
+	t.Run("InsertDuplicates", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.Equal(t, 1, tree.Count)
+
+		require.ErrorIs(t, tree.Insert('a', 2), btree.ErrExists)
+		require.Equal(t, 1, tree.Count)
+	})
+
+	t.Run("UpdateExistingKey", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.Equal(t, 1, tree.Count)
+
+		require.NoError(t, tree.Update('a', 99))
+		require.Equal(t, 1, tree.Count)
+	})
+
+	t.Run("UpdateOnMissingKey", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Update('x', 7))
+		require.Equal(t, 1, tree.Count)
+	})
+
+	t.Run("ManySameKeyInserts", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 4)
+		require.NoError(t, err)
+
+		const n = 1000
+		for i := range 1000 {
+			require.NoError(t, tree.Insert(rune(i), i))
+		}
+		require.Equal(t, n, tree.Count)
+
+		for i := range n / 2 {
+			require.ErrorIs(t, tree.Insert(rune(i), i), btree.ErrExists)
+		}
+		require.Equal(t, n, tree.Count)
+	})
+}
