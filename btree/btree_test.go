@@ -401,3 +401,122 @@ func TestFind(t *testing.T) {
 		require.ErrorIs(t, err, getErr)
 	})
 }
+
+func TestUpdate(t *testing.T) {
+	t.Run("UpdateNewKey_InsertInLeaf", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		err = tree.Update('k', 11)
+		require.NoError(t, err)
+
+		v, found, err := tree.Find('k')
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 11, v)
+	})
+
+	t.Run("UpdateSameKey_Overwrite", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		err = tree.Update('k', 1)
+		require.NoError(t, err)
+		err = tree.Update('k', 2)
+		require.NoError(t, err)
+
+		v, found, err := tree.Find('k')
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 2, v)
+	})
+
+	t.Run("UpdateManyKeys_triggersSplits_butAllKeysPresent", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 4)
+		require.NoError(t, err)
+
+		const n = 1550
+		const upN = 450
+		base := rune(0)
+		for i := range n {
+			k := base + rune(i)
+			err = tree.Insert(k, i)
+			require.NoError(t, err)
+		}
+
+		for i := range n {
+			k := base + rune(i) + upN
+			err = tree.Update(k, i)
+			require.NoError(t, err)
+		}
+
+		for i := range n {
+			k := base + rune(i) + upN
+			v, found, err := tree.Find(k)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, i, v)
+		}
+	})
+
+	t.Run("UpdateFails_BecauseStoreGetFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		storage.GetFn = func(ptr int) (*btree.Node[rune, int, int], error) {
+			return nil, getErr
+		}
+
+		err = tree.Update('x', 99)
+		require.ErrorIs(t, err, getErr)
+	})
+
+	t.Run("UpdateFails_BecauseStorePutFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		for _, k := range []rune{'a', 'b', 'c', 'd', 'e', 'f'} {
+			require.NoError(t, tree.Insert(k, int(k)))
+		}
+
+		putErr := errors.New("Store.Put() failed")
+		storage.PutFn = func(*btree.Node[rune, int, int]) (int, error) {
+			return 0, putErr
+		}
+		err = tree.Update('x', 99)
+		require.ErrorIs(t, err, putErr)
+	})
+
+	t.Run("UpdateThenClose", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Update('a', 2))
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("UpdateFails_BecauseStoreUpdateFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Update('a', 2))
+
+		updateErr := errors.New("Store.Update() failed")
+		storage.UpdateFn = func(ptr int, n *btree.Node[rune, int, int]) error {
+			return updateErr
+		}
+
+		err = tree.Close()
+		require.ErrorIs(t, err, updateErr)
+	})
+}
