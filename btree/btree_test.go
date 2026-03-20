@@ -262,6 +262,59 @@ func TestInsert(t *testing.T) {
 	})
 }
 
+func TestClose(t *testing.T) {
+	t.Run("Close_Twice", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, _ := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, tree.Close())
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("EmptyTree", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("Close_AfterInsert", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("Close_Fails_WhenStoreCloseFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+
+		closeErr := errors.New("Store.Close() failed")
+		storage.CloseFn = func() error { return closeErr }
+
+		err = tree.Close()
+		require.ErrorIs(t, err, closeErr)
+	})
+
+	t.Run("Close_Fails_BecauseStoreUpdateFailsOnFlush", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+
+		flushErr := errors.New("Store.Update() failed")
+		storage.UpdateFn = func(ptr int, n *btree.Node[rune, int, int]) error {
+			return flushErr
+		}
+		require.ErrorIs(t, tree.Close(), flushErr)
+	})
+}
+
 func TestFind(t *testing.T) {
 	t.Run("EmptyTree", func(t *testing.T) {
 		storage := btree.InMemoryStore_t[rune, int]{}
