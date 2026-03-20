@@ -591,3 +591,60 @@ func TestCount(t *testing.T) {
 		require.Equal(t, n, tree.Count)
 	})
 }
+
+func TestStats(t *testing.T) {
+	t.Run("Stats_missThenHit", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		h0, m0, s0 := tree.Stats()
+		require.Zero(t, h0, "an new empty tree can not generate any access on cache")
+		require.Zero(t, m0, "an new empty tree should have an empty cache")
+		require.Zero(t, s0, "an new empty tree should have an empty cache")
+
+		// Trigger one cache miss + one item in cache
+		require.NoError(t, tree.Insert('a', 1))
+		h1, m1, s1 := tree.Stats()
+		require.Equal(t, h1, h0, "no hit should happend on a first insertion in cache")
+		require.Equal(t, m1, m0+1, "expected at least one cache miss on first insertion")
+		require.Equal(t, s1, s0+1, "cache size should increase once on first insertion")
+
+		// Trigger one access
+		_, _, err = tree.Find('a')
+		require.NoError(t, err)
+		h2, m2, s2 := tree.Stats()
+		require.Equal(t, h2, h1+1, "expected a hit on a cache access")
+		require.Equal(t, m2, m1, "expected no cache miss on an access")
+		require.Equal(t, s2, s1, "cache size should not vary on an access")
+
+		// Trigger one access again
+		_, _, err = tree.Find('a')
+		require.NoError(t, err)
+		h3, m3, s3 := tree.Stats()
+		require.Equal(t, h3, h2+1, "expected a hit on a cache access")
+		require.Equal(t, m3, m1, "expected no cache miss on an access")
+		require.Equal(t, s3, s1, "cache size should not vary on an access")
+
+		// Trigger one access yet again
+		require.NoError(t, tree.Update('a', 42))
+		h4, m4, s4 := tree.Stats()
+		require.Equal(t, h4, h3+1, "expected a hit on an cache update")
+		require.Equal(t, m4, m1, "expected no cache miss on an update")
+		require.Equal(t, s4, s1, "cache size should not increase on an update")
+
+		// Trigger cache flush
+		require.NoError(t, tree.Close())
+		h5, m5, s5 := tree.Stats()
+		require.Equal(t, h5, h4, "flushing the cache should not generate any access")
+		require.NotZero(t, m5, "flushing the cache should not reset the cache miss value")
+		require.Zero(t, s5, "flushing the cache should generate an empty cache")
+
+		// Trigger no access, a cache miss, one iten in cache
+		require.NoError(t, tree.Update('a', 2))
+		h6, m6, s6 := tree.Stats()
+		require.Equal(t, h6, h5, "expected no hit on an update after a flush")
+		require.Equal(t, m6, m5+1, "expected a cache miss on an update after a flush")
+		require.Equal(t, s6, s5+1, "cache size should increase on an update after a flush")
+	})
+}
