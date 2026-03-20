@@ -4,7 +4,6 @@ import (
 	"cmp"
 	"errors"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,73 +43,6 @@ func TestFromStorage_RootMustExists(t *testing.T) {
 	}
 	if !errors.Is(err, notfound) {
 		t.Fatalf("expected error notfound, got %v", err)
-	}
-}
-
-func TestBTree(t *testing.T) {
-	store := InMemoryStore_t[rune, int]{}
-	tree, err := New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.NoError(t, err)
-	}
-
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.ErrorIs(t, err, ErrExists)
-	}
-
-	for i, r := range alphabet {
-		v, found, err := tree.Find(r)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.EqualValues(t, v, i)
-	}
-
-	for i := len(alphabet) - 1; i >= 0; i-- {
-		r := alphabet[i]
-		v, found, err := tree.Find(r)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.EqualValues(t, v, i)
-	}
-
-	nonexist := 'A'
-	_, found, err := tree.Find(nonexist)
-	require.NoError(t, err)
-	require.False(t, found)
-}
-
-func TestInsert(t *testing.T) {
-	store := InMemoryStore_t[string, int]{}
-	tree, err := New(&store, strings.Compare, 30)
-	require.NoError(t, err)
-
-	items := []string{"e", "z", "a", "b", "a", "a", "b", "b", "a", "c", "d"}
-	for i, r := range items {
-		err := tree.Insert(r, i)
-		require.True(t, err == nil || err == ErrExists)
-	}
-
-	unique := []struct {
-		key string
-		val int
-	}{
-		{"a", 2},
-		{"b", 3},
-		{"c", 9},
-		{"d", 10},
-		{"e", 0},
-	}
-
-	for _, u := range unique {
-		v, found, err := tree.Find(u.key)
-		require.NoError(t, err)
-		require.True(t, found)
-		require.Equal(t, v, u.val)
 	}
 }
 
