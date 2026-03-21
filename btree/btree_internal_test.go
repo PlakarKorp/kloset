@@ -2,6 +2,7 @@ package btree
 
 import (
 	"cmp"
+	"errors"
 	"testing"
 
 	"github.com/PlakarKorp/kloset/versioning"
@@ -158,5 +159,114 @@ func Test_insertInternal(t *testing.T) {
 		n.insertInternal(1, 'p', 99)
 		require.Equal(t, []rune{'m', 'p', 't'}, n.Keys)
 		require.Equal(t, []int{0, 1, 99, 2}, n.Pointers)
+	})
+}
+
+// The unreacheable code will be tested later with cache tests (cache.Put cache.Update)
+func Test_insertUpwards(t *testing.T) {
+	newTree := func(
+		t *testing.T,
+		st *InMemoryStore_t[rune, int],
+		order int,
+		rootPtr int,
+	) *BTree[rune, int, int] {
+		t.Helper()
+		return &BTree[rune, int, int]{
+			Order:   order,
+			Root:    rootPtr,
+			cache:   cachefor[rune, int, int](st, order),
+			compare: cmp.Compare[rune],
+		}
+	}
+
+	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
+		st := InMemoryStore_t[rune, int]{}
+		n := Node[rune, int, int]{
+			Keys:     []rune{'m'},
+			Pointers: []int{0, 1},
+		}
+		ptr, err := st.Put(&n)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		st.GetFn = func(ptr int) (*Node[rune, int, int], error) { return nil, getErr }
+
+		tree := newTree(t, &st, 3, ptr)
+		err = tree.insertUpwards('z', 999, []int{ptr})
+		require.ErrorIs(t, err, getErr)
+	})
+
+	t.Run("DuplicateKey", func(t *testing.T) {
+		st := InMemoryStore_t[rune, int]{}
+		n := Node[rune, int, int]{
+			Keys:     []rune{'m'},
+			Pointers: []int{0, 1},
+		}
+		ptr, err := st.Put(&n)
+		require.NoError(t, err)
+
+		tree := newTree(t, &st, 3, ptr)
+		require.PanicsWithValue(t, "broken invariant: duplicate key in intermediate node", func() {
+			tree.insertUpwards('m', 999, []int{ptr})
+		})
+	})
+
+	t.Run("SplitFails_BecauseStorePutFails", func(t *testing.T) {
+		st := InMemoryStore_t[rune, int]{}
+		n := Node[rune, int, int]{
+			Keys:     []rune{'m', 't'},
+			Pointers: []int{0, 1, 2},
+		}
+		ptr, err := st.Put(&n)
+		require.NoError(t, err)
+
+		putErr := errors.New("Store.Put() failed")
+		st.PutFn = func(n *Node[rune, int, int]) (int, error) { return 0, putErr }
+
+		tree := newTree(t, &st, 3, ptr)
+		err = tree.insertUpwards('z', 999, []int{ptr})
+		require.ErrorIs(t, err, putErr)
+	})
+
+	t.Run("StorePutFails_WhenGrowingTree", func(t *testing.T) {
+		st := InMemoryStore_t[rune, int]{}
+		n := Node[rune, int, int]{
+			Keys:   nil,
+			Values: nil,
+		}
+		rootPtr, err := st.Put(&n)
+		require.NoError(t, err)
+
+		putErr := errors.New("Store.Put() failed")
+		st.PutFn = func(n *Node[rune, int, int]) (int, error) {
+			if len(n.Keys) == 1 && len(n.Pointers) == 2 && len(n.Values) == 0 {
+				return 0, putErr
+			}
+			dup := cloneNode(n)
+			dup.Next = n.Next
+			st.store = append(st.store, *dup)
+			return len(st.store) - 1, nil
+		}
+		tree := newTree(t, &st, 3, rootPtr)
+
+		err = tree.insertUpwards('k', 42, nil)
+		require.ErrorIs(t, err, putErr)
+	})
+
+	t.Run("SplitsRoot_CreatesNewRoot", func(t *testing.T) {
+		store := InMemoryStore_t[rune, int]{}
+		root := Node[rune, int, int]{
+			Keys:     []rune{'m', 't'},
+			Pointers: []int{10, 11, 12},
+			Values:   nil,
+		}
+		rootPtr, err := store.Put(&root)
+		require.NoError(t, err)
+
+		tree := newTree(t, &store, 3, rootPtr)
+
+		err = tree.insertUpwards('z', 999, []int{rootPtr})
+		require.NoError(t, err)
+		require.NotEqual(t, rootPtr, tree.Root)
 	})
 }
