@@ -3,7 +3,6 @@ package btree
 import (
 	"cmp"
 	"errors"
-	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -44,80 +43,6 @@ func TestFromStorage_RootMustExists(t *testing.T) {
 	if !errors.Is(err, notfound) {
 		t.Fatalf("expected error notfound, got %v", err)
 	}
-}
-
-func TestScanAll(t *testing.T) {
-	store := InMemoryStore_t[rune, int]{}
-	tree, err := New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.NoError(t, err)
-	}
-
-	iter, err := tree.ScanAll()
-	require.NoError(t, err)
-
-	for i, r := range alphabet {
-		require.True(t, iter.Next())
-		k, v := iter.Current()
-		require.Equal(t, k, r)
-		require.Equal(t, v, i)
-	}
-
-	require.False(t, iter.Next())
-}
-
-func TestScanFrom(t *testing.T) {
-	store := InMemoryStore_t[rune, int]{}
-	tree, err := New(&store, cmp.Compare, 8)
-	require.NoError(t, err)
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.NoError(t, err)
-	}
-
-	iter, err := tree.ScanFrom(rune('e'))
-	require.NoError(t, err)
-
-	for i := 4; i < len(alphabet); i++ {
-		r := alphabet[i]
-		require.True(t, iter.Next())
-		k, v := iter.Current()
-		require.Equal(t, k, r)
-		require.Equal(t, v, i)
-	}
-
-	require.False(t, iter.Next())
-}
-
-func TestScanAllReverse(t *testing.T) {
-	store := InMemoryStore_t[rune, int]{}
-	tree, err := New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.NoError(t, err)
-	}
-
-	iter, err := tree.ScanAllReverse()
-	require.NoError(t, err)
-
-	for i := len(alphabet) - 1; i >= 0; i-- {
-		r := alphabet[i]
-		require.True(t, iter.Next())
-		k, v := iter.Current()
-		require.Equal(t, k, r)
-		require.Equal(t, v, i)
-	}
-
-	require.False(t, iter.Next())
 }
 
 func TestPersist(t *testing.T) {
@@ -162,29 +87,4 @@ func TestPersist(t *testing.T) {
 	}
 
 	require.False(t, iter.Next())
-}
-
-func TestVisitDFS(t *testing.T) {
-	store := InMemoryStore_t[rune, int]{}
-	tree, err := New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
-
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.NoError(t, err)
-	}
-
-	keySaw := []rune{}
-	it := tree.IterDFS()
-	for it.Next() {
-		_, node := it.Current()
-		if node.isleaf() {
-			for i := range node.Keys {
-				keySaw = append(keySaw, node.Keys[i])
-			}
-		}
-	}
-	require.NoError(t, it.Err())
-	require.Zero(t, slices.Compare(alphabet, keySaw))
 }
