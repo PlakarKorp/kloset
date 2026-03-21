@@ -114,3 +114,23 @@ func TestNewNodeFrom(t *testing.T) {
 		require.NotSame(t, &from.Values[0], &cl.Values[0])
 	})
 }
+
+func Test_split(t *testing.T) {
+	// cutoff==0 branch + leaf
+	t.Run("CutoffZero_Leaf", func(t *testing.T) {
+		n := Node[rune, int, int]{
+			Keys:   []rune{'a'},
+			Values: []int{1},
+		}
+		_ = n.split()
+	})
+
+	t.Run("InternalBranch", func(t *testing.T) {
+		n := Node[rune, int, int]{
+			Keys:     []rune{'b', 'c', 'd'},
+			Pointers: []int{10, 11, 12, 13},
+			Values:   nil,
+		}
+		_ = n.split()
+	})
+}
