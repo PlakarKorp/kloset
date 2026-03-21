@@ -2,7 +2,6 @@ package btree
 
 import (
 	"cmp"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -28,19 +27,9 @@ func TestFromStorage_RootMustExists(t *testing.T) {
 	tree, err := FromStorage(root, &storage, cmp.Compare, 3)
 	require.NoError(t, err)
 	require.NotNil(t, tree)
-	node, path, err := tree.findleaf(12)
+	_, _, err = tree.findleaf(12)
 
-	if calls == 0 {
-		t.Fatal("expected Get to be called at least once")
-	}
-	if firstCall != root {
-		t.Fatalf("expected first Get(%d), got Get(%d)", root, firstCall)
-	}
-
-	if err == nil {
-		t.Fatalf("expected error, got nil (node=%v path=%v)", node, path)
-	}
-	if !errors.Is(err, notfound) {
-		t.Fatalf("expected error notfound, got %v", err)
-	}
+	require.NotZerof(t, calls, "expected Get to be called at least once")
+	require.Equalf(t, firstCall, root, "expected first Get(%d), got Get(%d)", root, firstCall)
+	require.ErrorIs(t, err, notfound)
 }
