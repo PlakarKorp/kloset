@@ -134,3 +134,29 @@ func Test_split(t *testing.T) {
 		_ = n.split()
 	})
 }
+
+func Test_insertInternal(t *testing.T) {
+	// idx == len(Keys).
+	t.Run("AppendBranch", func(t *testing.T) {
+		n := Node[rune, int, int]{
+			Keys:     []rune{'m'},
+			Pointers: []int{0, 1},
+		}
+
+		n.insertInternal(len(n.Keys), 'z', 999)
+		require.Equal(t, []rune{'m', 'z'}, n.Keys)
+		require.Equal(t, []int{0, 1, 999}, n.Pointers)
+	})
+
+	// 0 < idx < len(Keys)
+	t.Run("MiddleBranch", func(t *testing.T) {
+		n := Node[rune, int, int]{
+			Keys:     []rune{'m', 't'},
+			Pointers: []int{0, 1, 2},
+		}
+
+		n.insertInternal(1, 'p', 99)
+		require.Equal(t, []rune{'m', 'p', 't'}, n.Keys)
+		require.Equal(t, []int{0, 1, 99, 2}, n.Pointers)
+	})
+}
