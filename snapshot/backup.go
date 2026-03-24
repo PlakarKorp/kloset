@@ -76,16 +76,16 @@ var (
 	ErrOutOfRange = errors.New("out of range")
 )
 
-func (sourceCtx *sourceContext) batchRecordEntry(kind scanlog.EntryKind, pathname string, serializedEntry []byte, serializedSummary []byte) error {
+func (sourceCtx *sourceContext) batchRecordEntry(kind scanlog.EntryKind, pathname string, ctype string, mac objects.MAC, serializedEntry []byte, serializedSummary []byte) error {
 	sourceCtx.vfsEntLock.Lock()
 	defer sourceCtx.vfsEntLock.Unlock()
 
 	if kind == scanlog.KindDirectory {
-		if err := sourceCtx.vfsEntBatch.PutDirectory(pathname, serializedEntry); err != nil {
+		if err := sourceCtx.vfsEntBatch.PutDirectory(pathname, mac, serializedEntry); err != nil {
 			return err
 		}
 	} else {
-		if err := sourceCtx.vfsEntBatch.PutFile(pathname, serializedEntry, serializedSummary); err != nil {
+		if err := sourceCtx.vfsEntBatch.PutFile(pathname, ctype, mac, serializedEntry, serializedSummary); err != nil {
 			return err
 		}
 	}
@@ -838,7 +838,7 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 		if err != nil {
 			return err
 		}
-		return sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), serialized, nil)
+		return sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), "", dirEntryMAC, serialized, nil)
 	} else {
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
@@ -855,7 +855,7 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 				return err
 			}
 		}
-		return sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), serialized, nil)
+		return sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), "", dirEntryMAC, serialized, nil)
 	}
 }
 
@@ -928,12 +928,8 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 
 	parts := strings.SplitN(meta.ContentType, ";", 2)
 	mime := parts[0]
-	k := fmt.Sprintf("/%s%s", mime, record.Pathname)
-	if err := sourceCtx.indexes.ctidx.Insert(k, fileEntryMAC); err != nil {
-		return err
-	}
 
-	return sourceCtx.batchRecordEntry(scanlog.KindFile, fileEntry.Path(), serializedFileEntry, serializedSummary)
+	return sourceCtx.batchRecordEntry(scanlog.KindFile, fileEntry.Path(), mime, fileEntryMAC, serializedFileEntry, serializedSummary)
 }
 
 func (snap *Builder) processDirectoryRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, chunker *chunkers.Chunker) error {
@@ -1252,11 +1248,11 @@ func (snap *Builder) relinkNodesRecursive(sourceCtx *sourceContext, pathname str
 			return err
 		}
 
-		if err := sourceCtx.scanLog.PutDirectory(pathname, serialized); err != nil {
+		mac := snap.repository.ComputeMAC(serialized)
+		if err := sourceCtx.scanLog.PutDirectory(pathname, mac, serialized); err != nil {
 			return err
 		}
 
-		mac := snap.repository.ComputeMAC(serialized)
 		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
 			return err
 		}
@@ -1339,9 +1335,16 @@ func (sourceCtx *sourceContext) buildVFSIndex() ([]string, error) {
 		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
 			return nil, err
 		}
+
 		if e.Kind == scanlog.KindDirectory {
 			directories = append(directories, e.Path)
+		} else {
+			k := fmt.Sprintf("/%s%s", e.Ctype, e.Path)
+			if err := sourceCtx.indexes.ctidx.Insert(k, e.MAC); err != nil {
+				return nil, err
+			}
 		}
+
 		itemsCount++
 	}
 	return directories, nil
