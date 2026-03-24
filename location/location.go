@@ -14,6 +14,7 @@ const (
 	FLAG_FILE                      // storage: kloset is in a single file
 	FLAG_STREAM                    // importer: cannot call Import() more than once
 	FLAG_NEEDACK                   // importer: cares about acknowledgments in Import()
+	FLAG_NOMERGE                   // importer: cannot merge those in a single snapshot (multidir support)
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")

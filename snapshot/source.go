@@ -58,6 +58,10 @@ func NewSource(ctx context.Context, flags location.Flags, importers ...importer.
 		is = append(is, imp)
 	}
 
+	if len(is) > 1 && (s.flags&location.FLAG_NOMERGE != 0) {
+		return nil, fmt.Errorf("cannot merge multiple importer of type %q", s.typ)
+	}
+
 	slices.SortFunc(is, func(a, b importer.Importer) int {
 		return strings.Compare(a.Root(), b.Root())
 	})
