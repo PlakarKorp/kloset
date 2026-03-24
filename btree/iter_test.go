@@ -2,6 +2,7 @@ package btree_test
 
 import (
 	"cmp"
+	"errors"
 	"slices"
 	"testing"
 
@@ -10,27 +11,58 @@ import (
 )
 
 func TestScanAll(t *testing.T) {
-	store := btree.InMemoryStore_t[rune, int]{}
-	tree, err := btree.New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
+	buildTreeRunes := func(
+		t *testing.T,
+		st *btree.InMemoryStore_t[rune, int],
+		order int,
+		keys []rune,
+	) *btree.BTree[rune, int, int] {
+		t.Helper()
 
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
+		tree, err := btree.New[rune, int, int](st, cmp.Compare, order)
 		require.NoError(t, err)
+
+		for i, k := range keys {
+			require.NoError(t, tree.Insert(k, i))
+		}
+		return tree
 	}
 
-	iter, err := tree.ScanAll()
-	require.NoError(t, err)
+	t.Run("IteratesInOrder", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+		keys := []rune("abcdefghijklmnopqrstuvwxyz")
+		tree := buildTreeRunes(t, &st, 3, keys)
 
-	for i, r := range alphabet {
-		require.True(t, iter.Next())
-		k, v := iter.Current()
-		require.Equal(t, k, r)
-		require.Equal(t, v, i)
-	}
+		it, err := tree.ScanAll()
+		require.NoError(t, err)
+		require.NoError(t, it.Err())
 
-	require.False(t, iter.Next())
+		for i, k := range keys {
+			require.True(t, it.Next())
+			gotK, gotV := it.Current()
+			require.Equal(t, k, gotK)
+			require.Equal(t, i, gotV)
+		}
+
+		require.False(t, it.Next())
+		require.NoError(t, it.Err())
+	})
+
+	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+		keys := []rune("abcdefghijklmnopqrstuvwxyz")
+		tree := buildTreeRunes(t, &st, 3, keys)
+
+		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
+		require.NoError(t, err)
+		require.NotNil(t, fresh)
+
+		getErr := errors.New("Store.Get() failed")
+		st.GetFn = func(ptr int) (*btree.Node[rune, int, int], error) { return nil, getErr }
+
+		_, err = fresh.ScanAll()
+		require.ErrorIs(t, err, getErr)
+	})
 }
 
 func TestScanFrom(t *testing.T) {
