@@ -122,6 +122,8 @@ func ParseFlag(name string) (Flags, error) {
 		return FLAG_STREAM, nil
 	case "needack":
 		return FLAG_NEEDACK, nil
+	case "nomerge":
+		return FLAG_NOMERGE, nil
 	default:
 		return 0, ErrUnknownFlag
 	}
