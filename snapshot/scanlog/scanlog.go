@@ -95,8 +95,6 @@ func createSchema(db *sqlite.SQLiteCache) error {
 
 	CREATE INDEX IF NOT EXISTS pathmacs_parent_idx
 	ON pathmacs(kind, parent, path);
-	CREATE INDEX IF NOT EXISTS pathmacs_kind_idx
-	ON pathmacs(kind);
 	`
 
 	_, err := db.Exec(schema)
@@ -418,50 +416,6 @@ func (s *ScanLog) ListPathMACsFrom(kind PathMACKind, prefix string) iter.Seq[Pat
 		rows, err := s.db.Query(
 			`SELECT path, mac FROM pathmacs WHERE kind = ? AND path >= ? AND path < ? ORDER BY path ASC`,
 			kind, prefix, hi,
-		)
-		if err != nil {
-			return
-		}
-		defer rows.Close()
-
-		for rows.Next() {
-			var p string
-			var stored []byte
-			if err := rows.Scan(&p, &stored); err != nil {
-				return
-			}
-			if len(stored) != 32 {
-				return
-			}
-			if !yield(PathMACEntry{Path: p, MAC: objects.MAC(stored[:])}) {
-				return
-			}
-		}
-	}
-}
-
-func (s *ScanLog) CountPathMACs(kind PathMACKind) (uint64, error) {
-	var n uint64
-	err := s.db.QueryRow(
-		`SELECT COUNT(1) FROM pathmacs WHERE kind = ?`,
-		kind,
-	).Scan(&n)
-	if err != nil {
-		return 0, err
-	}
-	return n, nil
-}
-
-func (s *ScanLog) ListDirectPathMACs(kind PathMACKind, parent string, reverse bool) iter.Seq[PathMACEntry] {
-	return func(yield func(PathMACEntry) bool) {
-		order := "ASC"
-		if reverse {
-			order = "DESC"
-		}
-
-		rows, err := s.db.Query(
-			`SELECT path, payload FROM pathmacs WHERE kind = ? AND parent = ? AND parent != path ORDER BY path `+order,
-			kind, parent,
 		)
 		if err != nil {
 			return
