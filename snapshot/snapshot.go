@@ -109,10 +109,6 @@ func GetSnapshot(repo *repository.Repository, Identifier objects.MAC) (*header.H
 		return nil, false, err
 	}
 
-	if cache != nil {
-		_ = cache.PutSnapshot(Identifier, buffer) // optionally handle/log error
-	}
-
 	return hdr, false, nil
 }
 
