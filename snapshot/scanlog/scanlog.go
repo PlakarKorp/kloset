@@ -77,13 +77,11 @@ func createSchema(db *sqlite.SQLiteCache) error {
 		mac     BLOB 	NOT NULL,
 		payload BLOB    NOT NULL,
 		summary BLOB,
-		PRIMARY KEY (kind, path)
+		PRIMARY KEY (path, kind)
 	) WITHOUT ROWID;
 
 	CREATE INDEX IF NOT EXISTS entries_parent_idx
-	ON entries(kind, parent, path);
-	CREATE INDEX IF NOT EXISTS entries_parent_path_idx
-	ON entries(parent, path);
+	ON entries(parent);
 
 
 	CREATE TABLE IF NOT EXISTS pathmacs (
