@@ -402,7 +402,7 @@ func (snap *Builder) flushDeltaState() {
 	}
 }
 
-func (snap *Builder) PutSnapshot() ([]byte, error) {
+func (snap *Builder) PutSnapshot() error {
 	// First thing is to stop the ticker, as we don't want any concurrent flushes to run.
 	// Maybe this could be stopped earlier.
 	if snap.flushTick != nil {
@@ -412,22 +412,22 @@ func (snap *Builder) PutSnapshot() ([]byte, error) {
 
 	serializedHdr, err := snap.Header.Serialize()
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if kp := snap.appContext.Keypair; kp != nil {
 		serializedHdrMAC := snap.repository.ComputeMAC(serializedHdr)
 		signature := kp.Sign(serializedHdrMAC[:])
 		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature); err != nil {
-			return nil, err
+			return err
 		}
 	}
 
 	if err := snap.repository.PutBlob(resources.RT_SNAPSHOT, snap.Header.Identifier, serializedHdr); err != nil {
-		return nil, err
+		return err
 	}
 
-	return serializedHdr, nil
+	return nil
 }
 
 func (snap *Builder) Commit() error {
@@ -436,9 +436,8 @@ func (snap *Builder) Commit() error {
 
 	snap.Header.Duration = time.Since(snap.beginTime)
 
-	var serializedHdr []byte
 	var err error
-	if serializedHdr, err = snap.PutSnapshot(); err != nil {
+	if err = snap.PutSnapshot(); err != nil {
 		return err
 	}
 
@@ -456,11 +455,6 @@ func (snap *Builder) Commit() error {
 	if err != nil {
 		snap.Logger().Warn("Failed to push the state to the repository %s", err)
 		return err
-	}
-
-	cache, err := snap.appContext.GetCache().Repository(snap.repository.Configuration().RepositoryID)
-	if err == nil {
-		_ = cache.PutSnapshot(snap.Header.Identifier, serializedHdr)
 	}
 
 	totalSize := uint64(0)

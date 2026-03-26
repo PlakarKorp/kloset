@@ -172,7 +172,6 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	if !dst.builderOptions.NoCommit {
 		return dst.Commit()
 	} else {
-		_, err := dst.PutSnapshot()
-		return err
+		return dst.PutSnapshot()
 	}
 }
