@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func buildTreeRunes(
+func BuildTreeRunes(
 	t *testing.T,
 	st *btree.InMemoryStore_t[rune, int],
 	order int,
@@ -31,7 +31,7 @@ func TestScanAll(t *testing.T) {
 	t.Run("IteratesInOrder", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		it, err := tree.ScanAll()
 		require.NoError(t, err)
@@ -51,7 +51,7 @@ func TestScanAll(t *testing.T) {
 	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
 		require.NoError(t, err)
@@ -69,7 +69,7 @@ func TestScanFrom(t *testing.T) {
 	t.Run("StartsExactlyAtKeyIfKeyExists", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 8, keys)
+		tree := BuildTreeRunes(t, &st, 8, keys)
 
 		it, err := tree.ScanFrom('e')
 		require.NoError(t, err)
@@ -89,7 +89,7 @@ func TestScanFrom(t *testing.T) {
 	t.Run("StartsAtFirstGreaterIfKeyMissing_inSameNode", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune{'a', 'c', 'e', 'g', 'i'}
-		tree := buildTreeRunes(t, &st, 8, keys)
+		tree := BuildTreeRunes(t, &st, 8, keys)
 
 		it, err := tree.ScanFrom('d')
 		require.NoError(t, err)
@@ -109,7 +109,7 @@ func TestScanFrom(t *testing.T) {
 	t.Run("StartsAtFirstGreaterIfKeyMissing_inAnotherNode", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		it, err := tree.ScanFrom('c')
 		require.NoError(t, err)
@@ -122,7 +122,7 @@ func TestScanFrom(t *testing.T) {
 
 	t.Run("EmptyIteratorIfKeyGreaterThanMax", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
-		tree := buildTreeRunes(t, &st, 8, []rune("abc"))
+		tree := BuildTreeRunes(t, &st, 8, []rune("abc"))
 
 		it, err := tree.ScanFrom('z')
 		require.NoError(t, err)
@@ -135,7 +135,7 @@ func TestScanFrom(t *testing.T) {
 	t.Run("ScanFrom_ReturnsError_WhenFindLeafFails", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 8, keys)
+		tree := BuildTreeRunes(t, &st, 8, keys)
 
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
 		require.NoError(t, err)
@@ -204,7 +204,7 @@ func TestScanAllReverse(t *testing.T) {
 	t.Run("IteratesInReverseOrder", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		it, err := tree.ScanAllReverse()
 		require.NoError(t, err)
@@ -225,7 +225,7 @@ func TestScanAllReverse(t *testing.T) {
 	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
 		require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestIterDFS(t *testing.T) {
 	t.Run("VisitsAllLeafKeysInOrder", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		it := tree.IterDFS()
 
@@ -260,7 +260,7 @@ func TestIterDFS(t *testing.T) {
 	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := buildTreeRunes(t, &st, 3, keys)
+		tree := BuildTreeRunes(t, &st, 3, keys)
 
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
 		require.NoError(t, err)
