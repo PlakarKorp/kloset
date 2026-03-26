@@ -30,6 +30,7 @@ type mockStateCache struct {
 	deltas         map[string][]byte // key: "type:blob:packfile"
 	coloured       map[string][]byte // key: "type:blob"
 	deleted        map[string][]byte // key: "type:blob"
+	snapshots      map[objects.MAC][]byte
 	packfiles      map[objects.MAC][]byte
 	configurations map[string][]byte
 }
@@ -258,6 +259,21 @@ func (c *mockStateCache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte
 
 func (c *mockStateCache) GetDeletedEntries() iter.Seq[[]byte] {
 	return maps.Values(c.deleted)
+}
+
+func (c *mockStateCache) PutSnapshot(snapID objects.MAC, data []byte) error {
+	c.snapshots[snapID] = data
+	return nil
+}
+
+func (c *mockStateCache) GetSnapshot(snapID objects.MAC) ([]byte, error) {
+	s, _ := c.snapshots[snapID]
+	return s, nil
+}
+
+func (c *mockStateCache) DelSnapshot(snapID objects.MAC) error {
+	delete(c.snapshots, snapID)
+	return nil
 }
 
 func (m *mockStateCache) NewBatch() caching.StateBatch {

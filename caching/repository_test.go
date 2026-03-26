@@ -229,11 +229,6 @@ func TestRepositoryCache(t *testing.T) {
 		err := cache.PutSnapshot(stateID, data)
 		require.NoError(t, err)
 
-		// Test HasSnapshot
-		exists, err := cache.HasSnapshot(stateID)
-		require.NoError(t, err)
-		require.True(t, exists)
-
 		// Test GetSnapshot
 		retrievedData, err := cache.GetSnapshot(stateID)
 		require.NoError(t, err)
@@ -244,8 +239,8 @@ func TestRepositoryCache(t *testing.T) {
 		require.NoError(t, err)
 
 		// Verify deletion
-		exists, err = cache.HasSnapshot(stateID)
+		snap, err := cache.GetSnapshot(stateID)
 		require.NoError(t, err)
-		require.False(t, exists)
+		require.Nil(t, snap)
 	})
 }

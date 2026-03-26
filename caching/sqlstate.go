@@ -604,6 +604,18 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 	}
 }
 
+func (c *SQLState) PutSnapshot(snapID objects.MAC, data []byte) error {
+	panic("NOTIMPLEMENTED")
+}
+
+func (c *SQLState) GetSnapshot(snapID objects.MAC) ([]byte, error) {
+	panic("NOTIMPLEMENTED")
+}
+
+func (c *SQLState) DelSnapshot(snapID objects.MAC) error {
+	panic("NOTIMPLEMENTED")
+}
+
 // Those two are only to construct deltas, when working with the local state we
 // do the actual deletion.
 func (c *SQLState) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {

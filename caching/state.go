@@ -40,6 +40,10 @@ type StateCache interface {
 	GetConfiguration(key string) ([]byte, error)
 	GetConfigurations() iter.Seq[[]byte]
 
+	PutSnapshot(snapID objects.MAC, data []byte) error
+	GetSnapshot(snapID objects.MAC) ([]byte, error)
+	DelSnapshot(snapID objects.MAC) error
+
 	NewBatch() StateBatch
 }
 

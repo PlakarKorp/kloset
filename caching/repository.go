@@ -135,8 +135,16 @@ func (c *_RepositoryCache) GetConfigurations() iter.Seq[[]byte] {
 	return c.getObjects("__configuration__:")
 }
 
-func (c *_RepositoryCache) GetSnapshot(stateID objects.MAC) ([]byte, error) {
-	return c.get("__snapshot__", fmt.Sprintf("%x", stateID))
+func (c *_RepositoryCache) PutSnapshot(snapID objects.MAC, data []byte) error {
+	panic("invalid method on repository cache")
+}
+
+func (c *_RepositoryCache) GetSnapshot(snapID objects.MAC) ([]byte, error) {
+	panic("invalid method on repository cache")
+}
+
+func (c *_RepositoryCache) DelSnapshot(snapID objects.MAC) error {
+	panic("invalid method on repository cache")
 }
 
 // Those two are only to construct deltas, when working with the local state we

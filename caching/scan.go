@@ -153,6 +153,18 @@ func (c *ScanCache) GetConfigurations() iter.Seq[[]byte] {
 	return c.getObjects("__configuration__:")
 }
 
+func (c *ScanCache) PutSnapshot(snapID objects.MAC, data []byte) error {
+	panic("invalid method on scan cache")
+}
+
+func (c *ScanCache) GetSnapshot(snapID objects.MAC) ([]byte, error) {
+	panic("invalid method on scan cache")
+}
+
+func (c *ScanCache) DelSnapshot(snapID objects.MAC) error {
+	panic("invalid method on scan cache")
+}
+
 func (c *ScanCache) EnumerateKeysWithPrefix(prefix string, reverse bool) iter.Seq2[string, []byte] {
 	l := len(prefix)
 
