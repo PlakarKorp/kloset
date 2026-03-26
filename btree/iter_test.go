@@ -238,27 +238,38 @@ func TestScanAllReverse(t *testing.T) {
 	})
 }
 
-func TestVisitDFS(t *testing.T) {
-	store := btree.InMemoryStore_t[rune, int]{}
-	tree, err := btree.New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
+func TestIterDFS(t *testing.T) {
+	t.Run("VisitsAllLeafKeysInOrder", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+		keys := []rune("abcdefghijklmnopqrstuvwxyz")
+		tree := buildTreeRunes(t, &st, 3, keys)
 
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
-		require.NoError(t, err)
-	}
+		it := tree.IterDFS()
 
-	keySaw := []rune{}
-	it := tree.IterDFS()
-	for it.Next() {
-		_, node := it.Current()
-		if len(node.Pointers) == 0 {
-			for i := range node.Keys {
-				keySaw = append(keySaw, node.Keys[i])
+		var keysSaw []rune
+		for it.Next() {
+			_, node := it.Current()
+			if len(node.Pointers) == 0 {
+				keysSaw = append(keysSaw, node.Keys...)
 			}
 		}
-	}
-	require.NoError(t, it.Err())
-	require.Zero(t, slices.Compare(alphabet, keySaw))
+		require.NoError(t, it.Err())
+		require.Zero(t, slices.Compare(keys, keysSaw))
+	})
+
+	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+		keys := []rune("abcdefghijklmnopqrstuvwxyz")
+		tree := buildTreeRunes(t, &st, 3, keys)
+
+		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		st.GetFn = func(_ int) (*btree.Node[rune, int, int], error) { return nil, getErr }
+
+		it := fresh.IterDFS()
+		require.False(t, it.Next())
+		require.ErrorIs(t, it.Err(), getErr)
+	})
 }
