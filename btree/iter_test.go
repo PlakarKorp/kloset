@@ -201,28 +201,41 @@ func TestScanFrom(t *testing.T) {
 }
 
 func TestScanAllReverse(t *testing.T) {
-	store := btree.InMemoryStore_t[rune, int]{}
-	tree, err := btree.New(&store, cmp.Compare, 3)
-	require.NoError(t, err)
+	t.Run("IteratesInReverseOrder", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+		keys := []rune("abcdefghijklmnopqrstuvwxyz")
+		tree := buildTreeRunes(t, &st, 3, keys)
 
-	alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
-	for i, r := range alphabet {
-		err := tree.Insert(r, i)
+		it, err := tree.ScanAllReverse()
 		require.NoError(t, err)
-	}
+		require.NoError(t, it.Err())
 
-	iter, err := tree.ScanAllReverse()
-	require.NoError(t, err)
+		// Expect reverse order
+		for i := len(keys) - 1; i >= 0; i-- {
+			require.True(t, it.Next())
+			gotK, gotV := it.Current()
+			require.Equal(t, keys[i], gotK)
+			require.Equal(t, i, gotV)
+		}
 
-	for i := len(alphabet) - 1; i >= 0; i-- {
-		r := alphabet[i]
-		require.True(t, iter.Next())
-		k, v := iter.Current()
-		require.Equal(t, k, r)
-		require.Equal(t, v, i)
-	}
+		require.False(t, it.Next())
+		require.NoError(t, it.Err())
+	})
 
-	require.False(t, iter.Next())
+	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+		keys := []rune("abcdefghijklmnopqrstuvwxyz")
+		tree := buildTreeRunes(t, &st, 3, keys)
+
+		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		st.GetFn = func(_ int) (*btree.Node[rune, int, int], error) { return nil, getErr }
+
+		_, err = fresh.ScanAllReverse()
+		require.ErrorIs(t, err, getErr)
+	})
 }
 
 func TestVisitDFS(t *testing.T) {
