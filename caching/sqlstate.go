@@ -94,6 +94,15 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		if _, err := db.Exec(create); err != nil {
 			return nil, err
 		}
+
+		create = `CREATE TABLE IF NOT EXISTS snapshots (
+		id TEXT NOT NULL PRIMARY KEY,
+		data BLOB NOT NULL
+	);`
+
+		if _, err := db.Exec(create); err != nil {
+			return nil, err
+		}
 	}
 	if ro {
 		// This should be ctx.MaxConcurrency, but this is an import cycle and
@@ -605,15 +614,34 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 }
 
 func (c *SQLState) PutSnapshot(snapID objects.MAC, data []byte) error {
-	panic("NOTIMPLEMENTED")
+	snapHex := hex.EncodeToString(snapID[:])
+
+	_, err := c.db.Exec("INSERT OR IGNORE INTO snapshots(id, payload) VALUES(?,  ?)", snapHex, data)
+	return err
 }
 
 func (c *SQLState) GetSnapshot(snapID objects.MAC) ([]byte, error) {
-	panic("NOTIMPLEMENTED")
+	snapHex := hex.EncodeToString(snapID[:])
+
+	query := "SELECT payload FROM snapshots WHERE id = ? LIMIT 1;"
+	var payload []byte
+	err := c.db.QueryRow(query, snapHex).Scan(&payload)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, err
+		}
+
+		return nil, err
+	}
+
+	return payload, nil
 }
 
 func (c *SQLState) DelSnapshot(snapID objects.MAC) error {
-	panic("NOTIMPLEMENTED")
+	snapHex := hex.EncodeToString(snapID[:])
+	_, err := c.db.Exec("DELETE FROM snapshots WHERE mac = ?;", snapHex)
+
+	return err
 }
 
 // Those two are only to construct deltas, when working with the local state we

@@ -1265,6 +1265,43 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 	}
 }
 
+func (r *Repository) CacheSnapshot(snapID objects.MAC) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "CacheSnapshot(%x): %s", snapID, time.Since(t0))
+	}()
+
+	buffer, err := r.GetBlobBytes(resources.RT_SNAPSHOT, snapID)
+	if err != nil {
+		return err
+	}
+
+	return r.state.CacheSnapshot(snapID, buffer)
+}
+
+func (r *Repository) GetSnapshot(snapID objects.MAC) ([]byte, bool, error) {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "GetSnapshot(%x): %s", snapID, time.Since(t0))
+	}()
+
+	buffer, err := r.state.GetCachedSnapshot(snapID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	if buffer != nil {
+		return buffer, true, nil
+	}
+
+	buffer, err = r.GetBlobBytes(resources.RT_SNAPSHOT, snapID)
+	if err != nil {
+		return nil, false, err
+	}
+
+	return buffer, false, nil
+}
+
 func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeker, error) {
 	t0 := time.Now()
 	defer func() {

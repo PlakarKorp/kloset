@@ -1291,6 +1291,14 @@ func (ls *LocalState) DelColouredResource(rtype resources.Type, resourceMAC obje
 	return ls.cache.PutDeleted(uint8(ET_COLOURED), resourceMAC, del.ToBytes())
 }
 
+func (ls *LocalState) CacheSnapshot(snapID objects.MAC, data []byte) error {
+	return ls.cache.PutSnapshot(snapID, data)
+}
+
+func (ls *LocalState) GetCachedSnapshot(snapID objects.MAC) ([]byte, error) {
+	return ls.cache.GetSnapshot(snapID)
+}
+
 func (mt *Metadata) ToBytes() ([]byte, error) {
 	return msgpack.Marshal(mt)
 }

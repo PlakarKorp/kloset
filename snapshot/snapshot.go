@@ -3,7 +3,6 @@ package snapshot
 import (
 	"errors"
 	"fmt"
-	"io"
 	"iter"
 	"slices"
 
@@ -53,7 +52,18 @@ func LogicalSize(repo *repository.Repository) (int, int64, error) {
 }
 
 func Load(repo *repository.Repository, Identifier objects.MAC) (*Snapshot, error) {
-	hdr, _, err := GetSnapshot(repo, Identifier)
+	buffer, cached, err := repo.GetSnapshot(Identifier)
+	_ = cached
+	// XXX: bubbling up this is a pain...
+	if err != nil {
+		if errors.Is(err, repository.ErrBlobNotFound) {
+			return nil, ErrNotFound
+		}
+
+		return nil, err
+	}
+
+	hdr, err := header.NewFromBytes(buffer)
 	if err != nil {
 		return nil, err
 	}
@@ -73,43 +83,6 @@ func (snap *Snapshot) Close() error {
 
 func (snap *Snapshot) AppContext() *kcontext.KContext {
 	return snap.repository.AppContext()
-}
-
-func GetSnapshot(repo *repository.Repository, Identifier objects.MAC) (*header.Header, bool, error) {
-	repo.Logger().Trace("snapshot", "repository.GetSnapshot(%x)", Identifier)
-
-	// Try to get snapshot from cache first
-	cache, err := repo.AppContext().GetCache().Repository(repo.Configuration().RepositoryID)
-	if err == nil {
-		if snapshotBytes, err := cache.GetSnapshot(Identifier); err == nil {
-			if snapshotBytes != nil {
-				hdr, err := header.NewFromBytes(snapshotBytes)
-				if err == nil {
-					return hdr, true, nil
-				}
-			}
-		}
-	}
-
-	rd, err := repo.GetBlob(resources.RT_SNAPSHOT, Identifier)
-	if err != nil {
-		if errors.Is(err, repository.ErrBlobNotFound) {
-			err = ErrNotFound
-		}
-		return nil, false, err
-	}
-
-	buffer, err := io.ReadAll(rd)
-	if err != nil {
-		return nil, false, err
-	}
-
-	hdr, err := header.NewFromBytes(buffer)
-	if err != nil {
-		return nil, false, err
-	}
-
-	return hdr, false, nil
 }
 
 func (snap *Snapshot) LookupObject(mac objects.MAC) (*objects.Object, error) {
