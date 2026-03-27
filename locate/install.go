@@ -38,6 +38,17 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 			return nil
 		})
 
+	flags.Func("type", "filter by backup type (repeat or comma-separated). Type is fs, s3, ...",
+		func(v string) error {
+			for _, t := range strings.Split(v, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					po.Filters.Types = append(po.Filters.Types, t)
+				}
+			}
+			return nil
+		})
+
 	flags.Func("tag", "filter by tag (repeat or comma-separated). All specified tags must be present.",
 		func(v string) error {
 			for _, t := range strings.Split(v, ",") {
