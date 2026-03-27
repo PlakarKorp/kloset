@@ -86,6 +86,18 @@ func (it ItemFilters) HasOrigins(origins []string) bool {
 	return false
 }
 
+func (it ItemFilters) HasTypes(types []string) bool {
+	if len(types) == 0 {
+		return true
+	}
+	for _, t := range types {
+		if it.HasType(t) {
+			return true
+		}
+	}
+	return false
+}
+
 func (it ItemFilters) HasRoot(root string) bool {
 	if root == "" {
 		return true
@@ -283,10 +295,8 @@ func (lo *LocateOptions) Matches(it Item) bool {
 			return false
 		}
 	}
-	for _, typ := range lo.Filters.Types {
-		if !it.Filters.HasType(typ) {
-			return false
-		}
+	if !it.Filters.HasTypes(lo.Filters.Types) {
+		return false
 	}
 	if !it.Filters.HasOrigins(lo.Filters.Origins) {
 		return false

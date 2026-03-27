@@ -30,7 +30,7 @@ func mac(n byte) objects.MAC {
 }
 
 // makeItem creates a test Item.
-func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, env string, perim string, job string, tags []string, roots []string, origins []string) Item {
+func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, env string, perim string, job string, tags []string, roots []string, origins []string, types []string) Item {
 	t.Helper()
 	return Item{
 		ItemID:    id,
@@ -44,6 +44,7 @@ func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, 
 			Tags:        tags,
 			Roots:       roots,
 			Origins:     origins,
+			Types:       types,
 		},
 	}
 }
@@ -168,7 +169,7 @@ func TestMatches_TimeWindow(t *testing.T) {
 }
 
 func TestMatches_Headers_Tags_Roots(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{})
+	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{}, []string{})
 
 	tests := []struct {
 		name string
@@ -199,7 +200,7 @@ func TestMatches_Headers_Tags_Roots(t *testing.T) {
 }
 
 func TestMatches_Origins(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{"hosta"})
+	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{"hosta"}, []string{})
 
 	tests := []struct {
 		name string
@@ -212,6 +213,32 @@ func TestMatches_Origins(t *testing.T) {
 		{"origin empty", func(lo *LocateOptions) { lo.Filters.Origins = []string{""} }, true},
 		{"origin not specified", func(lo *LocateOptions) { lo.Filters.Tags = []string{""} }, true},
 		{"origin not match", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hostb"} }, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var lo LocateOptions
+			tc.cfg(&lo)
+			if got := lo.Matches(it); got != tc.want {
+				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
+			}
+		})
+	}
+}
+
+func TestMatches_Types(t *testing.T) {
+	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{}, []string{"fs"})
+
+	tests := []struct {
+		name string
+		cfg  func(*LocateOptions)
+		want bool
+	}{
+		{"type match", func(lo *LocateOptions) { lo.Filters.Types = []string{"fs"} }, true},
+		{"type multi match 1", func(lo *LocateOptions) { lo.Filters.Types = []string{"fs", "s3"} }, true},
+		{"type multi match 2", func(lo *LocateOptions) { lo.Filters.Types = []string{"s3", "fs", "onedrive"} }, true},
+		{"type empty", func(lo *LocateOptions) { lo.Filters.Types = []string{""} }, true},
+		{"type not specified", func(lo *LocateOptions) { lo.Filters.Tags = []string{""} }, true},
+		{"type not match", func(lo *LocateOptions) { lo.Filters.Types = []string{"s3"} }, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -416,8 +443,8 @@ func TestMatch_OutsideWindows_NoRulesKeeping(t *testing.T) {
 // Sanity: with no periods, Match should keep all matched-filter items and mark as "matched filters".
 func TestMatch_NoPeriods_KeepsAllMatches(t *testing.T) {
 	items := []Item{
-		makeItem(t, mac(1), "2025-08-20T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}),
-		makeItem(t, mac(2), "2025-08-18T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}),
+		makeItem(t, mac(1), "2025-08-20T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
+		makeItem(t, mac(2), "2025-08-18T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
 	}
 	lo := LocateOptions{}
 	// Add restrictive filters that both items satisfy
