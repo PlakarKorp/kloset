@@ -12,11 +12,15 @@ import (
 )
 
 var (
+	ErrOrder  = errors.New("btree: order must be >= 3")
+	ErrStore  = errors.New("btree: storage can not be nil")
 	ErrExists = errors.New("Item already exists")
 )
 
-const BTREE_VERSION = "1.0.0"
-const NODE_VERSION = "1.0.0"
+const (
+	BTREE_VERSION = "1.0.0"
+	NODE_VERSION  = "1.0.0"
+)
 
 func init() {
 	versioning.Register(resources.RT_BTREE_ROOT, versioning.FromString(BTREE_VERSION))
@@ -66,8 +70,11 @@ type BTree[K any, P comparable, V any] struct {
 
 // New returns a new, empty tree.
 func New[K any, P comparable, V any](store Storer[K, P, V], compare func(K, K) int, order int) (*BTree[K, P, V], error) {
+	if order < 3 {
+		return nil, ErrOrder
+	}
 	if store == nil {
-		return nil, errors.New("can not create a tree from invalid storage")
+		return nil, ErrStore
 	}
 	root := Node[K, P, V]{
 		Version: versioning.FromString(NODE_VERSION),
@@ -88,14 +95,20 @@ func New[K any, P comparable, V any](store Storer[K, P, V], compare func(K, K) i
 // FromStorage returns a btree from the given storage.  The root must
 // exist, eventually empty, i.e. it should be a tree previously
 // created via New().
-func FromStorage[K any, P comparable, V any](root P, store Storer[K, P, V], compare func(K, K) int, order int) *BTree[K, P, V] {
+func FromStorage[K any, P comparable, V any](root P, store Storer[K, P, V], compare func(K, K) int, order int) (*BTree[K, P, V], error) {
+	if order < 3 {
+		return nil, ErrOrder
+	}
+	if store == nil {
+		return nil, ErrStore
+	}
 	return &BTree[K, P, V]{
 		Version: versioning.FromString(BTREE_VERSION),
 		Order:   order,
 		Root:    root,
 		cache:   cachefor(store, order),
 		compare: compare,
-	}
+	}, nil
 }
 
 func Deserialize[K any, P comparable, V any](rd io.Reader, store Storer[K, P, V], compare func(K, K) int) (*BTree[K, P, V], error) {
@@ -103,7 +116,7 @@ func Deserialize[K any, P comparable, V any](rd io.Reader, store Storer[K, P, V]
 	if err := msgpack.NewDecoder(rd).Decode(&root); err != nil {
 		return nil, err
 	}
-	return FromStorage(root.Root, store, compare, root.Order), nil
+	return FromStorage(root.Root, store, compare, root.Order)
 }
 
 func (b *BTree[K, P, V]) Close() error {
