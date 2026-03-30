@@ -88,7 +88,7 @@ func (b *BTree[K, P, V]) verifyNode(cur, parent *Node[K, P, V], ptrIdx int, stat
 
 	// Now check the order of keys.
 	for i := 1; i < len(cur.Keys); i++ {
-		if b.compare(cur.Keys[i-1], cur.Keys[1]) >= 0 {
+		if b.compare(cur.Keys[i-1], cur.Keys[i]) >= 0 {
 			return fmt.Errorf("Node: broken ordering of keys %v", cur.Keys)
 		}
 	}
