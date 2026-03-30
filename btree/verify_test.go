@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 	"sync"
 	"testing"
 
@@ -514,5 +515,61 @@ func TestVerify(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "Parent/Child ordering is wrong Parent (")
 		require.Contains(t, err.Error(), "('109' / '116')")
+	})
+}
+
+func TestDot(t *testing.T) {
+	t.Run("ValidGraph", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+
+		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+
+		var buf bytes.Buffer
+		err := tree.Dot(&buf, false)
+		require.NoError(t, err)
+
+		out := buf.String()
+		require.True(t, strings.HasPrefix(out, "digraph G {"))
+		require.True(t, strings.HasSuffix(strings.TrimSpace(out), "}"))
+		require.Contains(t, out, "->")
+	})
+
+	t.Run("ShowNextPtr", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+
+		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+
+		var bufNo, bufYes bytes.Buffer
+		err := tree.Dot(&bufNo, false)
+		require.NoError(t, err)
+
+		err = tree.Dot(&bufYes, true)
+		require.NoError(t, err)
+
+		outNo := bufNo.String()
+		outYes := bufYes.String()
+
+		require.True(t, strings.HasPrefix(outNo, "digraph G {"))
+		require.True(t, strings.HasSuffix(strings.TrimSpace(outNo), "}"))
+		require.True(t, strings.HasPrefix(outYes, "digraph G {"))
+		require.True(t, strings.HasSuffix(strings.TrimSpace(outYes), "}"))
+
+		require.GreaterOrEqual(t, len(outYes), len(outNo))
+	})
+
+	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
+		st := btree.InMemoryStore_t[rune, int]{}
+
+		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+
+		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		st.GetFn = func(_ int) (*btree.Node[rune, int, int], error) { return nil, getErr }
+
+		var buf bytes.Buffer
+		err = fresh.Dot(&buf, false)
+		require.Error(t, err)
 	})
 }
