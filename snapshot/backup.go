@@ -1288,6 +1288,11 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 		delete(missingMap, missingDir)
 	}
 
+	if err := snap.relinkNodesRecursive(sourceCtx, sourceCtx.source.root); err != nil {
+		return err
+	}
+	itemsCount++
+
 	return snap.relinkNodesRecursive(sourceCtx, "/")
 }
 
