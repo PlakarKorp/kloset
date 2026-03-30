@@ -47,6 +47,11 @@ func TestInstallLocateFlags_ParsesAllFlags(t *testing.T) {
 		"--tag=a,b",
 		"--tag=c",
 
+		"--origin=hosta,hostb",
+		"--origin=hostc",
+		"--type=fs, s3",
+		"--type=onedrive",
+
 		// retention
 		"--minutes=5",
 		"--hours=6",
@@ -106,6 +111,14 @@ func TestInstallLocateFlags_ParsesAllFlags(t *testing.T) {
 	wantTags := []string{"a", "b", "c"}
 	if !reflect.DeepEqual(po.Filters.Tags, wantTags) {
 		t.Fatalf("Tags: got %#v want %#v", po.Filters.Tags, wantTags)
+	}
+	wantOrigins := []string{"hosta", "hostb", "hostc"}
+	if !reflect.DeepEqual(po.Filters.Origins, wantOrigins) {
+		t.Fatalf("Origins: got %#v want %#v", po.Filters.Origins, wantOrigins)
+	}
+	wantTypes := []string{"fs", "s3", "onedrive"}
+	if !reflect.DeepEqual(po.Filters.Types, wantTypes) {
+		t.Fatalf("Origins: got %#v want %#v", po.Filters.Types, wantTypes)
 	}
 
 	// Retention

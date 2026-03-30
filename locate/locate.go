@@ -74,6 +74,30 @@ func (it ItemFilters) HasOrigin(origin string) bool {
 	return false
 }
 
+func (it ItemFilters) HasOrigins(origins []string) bool {
+	if len(origins) == 0 {
+		return true
+	}
+	for _, origin := range origins {
+		if it.HasOrigin(origin) {
+			return true
+		}
+	}
+	return false
+}
+
+func (it ItemFilters) HasTypes(types []string) bool {
+	if len(types) == 0 {
+		return true
+	}
+	for _, t := range types {
+		if it.HasType(t) {
+			return true
+		}
+	}
+	return false
+}
+
 func (it ItemFilters) HasRoot(root string) bool {
 	if root == "" {
 		return true
@@ -215,6 +239,9 @@ func WithJob(job string) Option {
 func WithTag(tag string) Option {
 	return func(p *LocateOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
 }
+func WithOrigin(origin string) Option {
+	return func(p *LocateOptions) { p.Filters.Origins = append(p.Filters.Origins, origin) }
+}
 func WithID(id string) Option {
 	return func(p *LocateOptions) { p.Filters.IDs = append(p.Filters.IDs, id) }
 }
@@ -268,15 +295,11 @@ func (lo *LocateOptions) Matches(it Item) bool {
 			return false
 		}
 	}
-	for _, typ := range lo.Filters.Types {
-		if !it.Filters.HasType(typ) {
-			return false
-		}
+	if !it.Filters.HasTypes(lo.Filters.Types) {
+		return false
 	}
-	for _, origin := range lo.Filters.Origins {
-		if !it.Filters.HasOrigin(origin) {
-			return false
-		}
+	if !it.Filters.HasOrigins(lo.Filters.Origins) {
+		return false
 	}
 	for _, root := range lo.Filters.Roots {
 		if !it.Filters.HasRoot(root) {
