@@ -97,6 +97,10 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 
 	snap.Header.Tags = append(snap.Header.Tags, builderOptions.Tags...)
 	snap.Header.Name = builderOptions.Name
+	snap.Header.Category = builderOptions.Category
+	snap.Header.Environment = builderOptions.Environment
+	snap.Header.Perimeter = builderOptions.Perimeter
+	snap.Header.Job = builderOptions.Job
 
 	return snap, nil
 }

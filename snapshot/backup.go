@@ -65,6 +65,10 @@ type scanStats struct {
 type BuilderOptions struct {
 	Name            string
 	Tags            []string
+	Category        string
+	Environment     string
+	Perimeter       string
+	Job             string
 	NoCheckpoint    bool
 	NoCommit        bool
 	NoXattr         bool
