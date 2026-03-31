@@ -159,21 +159,39 @@ func TestFromPrivateKey(t *testing.T) {
 	})
 }
 
-// TestFromPublicKey checks if a key pair can be created from an existing public key
 func TestFromPublicKey(t *testing.T) {
-	publicKey, _, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatalf("Failed to generate public key: %v", err)
-	}
+	t.Run("PublicKey Nil", func(t *testing.T) {
+		kp := keypair.FromPublicKey(nil)
+		require.NotNil(t, kp)
+		require.Nil(t, kp.PrivateKey)
+		require.Nil(t, kp.PublicKey)
+	})
 
-	kp := keypair.FromPublicKey(publicKey)
-	if kp.PrivateKey != nil {
-		t.Fatal("Key pair from public key should have nil private key")
-	}
+	t.Run("ValidPublicKey", func(t *testing.T) {
+		original, err := keypair.Generate()
+		require.NoError(t, err)
 
-	if !bytes.Equal(kp.PublicKey, publicKey) {
-		t.Fatal("Public key in key pair does not match the input public key")
-	}
+		kp := keypair.FromPublicKey(original.PublicKey)
+		require.NotNil(t, kp)
+		require.Nil(t, kp.PrivateKey)
+		require.Equal(t, kp.PublicKey, original.PublicKey)
+	})
+
+	t.Run("SameSourceKeyPair", func(t *testing.T) {
+		original, err := keypair.Generate()
+		require.NoError(t, err)
+
+		fromPrivate := keypair.FromPrivateKey(original.PrivateKey)
+		require.NotNil(t, fromPrivate)
+
+		publicFromPrivate := keypair.FromPublicKey(fromPrivate.PublicKey)
+		require.NotNil(t, publicFromPrivate)
+
+		require.Equal(t, fromPrivate.PrivateKey, original.PrivateKey)
+		require.Equal(t, fromPrivate.PublicKey, original.PublicKey)
+		require.Nil(t, publicFromPrivate.PrivateKey)
+		require.Equal(t, publicFromPrivate.PublicKey, original.PublicKey)
+	})
 }
 
 // TestSignAndVerify checks if signing and verification using a key pair works correctly
