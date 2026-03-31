@@ -6,24 +6,37 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/kloset/encryption/keypair"
+	"github.com/stretchr/testify/require"
 )
 
-// TestGenerate checks if key pair generation works correctly
 func TestGenerate(t *testing.T) {
-	kp, err := keypair.Generate()
-	if err != nil {
-		t.Fatalf("Failed to generate key pair: %v", err)
-	}
+	t.Run("ValidKeyPair", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+		require.NotNil(t, kp)
 
-	// Check if private and public keys are not nil
-	if kp.PrivateKey == nil || kp.PublicKey == nil {
-		t.Fatal("Generated key pair has nil keys")
-	}
+		require.NotNil(t, kp.PrivateKey)
+		require.NotNil(t, kp.PublicKey)
 
-	// Check if the generated public key matches the private key's public key
-	if !bytes.Equal(kp.PublicKey, kp.PrivateKey.Public().(ed25519.PublicKey)) {
-		t.Fatal("Generated public key does not match the private key's public key")
-	}
+		require.Len(t, kp.PrivateKey, ed25519.PrivateKeySize)
+		require.Len(t, kp.PublicKey, ed25519.PublicKeySize)
+
+		publicKey := kp.PrivateKey.Public().(ed25519.PublicKey)
+		require.Equal(t, publicKey, kp.PublicKey)
+	})
+
+	t.Run("TwoCallsProduceDifferentKeyPairs", func(t *testing.T) {
+		first, err := keypair.Generate()
+		require.NoError(t, err)
+		require.NotNil(t, first)
+
+		second, err := keypair.Generate()
+		require.NoError(t, err)
+		require.NotNil(t, second)
+
+		require.NotEqual(t, first.PrivateKey, second.PrivateKey)
+		require.NotEqual(t, first.PublicKey, second.PublicKey)
+	})
 }
 
 // TestFromBytes checks if a key pair can be correctly deserialized from bytes
