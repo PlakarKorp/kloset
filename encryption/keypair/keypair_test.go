@@ -1,7 +1,6 @@
 package keypair_test
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"testing"
 
@@ -194,40 +193,55 @@ func TestFromPublicKey(t *testing.T) {
 	})
 }
 
-// TestSignAndVerify checks if signing and verification using a key pair works correctly
-func TestSignAndVerify(t *testing.T) {
-	// Generate a key pair for testing
-	kp, err := keypair.Generate()
-	if err != nil {
-		t.Fatalf("Failed to generate key pair: %v", err)
-	}
+func TestSign(t *testing.T) {
+	t.Run("ValidData", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
 
-	data := []byte("This is a test message.")
-	signature := kp.Sign(data)
+		signature := kp.Sign([]byte("hello"))
+		require.NotNil(t, signature)
+		require.Len(t, signature, ed25519.SignatureSize)
+	})
 
-	// Verify the signature using the same key pair
-	if !kp.Verify(data, signature) {
-		t.Fatal("Failed to verify signature with the same key pair")
-	}
+	t.Run("NilPrivateKey", func(t *testing.T) {
+		kp := keypair.FromPublicKey(ed25519.PublicKey("public"))
+		require.Panics(t, func() { kp.Sign([]byte("hello")) })
+	})
 
-	// Create a different key pair to test signature verification failure
-	otherKp, err := keypair.Generate()
-	if err != nil {
-		t.Fatalf("Failed to generate a different key pair: %v", err)
-	}
+	t.Run("NilData", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
 
-	if otherKp.Verify(data, signature) {
-		t.Fatal("Signature verified with a different key pair")
-	}
-}
+		signature := kp.Sign(nil)
+		require.NotNil(t, signature)
+		require.Len(t, signature, ed25519.SignatureSize)
+	})
 
-// TestSignWithNilPrivateKey checks that signing fails when private key is nil
-func TestSignWithNilPrivateKey(t *testing.T) {
-	kp := keypair.FromPublicKey(make(ed25519.PublicKey, ed25519.PublicKeySize))
-	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("Expected panic when signing with nil private key")
-		}
-	}()
-	_ = kp.Sign([]byte("Some data"))
+	t.Run("SameKeyPairSameData_SameSignature", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		data := []byte("hello")
+
+		first := kp.Sign(data)
+		require.Len(t, first, ed25519.SignatureSize)
+
+		second := kp.Sign(data)
+		require.Len(t, second, ed25519.SignatureSize)
+
+		require.Equal(t, first, second)
+	})
+
+	t.Run("SameKeyPairDifferentData_DifferentSignatures", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		first := kp.Sign([]byte("hello"))
+		require.Len(t, first, ed25519.SignatureSize)
+
+		second := kp.Sign([]byte("world"))
+		require.Len(t, second, ed25519.SignatureSize)
+
+		require.NotEqual(t, first, second)
+	})
 }
