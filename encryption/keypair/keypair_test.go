@@ -1,14 +1,16 @@
-package keypair
+package keypair_test
 
 import (
 	"bytes"
 	"crypto/ed25519"
 	"testing"
+
+	"github.com/PlakarKorp/kloset/encryption/keypair"
 )
 
 // TestGenerate checks if key pair generation works correctly
 func TestGenerate(t *testing.T) {
-	kp, err := Generate()
+	kp, err := keypair.Generate()
 	if err != nil {
 		t.Fatalf("Failed to generate key pair: %v", err)
 	}
@@ -27,7 +29,7 @@ func TestGenerate(t *testing.T) {
 // TestFromBytes checks if a key pair can be correctly deserialized from bytes
 func TestFromBytes(t *testing.T) {
 	// Create a key pair and serialize it to bytes
-	kp, err := Generate()
+	kp, err := keypair.Generate()
 	if err != nil {
 		t.Fatalf("Failed to generate key pair: %v", err)
 	}
@@ -37,7 +39,7 @@ func TestFromBytes(t *testing.T) {
 	}
 
 	// Deserialize from bytes
-	deserializedKP, err := FromBytes(data)
+	deserializedKP, err := keypair.FromBytes(data)
 	if err != nil {
 		t.Fatalf("Failed to deserialize key pair: %v", err)
 	}
@@ -53,7 +55,7 @@ func TestFromBytes(t *testing.T) {
 
 // TestToBytes checks if a key pair can be correctly serialized to bytes
 func TestToBytes(t *testing.T) {
-	kp, err := Generate()
+	kp, err := keypair.Generate()
 	if err != nil {
 		t.Fatalf("Failed to generate key pair: %v", err)
 	}
@@ -76,7 +78,7 @@ func TestFromPrivateKey(t *testing.T) {
 		t.Fatalf("Failed to generate private key: %v", err)
 	}
 
-	kp := FromPrivateKey(privateKey)
+	kp := keypair.FromPrivateKey(privateKey)
 	if kp.PrivateKey == nil || kp.PublicKey == nil {
 		t.Fatal("Key pair from private key has nil keys")
 	}
@@ -94,7 +96,7 @@ func TestFromPublicKey(t *testing.T) {
 		t.Fatalf("Failed to generate public key: %v", err)
 	}
 
-	kp := FromPublicKey(publicKey)
+	kp := keypair.FromPublicKey(publicKey)
 	if kp.PrivateKey != nil {
 		t.Fatal("Key pair from public key should have nil private key")
 	}
@@ -107,7 +109,7 @@ func TestFromPublicKey(t *testing.T) {
 // TestSignAndVerify checks if signing and verification using a key pair works correctly
 func TestSignAndVerify(t *testing.T) {
 	// Generate a key pair for testing
-	kp, err := Generate()
+	kp, err := keypair.Generate()
 	if err != nil {
 		t.Fatalf("Failed to generate key pair: %v", err)
 	}
@@ -121,7 +123,7 @@ func TestSignAndVerify(t *testing.T) {
 	}
 
 	// Create a different key pair to test signature verification failure
-	otherKp, err := Generate()
+	otherKp, err := keypair.Generate()
 	if err != nil {
 		t.Fatalf("Failed to generate a different key pair: %v", err)
 	}
@@ -133,7 +135,7 @@ func TestSignAndVerify(t *testing.T) {
 
 // TestSignWithNilPrivateKey checks that signing fails when private key is nil
 func TestSignWithNilPrivateKey(t *testing.T) {
-	kp := FromPublicKey(make(ed25519.PublicKey, ed25519.PublicKeySize))
+	kp := keypair.FromPublicKey(make(ed25519.PublicKey, ed25519.PublicKeySize))
 	defer func() {
 		if r := recover(); r == nil {
 			t.Fatal("Expected panic when signing with nil private key")
