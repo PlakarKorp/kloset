@@ -245,3 +245,68 @@ func TestSign(t *testing.T) {
 		require.NotEqual(t, first, second)
 	})
 }
+
+func TestVerify(t *testing.T) {
+	t.Run("ValidSignature", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		data := []byte("hello")
+		signature := kp.Sign(data)
+
+		ok := kp.Verify(data, signature)
+		require.True(t, ok)
+	})
+
+	t.Run("ModifiedData", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		signature := kp.Sign([]byte("hello"))
+
+		ok := kp.Verify([]byte("world"), signature)
+		require.False(t, ok)
+	})
+
+	t.Run("ModifiedSignature", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		data := []byte("hello")
+		signature := kp.Sign(data)
+		require.Len(t, signature, ed25519.SignatureSize)
+
+		signature[0] ^= 0xff
+
+		ok := kp.Verify(data, signature)
+		require.False(t, ok)
+	})
+
+	t.Run("DifferentPublicKey", func(t *testing.T) {
+		first, err := keypair.Generate()
+		require.NoError(t, err)
+
+		second, err := keypair.Generate()
+		require.NoError(t, err)
+
+		data := []byte("hello")
+		signature := first.Sign(data)
+
+		ok := second.Verify(data, signature)
+		require.False(t, ok)
+	})
+
+	t.Run("PublicKeyOnlyKeyPair", func(t *testing.T) {
+		original, err := keypair.Generate()
+		require.NoError(t, err)
+
+		publicOnly := keypair.FromPublicKey(original.PublicKey)
+		require.NotNil(t, publicOnly)
+
+		data := []byte("hello")
+		signature := original.Sign(data)
+
+		ok := publicOnly.Verify(data, signature)
+		require.True(t, ok)
+	})
+}
