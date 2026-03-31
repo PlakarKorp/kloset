@@ -83,6 +83,51 @@ func TestNewDefaultKDFParams(t *testing.T) {
 	})
 }
 
+func compareConfigParams(
+	t *testing.T,
+	config *enc.Configuration,
+	params *enc.KDFParams,
+) {
+	t.Helper()
+
+	require.Equal(t, "AES256-KW", config.SubKeyAlgorithm)
+	require.Equal(t, "AES256-GCM-SIV", config.DataAlgorithm)
+	require.Equal(t, 64*1024, config.ChunkSize)
+
+	require.Equal(t, params.KDF, config.KDFParams.KDF)
+	require.Len(t, config.KDFParams.Salt, len(params.Salt))
+	require.NotEqual(t, params.Salt, config.KDFParams.Salt)
+	require.Equal(t, params.Argon2idParams, config.KDFParams.Argon2idParams)
+	require.Equal(t, params.ScryptParams, config.KDFParams.ScryptParams)
+	require.Equal(t, params.Pbkdf2Params, config.KDFParams.Pbkdf2Params)
+}
+
+func TestNewConfiguration(t *testing.T) {
+	testCases := []string{
+		"ARGON2ID",
+		"SCRYPT",
+		"PBKDF2",
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc, func(t *testing.T) {
+			params, err := enc.NewDefaultKDFParams(tc)
+			require.NoError(t, err)
+
+			config := enc.NewConfiguration(tc)
+			require.NotNil(t, config)
+
+			compareConfigParams(t, config, params)
+		})
+	}
+
+	t.Run("UnsupportedKDF", func(t *testing.T) {
+		require.Panics(t, func() {
+			enc.NewConfiguration("NOPE")
+		})
+	})
+}
+
 func testSetup(t *testing.T, hashing string) SymmetricParams {
 	config := enc.NewConfiguration(hashing)
 
