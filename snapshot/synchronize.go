@@ -153,7 +153,7 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 	dst.Header.Tags = src.Header.Tags
 	dst.Header.Context = src.Header.Context
 
-	source, err := NewSource(dst.AppContext(), 0, imp)
+	source, err := NewSource(dst.AppContext(), imp)
 	if err != nil {
 		return err
 	}
