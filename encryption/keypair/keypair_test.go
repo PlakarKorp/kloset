@@ -142,22 +142,21 @@ func TestFromBytes(t *testing.T) {
 	})
 }
 
-// TestFromPrivateKey checks if a key pair can be created from an existing private key
 func TestFromPrivateKey(t *testing.T) {
-	_, privateKey, err := ed25519.GenerateKey(nil)
-	if err != nil {
-		t.Fatalf("Failed to generate private key: %v", err)
-	}
+	t.Run("NilPrivateKey", func(t *testing.T) {
+		require.Panics(t, func() { keypair.FromPrivateKey(nil) })
+	})
 
-	kp := keypair.FromPrivateKey(privateKey)
-	if kp.PrivateKey == nil || kp.PublicKey == nil {
-		t.Fatal("Key pair from private key has nil keys")
-	}
+	t.Run("ValidPrivateKey", func(t *testing.T) {
+		original, err := keypair.Generate()
+		require.NoError(t, err)
 
-	// Check if the public key matches the private key's public key
-	if !bytes.Equal(kp.PublicKey, privateKey.Public().(ed25519.PublicKey)) {
-		t.Fatal("Public key does not match the private key's public key")
-	}
+		kp := keypair.FromPrivateKey(original.PrivateKey)
+		require.NotNil(t, kp)
+
+		require.Equal(t, kp.PrivateKey, original.PrivateKey)
+		require.Equal(t, kp.PublicKey, original.PublicKey)
+	})
 }
 
 // TestFromPublicKey checks if a key pair can be created from an existing public key
