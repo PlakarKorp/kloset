@@ -39,33 +39,6 @@ func TestGenerate(t *testing.T) {
 	})
 }
 
-// TestFromBytes checks if a key pair can be correctly deserialized from bytes
-func TestFromBytes(t *testing.T) {
-	// Create a key pair and serialize it to bytes
-	kp, err := keypair.Generate()
-	if err != nil {
-		t.Fatalf("Failed to generate key pair: %v", err)
-	}
-	data, err := kp.ToBytes()
-	if err != nil {
-		t.Fatalf("Failed to serialize key pair: %v", err)
-	}
-
-	// Deserialize from bytes
-	deserializedKP, err := keypair.FromBytes(data)
-	if err != nil {
-		t.Fatalf("Failed to deserialize key pair: %v", err)
-	}
-
-	// Check if the deserialized public and private keys match the original
-	if !bytes.Equal(deserializedKP.PublicKey, kp.PublicKey) {
-		t.Fatal("Deserialized public key does not match original")
-	}
-	if !bytes.Equal(deserializedKP.PrivateKey, kp.PrivateKey) {
-		t.Fatal("Deserialized private key does not match original")
-	}
-}
-
 func TestToBytes(t *testing.T) {
 	t.Run("ValidKeyPair", func(t *testing.T) {
 		kp, err := keypair.Generate()
@@ -108,6 +81,64 @@ func TestToBytes(t *testing.T) {
 		require.NotEmpty(t, second)
 
 		require.NotEqual(t, first, second)
+	})
+}
+
+func TestFromBytes(t *testing.T) {
+	t.Run("InvalidBytes", func(t *testing.T) {
+		kp, err := keypair.FromBytes(nil)
+		require.Error(t, err)
+		require.Nil(t, kp)
+	})
+
+	t.Run("EmptyBytes", func(t *testing.T) {
+		kp, err := keypair.FromBytes([]byte{})
+		require.Error(t, err)
+		require.Nil(t, kp)
+	})
+
+	t.Run("InvalidByteEncoding", func(t *testing.T) {
+		kp, err := keypair.FromBytes([]byte{0x00, 0x01, 0x02})
+		require.Error(t, err)
+		require.Nil(t, kp)
+	})
+
+	t.Run("SameBytes_SameKeyPair", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		data, err := kp.ToBytes()
+		require.NoError(t, err)
+
+		first, err := keypair.FromBytes(data)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+
+		second, err := keypair.FromBytes(data)
+		require.NoError(t, err)
+		require.NotNil(t, second)
+
+		require.Equal(t, first.PrivateKey, second.PrivateKey)
+		require.Equal(t, first.PublicKey, second.PublicKey)
+	})
+
+	t.Run("ToBytes->FromBytes->ToBytes", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		data, err := kp.ToBytes()
+		require.NoError(t, err)
+
+		decoded, err := keypair.FromBytes(data)
+		require.NoError(t, err)
+		require.NotNil(t, decoded)
+
+		require.Equal(t, decoded.PrivateKey, kp.PrivateKey)
+		require.Equal(t, decoded.PublicKey, kp.PublicKey)
+
+		sameData, err := decoded.ToBytes()
+		require.NoError(t, err)
+		require.Equal(t, data, sameData)
 	})
 }
 
