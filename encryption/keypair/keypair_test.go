@@ -66,22 +66,49 @@ func TestFromBytes(t *testing.T) {
 	}
 }
 
-// TestToBytes checks if a key pair can be correctly serialized to bytes
 func TestToBytes(t *testing.T) {
-	kp, err := keypair.Generate()
-	if err != nil {
-		t.Fatalf("Failed to generate key pair: %v", err)
-	}
+	t.Run("ValidKeyPair", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
 
-	data, err := kp.ToBytes()
-	if err != nil {
-		t.Fatalf("Failed to serialize key pair: %v", err)
-	}
+		data, err := kp.ToBytes()
+		require.NoError(t, err)
+		require.NotNil(t, data)
+		require.NotEmpty(t, data)
+	})
 
-	// Ensure that the serialized data is not empty
-	if len(data) == 0 {
-		t.Fatal("Serialized data is empty")
-	}
+	t.Run("SameKeyPair_ProducesSameBytes", func(t *testing.T) {
+		kp, err := keypair.Generate()
+		require.NoError(t, err)
+
+		first, err := kp.ToBytes()
+		require.NoError(t, err)
+		require.NotEmpty(t, first)
+
+		second, err := kp.ToBytes()
+		require.NoError(t, err)
+		require.NotEmpty(t, second)
+
+		require.Equal(t, first, second)
+	})
+
+	t.Run("DifferentKeyPairs_ProduceDifferentBytes", func(t *testing.T) {
+		firstKP, err := keypair.Generate()
+		require.NoError(t, err)
+
+		secondKP, err := keypair.Generate()
+		require.NoError(t, err)
+
+		first, err := firstKP.ToBytes()
+		require.NoError(t, err)
+		require.NotEmpty(t, first)
+
+		second, err := secondKP.ToBytes()
+		require.NoError(t, err)
+		require.NotEmpty(t, second)
+
+		require.NotEqual(t, first, second)
+	})
 }
 
 // TestFromPrivateKey checks if a key pair can be created from an existing private key
