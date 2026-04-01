@@ -62,3 +62,13 @@ func Test_decryptSubkey_AES256_GCM(t *testing.T) {
 		require.Nil(t, decrypted)
 	})
 }
+
+func Test_encryptSubkey_AES256_KW(t *testing.T) {
+	key, _, _ := setup(t)
+
+	t.Run("InvalidSubkeyLength", func(t *testing.T) {
+		encrypted, err := encryptSubkey_AES256_KW(key, bytes.Repeat([]byte{0x01}, 31))
+		require.Error(t, err)
+		require.Nil(t, encrypted)
+	})
+}
