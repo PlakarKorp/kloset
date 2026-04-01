@@ -2,19 +2,16 @@ package encryption_test
 
 import (
 	"crypto/rand"
+	"errors"
 	"io"
 	"strings"
 	"testing"
+	"testing/iotest"
 
 	"github.com/PlakarKorp/kloset/compression"
 	enc "github.com/PlakarKorp/kloset/encryption"
 	"github.com/stretchr/testify/require"
 )
-
-type SymmetricParams struct {
-	config *enc.Configuration
-	key    []byte
-}
 
 func TestNewDefaultKDFParams(t *testing.T) {
 	t.Run("ARGON2ID", func(t *testing.T) {
@@ -407,7 +404,126 @@ func TestDecryptSubkey(t *testing.T) {
 	})
 }
 
-func testSetup(t *testing.T, hashing string) SymmetricParams {
+type Params_t struct {
+	config *enc.Configuration
+	key    []byte
+}
+
+func TestEncryptStream(t *testing.T) {
+	setup := func(t *testing.T) *Params_t {
+		t.Helper()
+
+		return &Params_t{
+			config: enc.NewDefaultConfiguration(),
+			key:    []byte("0123456789abcdef0123456789abcdef"),
+		}
+	}
+
+	t.Run("ValidStream", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, params.key, strings.NewReader("hello world"))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.NoError(t, err)
+		require.NotEmpty(t, data)
+	})
+
+	t.Run("EmptyStreamIsValid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, params.key, strings.NewReader(""))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.NoError(t, err)
+		require.NotNil(t, data)
+	})
+
+	t.Run("ConfigNilIsInvalid", func(t *testing.T) {
+		require.Panics(t, func() {
+			enc.EncryptStream(nil, []byte("0123456789abcdef0123456789abcdef"), strings.NewReader("hello"))
+		})
+	})
+
+	t.Run("UnsupportedDataAlgorithmIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		params.config.DataAlgorithm = "NOPE"
+
+		rd, err := enc.EncryptStream(params.config, params.key, strings.NewReader("hello world"))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("UnsupportedSubKeyAlgorithmIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		params.config.SubKeyAlgorithm = "NOPE"
+
+		rd, err := enc.EncryptStream(params.config, params.key, strings.NewReader("hello world"))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyNilIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, nil, strings.NewReader("hello world"))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyEmptyIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, []byte{}, strings.NewReader("hello world"))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyTooShortIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, []byte("short"), strings.NewReader("hello world"))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyTooLongIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, []byte("0123456789abcdef0123456789abcdefx"), strings.NewReader("hello world"))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("Fails_IfReaderIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.EncryptStream(params.config, params.key, nil)
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("Fails_IfReaderFails", func(t *testing.T) {
+		params := setup(t)
+		readErr := errors.New("reader failed")
+
+		rd, err := enc.EncryptStream(params.config, params.key, iotest.ErrReader(readErr))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.ErrorIs(t, err, readErr)
+		// EncryptStream writes the encrypted subkey header before reading from the
+		// source reader, so partial output is expected even when the reader later fails.
+		require.NotEmpty(t, data)
+	})
+}
+
+func testSetup(t *testing.T, hashing string) Params_t {
 	config := enc.NewConfiguration(hashing)
 
 	salt := make([]byte, uint32(16))
@@ -422,7 +538,7 @@ func testSetup(t *testing.T, hashing string) SymmetricParams {
 		t.Fatalf("Failed to derive key from passphrase: %v", err)
 	}
 
-	params := SymmetricParams{config, key}
+	params := Params_t{config, key}
 	return params
 }
 
