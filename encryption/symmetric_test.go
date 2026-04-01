@@ -834,3 +834,138 @@ func TestDeriveCanary(t *testing.T) {
 		require.Nil(t, canary)
 	})
 }
+
+func TestVerifyCanary(t *testing.T) {
+	t.Run("ConfigNil", func(t *testing.T) {
+		require.Panics(t, func() {
+			enc.VerifyCanary(nil, []byte("0123456789abcdef0123456789abcdef"))
+		})
+	})
+
+	t.Run("ValidCanary", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		ok := enc.VerifyCanary(params.config, params.key)
+		require.True(t, ok)
+	})
+
+	t.Run("IncorrectKey", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		ok := enc.VerifyCanary(params.config, []byte("fedcba9876543210fedcba9876543210"))
+		require.False(t, ok)
+	})
+
+	t.Run("CanaryNil", func(t *testing.T) {
+		params := setup(t)
+		params.config.Canary = nil
+		ok := enc.VerifyCanary(params.config, params.key)
+		require.False(t, ok)
+	})
+
+	t.Run("CanaryEmpty", func(t *testing.T) {
+		params := setup(t)
+		params.config.Canary = []byte{}
+		ok := enc.VerifyCanary(params.config, params.key)
+		require.False(t, ok)
+	})
+
+	t.Run("CanaryInvalid", func(t *testing.T) {
+		params := setup(t)
+		params.config.Canary = []byte("not a valid encrypted canary")
+		ok := enc.VerifyCanary(params.config, params.key)
+		require.False(t, ok)
+	})
+
+	t.Run("UnsupportedDataAlgorithm", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		params.config.DataAlgorithm = "NOPE"
+		ok := enc.VerifyCanary(params.config, params.key)
+		require.False(t, ok)
+	})
+
+	t.Run("UnsupportedSubKeyAlgorithm", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		params.config.SubKeyAlgorithm = "NOPE"
+		ok := enc.VerifyCanary(params.config, params.key)
+		require.False(t, ok)
+	})
+
+	t.Run("KeyNil", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		ok := enc.VerifyCanary(params.config, nil)
+		require.False(t, ok)
+	})
+
+	t.Run("KeyEmpty", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		ok := enc.VerifyCanary(params.config, []byte{})
+		require.False(t, ok)
+	})
+
+	t.Run("KeyTooShort", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		ok := enc.VerifyCanary(params.config, []byte("short"))
+		require.False(t, ok)
+	})
+
+	t.Run("KeyTooLong", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+
+		params.config.Canary = canary
+		ok := enc.VerifyCanary(params.config, []byte("0123456789abcdef0123456789abcdefx"))
+		require.False(t, ok)
+	})
+}
