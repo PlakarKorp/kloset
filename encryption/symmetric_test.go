@@ -179,20 +179,105 @@ func testSetup(t *testing.T, hashing string) SymmetricParams {
 }
 
 func TestDeriveKey(t *testing.T) {
-	testCases := []SymmetricParams{
-		testSetup(t, enc.DEFAULT_KDF),
-		testSetup(t, "SCRYPT"),
-		testSetup(t, "PBKDF2"),
+	assertKey := func(t *testing.T, kdf string, passphrase []byte) []byte {
+		t.Helper()
+
+		params, err := enc.NewDefaultKDFParams(kdf)
+		require.NoError(t, err)
+		require.NotNil(t, params)
+
+		key, err := enc.DeriveKey(*params, passphrase)
+		require.NoError(t, err)
+		require.NotNil(t, key)
+		require.Len(t, key, 32)
+
+		return key
+	}
+
+	testCases := []string{
+		"ARGON2ID",
+		"SCRYPT",
+		"PBKDF2",
 	}
 
 	for _, tc := range testCases {
-		t.Run(tc.config.KDFParams.KDF, func(t *testing.T) {
-			// Verify that derived key is non-nil and of expected length
-			if tc.key == nil || len(tc.key) != 32 {
-				t.Errorf("Unexpected derived key length. Got %d, want 32", len(tc.key))
-			}
+		t.Run("ValidKey:"+tc, func(t *testing.T) {
+			assertKey(t, tc, []byte("strong passphrase"))
 		})
 	}
+
+	t.Run("NilPassphraseIsValid", func(t *testing.T) {
+		assertKey(t, "SCRYPT", nil)
+	})
+
+	t.Run("SameParamsAndPassphrase_SameKey", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams("ARGON2ID")
+		require.NoError(t, err)
+
+		passphrase := []byte("strong passphrase")
+
+		first, err := enc.DeriveKey(*params, passphrase)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.Len(t, first, 32)
+
+		second, err := enc.DeriveKey(*params, passphrase)
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		require.Len(t, second, 32)
+
+		require.Equal(t, first, second)
+	})
+
+	t.Run("DifferentPassphrases_DifferentKeys", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams("ARGON2ID")
+		require.NoError(t, err)
+
+		first, err := enc.DeriveKey(*params, []byte("strong passphrase"))
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.Len(t, first, 32)
+
+		second, err := enc.DeriveKey(*params, []byte("different passphrase"))
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		require.Len(t, second, 32)
+
+		require.NotEqual(t, first, second)
+	})
+
+	t.Run("DifferentSalts_DifferentKeys", func(t *testing.T) {
+		firstParams, err := enc.NewDefaultKDFParams("ARGON2ID")
+		require.NoError(t, err)
+
+		secondParams, err := enc.NewDefaultKDFParams("ARGON2ID")
+		require.NoError(t, err)
+
+		passphrase := []byte("strong passphrase")
+
+		first, err := enc.DeriveKey(*firstParams, passphrase)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.Len(t, first, 32)
+
+		second, err := enc.DeriveKey(*secondParams, passphrase)
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		require.Len(t, second, 32)
+
+		require.NotEqual(t, first, second)
+	})
+
+	t.Run("UnsupportedKDF", func(t *testing.T) {
+		params := enc.KDFParams{
+			KDF:  "NOPE",
+			Salt: []byte("0123456789abcdef"),
+		}
+
+		key, err := enc.DeriveKey(params, []byte("strong passphrase"))
+		require.Error(t, err)
+		require.Nil(t, key)
+	})
 }
 
 func TestEncryptDecryptStream(t *testing.T) {
