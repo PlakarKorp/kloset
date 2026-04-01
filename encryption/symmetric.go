@@ -265,6 +265,10 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 		return nil, fmt.Errorf("unsupported data encryption algorithm: %s", config.DataAlgorithm)
 	}
 
+	if r == nil {
+		return nil, fmt.Errorf("reader is nil")
+	}
+
 	// Generate a random subkey for data encryption
 	subkey := make([]byte, 32)
 	if _, err := rand.Read(subkey); err != nil {
