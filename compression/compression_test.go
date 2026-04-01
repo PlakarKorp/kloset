@@ -1,4 +1,4 @@
-package compression
+package compression_test
 
 import (
 	"bytes"
@@ -6,19 +6,20 @@ import (
 	"io"
 	"testing"
 
+	cprss "github.com/PlakarKorp/kloset/compression"
 	"github.com/pierrec/lz4/v4"
 )
 
 // Helper function to compress and then decompress data and verify correctness
 func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
 	// Compress data
-	compressedReader, err := DeflateStream(algorithm, bytes.NewReader(data))
+	compressedReader, err := cprss.DeflateStream(algorithm, bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("DeflateStream failed for %s: %v", algorithm, err)
 	}
 
 	// Decompress data
-	decompressedReader, err := InflateStream(algorithm, io.NopCloser(compressedReader))
+	decompressedReader, err := cprss.InflateStream(algorithm, io.NopCloser(compressedReader))
 	if err != nil {
 		t.Fatalf("InflateStream failed for %s: %v", algorithm, err)
 	}
@@ -56,19 +57,20 @@ func TestCompression(t *testing.T) {
 
 func TestDefaultAlgorithm(t *testing.T) {
 	expected := "LZ4"
-	result := NewDefaultConfiguration().Algorithm
+	result := cprss.NewDefaultConfiguration().Algorithm
 
 	if result != expected {
 		t.Errorf("DefaultAlgorithm failed: expected %v, got %v", expected, result)
 	}
 }
+
 func TestUnsupportedAlgorithm(t *testing.T) {
-	_, err := DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
+	_, err := cprss.DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
 
-	_, err = InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
+	_, err = cprss.InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
@@ -81,24 +83,24 @@ func (e *errorReader) Read(p []byte) (n int, err error) {
 }
 
 func TestDeflateStreamErrorHandling(t *testing.T) {
-	_, err := DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
+	_, err := cprss.DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
 
-	_, err = DeflateStream("gzip", &errorReader{})
+	_, err = cprss.DeflateStream("gzip", &errorReader{})
 	if err == nil {
 		t.Error("Expected error for reader failure, got nil")
 	}
 }
 
 func TestInflateStreamErrorHandling(t *testing.T) {
-	_, err := InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
+	_, err := cprss.InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
 
-	_, err = InflateStream("gzip", io.NopCloser(&errorReader{}))
+	_, err = cprss.InflateStream("gzip", io.NopCloser(&errorReader{}))
 	if err == nil {
 		t.Error("Expected error for reader failure, got nil")
 	}
@@ -106,7 +108,7 @@ func TestInflateStreamErrorHandling(t *testing.T) {
 
 func TestDeflateStreamRewindLogic(t *testing.T) {
 	data := []byte("test rewind logic")
-	compressedReader, err := DeflateStream("GZIP", bytes.NewReader(data))
+	compressedReader, err := cprss.DeflateStream("GZIP", bytes.NewReader(data))
 	if err != nil {
 		t.Fatalf("DeflateStream failed: %v", err)
 	}
@@ -124,12 +126,12 @@ func TestLargeDataCompression(t *testing.T) {
 		largeData[i] = byte(i % 256)
 	}
 
-	compressedReader, err := DeflateStream("LZ4", bytes.NewReader(largeData))
+	compressedReader, err := cprss.DeflateStream("LZ4", bytes.NewReader(largeData))
 	if err != nil {
 		t.Fatalf("DeflateStream failed for large data: %v", err)
 	}
 
-	decompressedReader, err := InflateStream("LZ4", io.NopCloser(compressedReader))
+	decompressedReader, err := cprss.InflateStream("LZ4", io.NopCloser(compressedReader))
 	if err != nil {
 		t.Fatalf("InflateStream failed for large data: %v", err)
 	}
@@ -146,7 +148,7 @@ func TestLargeDataCompression(t *testing.T) {
 }
 
 func TestLookupNewDefaultConfigurationLZ4(t *testing.T) {
-	config, err := LookupDefaultConfiguration("LZ4")
+	config, err := cprss.LookupDefaultConfiguration("LZ4")
 	if err != nil {
 		t.Errorf("LookupNewDefaultConfiguration(LZ4) returned an error: %v", err)
 	}
@@ -159,7 +161,7 @@ func TestLookupNewDefaultConfigurationLZ4(t *testing.T) {
 }
 
 func TestLookupNewDefaultConfigurationGZIP(t *testing.T) {
-	config, err := LookupDefaultConfiguration("GZIP")
+	config, err := cprss.LookupDefaultConfiguration("GZIP")
 	if err != nil {
 		t.Errorf("LookupNewDefaultConfiguration(GZIP) returned an error: %v", err)
 	}
@@ -172,7 +174,7 @@ func TestLookupNewDefaultConfigurationGZIP(t *testing.T) {
 }
 
 func TestLookupNewDefaultConfigurationUnknown(t *testing.T) {
-	_, err := LookupDefaultConfiguration("unknown")
+	_, err := cprss.LookupDefaultConfiguration("unknown")
 	if err == nil {
 		t.Errorf("LookupNewDefaultConfiguration(unknown) did not return an error")
 	}
