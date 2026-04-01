@@ -18,8 +18,8 @@ type SymmetricParams struct {
 func testSetup(t *testing.T, hashing string) SymmetricParams {
 	config := enc.NewConfiguration(hashing)
 
-	salt, err := enc.Salt()
-	if err != nil {
+	salt := make([]byte, uint32(16))
+	if _, err := rand.Read(salt); err != nil {
 		t.Fatalf("Failed to generate random salt: %v", err)
 	}
 	config.KDFParams.Salt = salt

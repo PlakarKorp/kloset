@@ -130,11 +130,6 @@ func NewDefaultConfiguration() *Configuration {
 	return NewConfiguration(DEFAULT_KDF)
 }
 
-func Salt() (salt []byte, err error) {
-	_, err = rand.Read(salt[:])
-	return
-}
-
 // DeriveKey generates a secret from a passphrase using configured KDF parameters
 func DeriveKey(params KDFParams, passphrase []byte) ([]byte, error) {
 	switch params.KDF {
