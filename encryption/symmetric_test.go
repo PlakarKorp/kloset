@@ -751,3 +751,86 @@ func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
 
 	require.Equal(t, string(finalData), originalData)
 }
+
+func TestDeriveCanary(t *testing.T) {
+	t.Run("ConfigNil", func(t *testing.T) {
+		require.Panics(t, func() {
+			enc.DeriveCanary(nil, []byte("0123456789abcdef0123456789abcdef"))
+		})
+	})
+
+	t.Run("ValidConfiguration", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, canary)
+		require.NotEmpty(t, canary)
+	})
+
+	t.Run("SameConfigurations_DifferentCanaries", func(t *testing.T) {
+		params := setup(t)
+
+		first, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotEmpty(t, first)
+
+		second, err := enc.DeriveCanary(params.config, params.key)
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		require.NotEmpty(t, second)
+
+		require.NotEqual(t, first, second)
+	})
+
+	t.Run("UnsupportedDataAlgorithm", func(t *testing.T) {
+		params := setup(t)
+		params.config.DataAlgorithm = "NOPE"
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.Error(t, err)
+		require.Nil(t, canary)
+	})
+
+	t.Run("UnsupportedSubKeyAlgorithm", func(t *testing.T) {
+		params := setup(t)
+		params.config.SubKeyAlgorithm = "NOPE"
+
+		canary, err := enc.DeriveCanary(params.config, params.key)
+		require.Error(t, err)
+		require.Nil(t, canary)
+	})
+
+	t.Run("KeyNilIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, nil)
+		require.Error(t, err)
+		require.Nil(t, canary)
+	})
+
+	t.Run("KeyEmptyIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, []byte{})
+		require.Error(t, err)
+		require.Nil(t, canary)
+	})
+
+	t.Run("KeyTooShortIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, []byte("short"))
+		require.Error(t, err)
+		require.Nil(t, canary)
+	})
+
+	t.Run("KeyTooLongIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		canary, err := enc.DeriveCanary(params.config, []byte("0123456789abcdef0123456789abcdefx"))
+		require.Error(t, err)
+		require.Nil(t, canary)
+	})
+}
