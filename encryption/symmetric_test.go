@@ -325,6 +325,88 @@ func TestEncryptSubkey(t *testing.T) {
 	})
 }
 
+func TestDecryptSubkey(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	subkey := []byte("abcdefghijklmnopqrstuvwxyz012345")
+
+	t.Run("AES256-GCM", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", key, subkey)
+		require.NoError(t, err)
+
+		decrypted, err := enc.DecryptSubkey("AES256-GCM", key, bytes.NewReader(encrypted))
+		require.NoError(t, err)
+		require.NotNil(t, decrypted)
+		require.Equal(t, subkey, decrypted)
+	})
+
+	t.Run("AES256-KW", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-KW", key, subkey)
+		require.NoError(t, err)
+
+		decrypted, err := enc.DecryptSubkey("AES256-KW", key, bytes.NewReader(encrypted))
+		require.NoError(t, err)
+		require.NotNil(t, decrypted)
+		require.Equal(t, subkey, decrypted)
+	})
+
+	t.Run("NilKeyIsInvalid", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-KW", key, subkey)
+		require.NoError(t, err)
+
+		decrypted, err := enc.DecryptSubkey("AES256-KW", nil, bytes.NewReader(encrypted))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+
+	t.Run("NilSubKeyIsInvalid", func(t *testing.T) {
+		require.Panics(t, func() { enc.DecryptSubkey("AES256-GCM", key, nil) })
+	})
+
+	t.Run("IncorrectKey", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", key, subkey)
+		require.NoError(t, err)
+
+		incorrectKey := []byte("fedcba9876543210fedcba9876543210")
+		decrypted, err := enc.DecryptSubkey("AES256-GCM", incorrectKey, bytes.NewReader(encrypted))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+
+	t.Run("IncorrectSubKey", func(t *testing.T) {
+		decrypted, err := enc.DecryptSubkey("AES256-GCM", key, bytes.NewReader([]byte("whatever")))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+
+	t.Run("UnsupportedAlgorithm", func(t *testing.T) {
+		decrypted, err := enc.DecryptSubkey("NOPE", key, bytes.NewReader([]byte("whatever")))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+
+	t.Run("TruncatedData", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-KW", key, subkey)
+		require.NoError(t, err)
+
+		decrypted, err := enc.DecryptSubkey("AES256-KW", key, bytes.NewReader(encrypted[:len(encrypted)-4]))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+
+	t.Run("TruncatedAfterNonce_AES256_GCM", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", key, subkey)
+		require.NoError(t, err)
+		require.NotNil(t, encrypted)
+
+		const nonceSize = 12
+		require.Greater(t, len(encrypted), nonceSize)
+
+		decrypted, err := enc.DecryptSubkey("AES256-GCM", key, bytes.NewReader(encrypted[:nonceSize+1]))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+}
+
 func testSetup(t *testing.T, hashing string) SymmetricParams {
 	config := enc.NewConfiguration(hashing)
 
