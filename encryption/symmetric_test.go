@@ -1,7 +1,7 @@
 package encryption_test
 
 import (
-	"crypto/rand"
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -409,16 +409,15 @@ type Params_t struct {
 	key    []byte
 }
 
-func TestEncryptStream(t *testing.T) {
-	setup := func(t *testing.T) *Params_t {
-		t.Helper()
-
-		return &Params_t{
-			config: enc.NewDefaultConfiguration(),
-			key:    []byte("0123456789abcdef0123456789abcdef"),
-		}
+func setup(t *testing.T) *Params_t {
+	t.Helper()
+	return &Params_t{
+		config: enc.NewDefaultConfiguration(),
+		key:    []byte("0123456789abcdef0123456789abcdef"),
 	}
+}
 
+func TestEncryptStream(t *testing.T) {
 	t.Run("ValidStream", func(t *testing.T) {
 		params := setup(t)
 
@@ -523,120 +522,203 @@ func TestEncryptStream(t *testing.T) {
 	})
 }
 
-func testSetup(t *testing.T, hashing string) Params_t {
-	config := enc.NewConfiguration(hashing)
-
-	salt := make([]byte, uint32(16))
-	if _, err := rand.Read(salt); err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := enc.DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
-
-	params := Params_t{config, key}
-	return params
+type errAfterNReadCloser struct {
+	data []byte
+	n    int
+	err  error
+	pos  int
 }
 
-func TestEncryptDecryptStream(t *testing.T) {
-	params := testSetup(t, enc.DEFAULT_KDF)
-
-	// Original data to encrypt and decrypt
-	originalData := "This is a test data string for encryption and decryption"
-	r := strings.NewReader(originalData)
-
-	// Encrypt the data
-	encryptedReader, err := enc.EncryptStream(params.config, params.key, r)
-	if err != nil {
-		t.Fatalf("Failed to encrypt data: %v", err)
+func (r *errAfterNReadCloser) Read(p []byte) (int, error) {
+	if r.pos >= len(r.data) {
+		return 0, r.err
 	}
 
-	// Decrypt the data
-	decryptedReader, err := enc.DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
-	if err != nil {
-		t.Fatalf("Failed to decrypt data: %v", err)
+	remaining := len(r.data) - r.pos
+	if remaining > r.n {
+		remaining = r.n
+	}
+	if remaining > len(p) {
+		remaining = len(p)
 	}
 
-	// Read the decrypted data
-	decryptedData, err := io.ReadAll(decryptedReader)
-	if err != nil {
-		t.Fatalf("Failed to read decrypted data: %v", err)
-	}
-
-	// Verify the decrypted data matches the original data
-	if string(decryptedData) != originalData {
-		t.Errorf("Decrypted data does not match original. Got: %q, want: %q", string(decryptedData), originalData)
-	}
+	copy(p, r.data[r.pos:r.pos+remaining])
+	r.pos += remaining
+	return remaining, nil
 }
 
-func TestEncryptDecryptEmptyStream(t *testing.T) {
-	params := testSetup(t, enc.DEFAULT_KDF)
-
-	// Original data to encrypt and decrypt
-	originalData := ""
-	r := strings.NewReader(originalData)
-
-	// Encrypt the data
-	encryptedReader, err := enc.EncryptStream(params.config, params.key, r)
-	if err != nil {
-		t.Fatalf("Failed to encrypt data: %v", err)
-	}
-
-	// Decrypt the data
-	decryptedReader, err := enc.DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
-	if err != nil {
-		t.Fatalf("Failed to decrypt data: %v", err)
-	}
-
-	// Read the decrypted data
-	decryptedData, err := io.ReadAll(decryptedReader)
-	if err != nil {
-		t.Fatalf("Failed to read decrypted data: %v", err)
-	}
-
-	// Verify the decrypted data matches the original data
-	if string(decryptedData) != originalData {
-		t.Errorf("Decrypted data does not match original. Got: %q, want: %q", string(decryptedData), originalData)
-	}
+func (r *errAfterNReadCloser) Close() error {
+	return nil
 }
 
-func TestEncryptDecryptStreamWithIncorrectKey(t *testing.T) {
-	params := testSetup(t, enc.DEFAULT_KDF)
+func TestDecryptStream(t *testing.T) {
+	encrypt := func(t *testing.T, params *Params_t, data string) []byte {
+		t.Helper()
 
-	// Original data to encrypt and decrypt
-	originalData := "Sensitive information to protect"
-	r := strings.NewReader(originalData)
+		rd, err := enc.EncryptStream(params.config, params.key, strings.NewReader(data))
+		require.NoError(t, err)
 
-	// Encrypt the data
-	encryptedReader, err := enc.EncryptStream(params.config, params.key, r)
-	if err != nil {
-		t.Fatalf("Failed to encrypt data: %v", err)
+		encrypted, err := io.ReadAll(rd)
+		require.NoError(t, err)
+
+		return encrypted
 	}
 
-	// Generate an incorrect key for decryption
-	incorrectKey := make([]byte, len(params.key))
-	if _, err := rand.Read(incorrectKey); err != nil {
-		t.Fatalf("Failed to generate incorrect decryption key: %v", err)
-	}
+	t.Run("ValidStream", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
 
-	// Attempt to decrypt the data with the incorrect key
-	decryptedReader, err := enc.DecryptStream(params.config, incorrectKey, io.NopCloser(encryptedReader))
-	if err == nil {
-		// Attempt to read the (likely) invalid decrypted data to trigger an error
-		if _, readErr := io.ReadAll(decryptedReader); readErr == nil {
-			t.Error("Expected error during decryption with incorrect key, but got none")
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(bytes.NewReader(encrypted)))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.NoError(t, err)
+		require.Equal(t, "hello world", string(data))
+	})
+
+	t.Run("EmptyPayload", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "")
+
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(bytes.NewReader(encrypted)))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.NoError(t, err)
+		require.Empty(t, data)
+	})
+
+	t.Run("ConfigNil", func(t *testing.T) {
+		require.Panics(t, func() {
+			enc.DecryptStream(nil, []byte("0123456789abcdef0123456789abcdef"), io.NopCloser(bytes.NewReader([]byte("data"))))
+		})
+	})
+
+	t.Run("UnsupportedDataAlgorithm", func(t *testing.T) {
+		params := setup(t)
+		params.config.DataAlgorithm = "NOPE"
+
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(bytes.NewReader([]byte("data"))))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("UnsupportedSubKeyAlgorithm", func(t *testing.T) {
+		params := setup(t)
+		params.config.SubKeyAlgorithm = "NOPE"
+
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(bytes.NewReader([]byte("data"))))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyNilIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+
+		rd, err := enc.DecryptStream(params.config, nil, io.NopCloser(bytes.NewReader(encrypted)))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyEmptyIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+
+		rd, err := enc.DecryptStream(params.config, []byte{}, io.NopCloser(bytes.NewReader(encrypted)))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyTooShortIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+
+		rd, err := enc.DecryptStream(params.config, []byte("short"), io.NopCloser(bytes.NewReader(encrypted)))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("KeyTooLongIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+
+		rd, err := enc.DecryptStream(params.config, []byte("0123456789abcdef0123456789abcdefx"), io.NopCloser(bytes.NewReader(encrypted)))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("IncorrectKeyIsInvalid", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+
+		rd, err := enc.DecryptStream(params.config, []byte("fedcba9876543210fedcba9876543210"), io.NopCloser(bytes.NewReader(encrypted)))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("InvalidEncryptedStreamIsInvalid", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(bytes.NewReader(nil)))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("TruncatedEncryptedStreamIsIValid", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+		require.Greater(t, len(encrypted), 1)
+
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(bytes.NewReader(encrypted[:len(encrypted)-4])))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		// The error is raised when reading
+		data, err := io.ReadAll(rd)
+		require.Error(t, err)
+		require.Empty(t, data)
+	})
+
+	t.Run("ReaderFails_AfterFirstEncryptedChunk", func(t *testing.T) {
+		params := setup(t)
+
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(iotest.ErrReader(errors.New("reader failed"))))
+		require.Error(t, err)
+		require.Nil(t, rd)
+	})
+
+	t.Run("ReaderFailsWhileReadingEncryptedPayload", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, strings.Repeat("a", params.config.ChunkSize+1))
+
+		const wrappedSubkeySize = 40
+		const aesGCMSIVOverhead = 28
+		firstEncryptedChunkSize := params.config.ChunkSize + aesGCMSIVOverhead
+
+		require.Greater(t, len(encrypted), wrappedSubkeySize+firstEncryptedChunkSize)
+
+		readErr := errors.New("reader failed")
+		r := &errAfterNReadCloser{
+			data: encrypted[:wrappedSubkeySize+firstEncryptedChunkSize],
+			n:    wrappedSubkeySize + firstEncryptedChunkSize,
+			err:  readErr,
 		}
-	} else {
-		t.Logf("Decryption failed as expected with incorrect key: %v", err)
-	}
+
+		rd, err := enc.DecryptStream(params.config, params.key, r)
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.ErrorIs(t, err, readErr)
+		require.NotEmpty(t, data)
+	})
 }
 
 func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
-	params := testSetup(t, enc.DEFAULT_KDF)
+	params := setup(t)
 
 	// Original data to compress, encrypt, decrypt, and decompress
 	originalData := "This is a test string for compression and encryption. It should work!"
@@ -644,36 +726,28 @@ func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
 
 	// Step 1: Compress the data
 	compressedReader, err := compression.DeflateStream("GZIP", r)
-	if err != nil {
-		t.Fatalf("Failed to compress data: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, compressedReader)
 
 	// Step 2: Encrypt the compressed data
 	encryptedReader, err := enc.EncryptStream(params.config, params.key, compressedReader)
-	if err != nil {
-		t.Fatalf("Failed to encrypt data: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, encryptedReader)
 
 	// Step 3: Decrypt the data
 	decryptedReader, err := enc.DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
-	if err != nil {
-		t.Fatalf("Failed to decrypt data: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, decryptedReader)
 
 	// Step 4: Decompress the decrypted data
 	decompressedReader, err := compression.InflateStream("GZIP", decryptedReader)
-	if err != nil {
-		t.Fatalf("Failed to decompress data: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, decompressedReader)
 
 	// Read the final output
 	finalData, err := io.ReadAll(decompressedReader)
-	if err != nil {
-		t.Fatalf("Failed to read decompressed data: %v", err)
-	}
+	require.NoError(t, err)
+	require.NotEmpty(t, finalData)
 
-	// Verify the final data matches the original data
-	if string(finalData) != originalData {
-		t.Errorf("Final data does not match original. Got: %q, want: %q", string(finalData), originalData)
-	}
+	require.Equal(t, string(finalData), originalData)
 }
