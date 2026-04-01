@@ -128,6 +128,37 @@ func TestNewConfiguration(t *testing.T) {
 	})
 }
 
+func TestNewDefaultConfiguration(t *testing.T) {
+	t.Run("DefaultKDF", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams(enc.DEFAULT_KDF)
+		require.NoError(t, err)
+
+		config := enc.NewDefaultConfiguration()
+		require.NotNil(t, config)
+
+		compareConfigParams(t, config, params)
+	})
+
+	t.Run("vs_NewConfiguration", func(t *testing.T) {
+		defaultConfig := enc.NewDefaultConfiguration()
+		config := enc.NewConfiguration(enc.DEFAULT_KDF)
+
+		require.NotNil(t, defaultConfig)
+		require.NotNil(t, config)
+
+		require.Equal(t, config.SubKeyAlgorithm, defaultConfig.SubKeyAlgorithm)
+		require.Equal(t, config.DataAlgorithm, defaultConfig.DataAlgorithm)
+		require.Equal(t, config.ChunkSize, defaultConfig.ChunkSize)
+
+		require.Equal(t, config.KDFParams.KDF, defaultConfig.KDFParams.KDF)
+		require.Len(t, defaultConfig.KDFParams.Salt, len(config.KDFParams.Salt))
+		require.NotEqual(t, defaultConfig.KDFParams.Salt, config.KDFParams.Salt)
+		require.Equal(t, config.KDFParams.Argon2idParams, defaultConfig.KDFParams.Argon2idParams)
+		require.Equal(t, config.KDFParams.ScryptParams, defaultConfig.KDFParams.ScryptParams)
+		require.Equal(t, config.KDFParams.Pbkdf2Params, defaultConfig.KDFParams.Pbkdf2Params)
+	})
+}
+
 func testSetup(t *testing.T, hashing string) SymmetricParams {
 	config := enc.NewConfiguration(hashing)
 
