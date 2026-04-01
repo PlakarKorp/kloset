@@ -72,3 +72,26 @@ func Test_encryptSubkey_AES256_KW(t *testing.T) {
 		require.Nil(t, encrypted)
 	})
 }
+
+func Test_decryptSubkey_AES256_KW(t *testing.T) {
+	key, subkey, _ := setup(t)
+
+	t.Run("ShortWrappedKey", func(t *testing.T) {
+		decrypted, err := decryptSubkey_AES256_KW(key, bytes.NewReader(make([]byte, 39)))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+
+	t.Run("CorruptedWrappedKey", func(t *testing.T) {
+		wrapped, err := encryptSubkey_AES256_KW(key, subkey)
+		require.NoError(t, err)
+		require.NotNil(t, wrapped)
+		require.Len(t, wrapped, 40)
+
+		wrapped[len(wrapped)-1] ^= 0xff
+
+		decrypted, err := decryptSubkey_AES256_KW(key, bytes.NewReader(wrapped))
+		require.Error(t, err)
+		require.Nil(t, decrypted)
+	})
+}
