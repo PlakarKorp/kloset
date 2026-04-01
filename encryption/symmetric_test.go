@@ -159,25 +159,6 @@ func TestNewDefaultConfiguration(t *testing.T) {
 	})
 }
 
-func testSetup(t *testing.T, hashing string) SymmetricParams {
-	config := enc.NewConfiguration(hashing)
-
-	salt := make([]byte, uint32(16))
-	if _, err := rand.Read(salt); err != nil {
-		t.Fatalf("Failed to generate random salt: %v", err)
-	}
-	config.KDFParams.Salt = salt
-
-	passphrase := []byte("strong passphrase")
-	key, err := enc.DeriveKey(config.KDFParams, passphrase)
-	if err != nil {
-		t.Fatalf("Failed to derive key from passphrase: %v", err)
-	}
-
-	params := SymmetricParams{config, key}
-	return params
-}
-
 func TestDeriveKey(t *testing.T) {
 	assertKey := func(t *testing.T, kdf string, passphrase []byte) []byte {
 		t.Helper()
@@ -278,6 +259,89 @@ func TestDeriveKey(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, key)
 	})
+}
+
+func TestEncryptSubkey(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	subkey := []byte("abcdefghijklmnopqrstuvwxyz012345")
+
+	t.Run("AES256-GCM", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", key, subkey)
+		require.NoError(t, err)
+		require.NotNil(t, encrypted)
+		require.NotEmpty(t, encrypted)
+	})
+
+	t.Run("AES256-KW", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-KW", key, subkey)
+		require.NoError(t, err)
+		require.NotNil(t, encrypted)
+		require.NotEmpty(t, encrypted)
+	})
+
+	t.Run("NilKeyIsInvalid", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", nil, subkey)
+		require.Error(t, err)
+		require.Nil(t, encrypted)
+	})
+
+	t.Run("NilSubKeyIsValid", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", key, nil)
+		require.NoError(t, err)
+		require.NotNil(t, encrypted)
+		require.NotEmpty(t, encrypted)
+	})
+
+	t.Run("InvalidKey", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", []byte("short"), subkey)
+		require.Error(t, err)
+		require.Nil(t, encrypted)
+	})
+
+	t.Run("InvaliSubdKeyIsValid", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("AES256-GCM", key, []byte("short"))
+		require.NoError(t, err)
+		require.NotNil(t, encrypted)
+	})
+
+	t.Run("SameAlgorithmAndKey_DifferentSubKey", func(t *testing.T) {
+		first, err := enc.EncryptSubkey("AES256-GCM", key, subkey)
+		require.NoError(t, err)
+		require.NotNil(t, first)
+		require.NotEmpty(t, first)
+
+		second, err := enc.EncryptSubkey("AES256-GCM", key, subkey)
+		require.NoError(t, err)
+		require.NotNil(t, second)
+		require.NotEmpty(t, second)
+
+		require.NotEqual(t, first, second)
+	})
+
+	t.Run("UnsupportedAlgorithm", func(t *testing.T) {
+		encrypted, err := enc.EncryptSubkey("NOPE", key, subkey)
+		require.Error(t, err)
+		require.Nil(t, encrypted)
+	})
+}
+
+func testSetup(t *testing.T, hashing string) SymmetricParams {
+	config := enc.NewConfiguration(hashing)
+
+	salt := make([]byte, uint32(16))
+	if _, err := rand.Read(salt); err != nil {
+		t.Fatalf("Failed to generate random salt: %v", err)
+	}
+	config.KDFParams.Salt = salt
+
+	passphrase := []byte("strong passphrase")
+	key, err := enc.DeriveKey(config.KDFParams, passphrase)
+	if err != nil {
+		t.Fatalf("Failed to derive key from passphrase: %v", err)
+	}
+
+	params := SymmetricParams{config, key}
+	return params
 }
 
 func TestEncryptDecryptStream(t *testing.T) {
