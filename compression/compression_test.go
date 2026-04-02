@@ -371,6 +371,92 @@ func TestDeflateStream(t *testing.T) {
 	})
 }
 
+func TestInflateStream(t *testing.T) {
+	t.Run("InitializationError", func(t *testing.T) {
+		decompressedReader, err := cprss.InflateStream("GZIP", io.NopCloser(bytes.NewReader([]byte("not gzip"))))
+		require.Nil(t, decompressedReader)
+		require.Error(t, err)
+	})
+
+	t.Run("DispatchGZIP", func(t *testing.T) {
+		data := []byte("hello gzip")
+		compressedData := compressDataForTest(t, "GZIP", data)
+
+		decompressedReader, err := cprss.InflateStream("GZIP", io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("DispatchLZ4", func(t *testing.T) {
+		data := []byte("hello lz4")
+		compressedData := compressDataForTest(t, "LZ4", data)
+
+		decompressedReader, err := cprss.InflateStream("LZ4", io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("PartialReadOnGZIPData", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello gzip"), 128)
+		compressedData := compressDataForTest(t, "GZIP", data)
+
+		decompressedReader, err := cprss.InflateStream("GZIP", io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		firstChunk := make([]byte, 8)
+		n, err := decompressedReader.Read(firstChunk)
+		require.NoError(t, err)
+		require.Greater(t, n, 0)
+
+		remainingDecompressedData, err := io.ReadAll(decompressedReader)
+		require.NotEmpty(t, remainingDecompressedData)
+		require.NoError(t, err)
+
+		fullDecompressedData := append(firstChunk[:n], remainingDecompressedData...)
+		require.NotEmpty(t, fullDecompressedData)
+		require.Equal(t, data, fullDecompressedData)
+	})
+
+	t.Run("PartialReadOnLZ4Data", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello lz4"), 128)
+		compressedData := compressDataForTest(t, "LZ4", data)
+
+		decompressedReader, err := cprss.InflateStream("LZ4", io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		firstChunk := make([]byte, 8)
+		n, err := decompressedReader.Read(firstChunk)
+		require.NoError(t, err)
+		require.Greater(t, n, 0)
+
+		remainingDecompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, remainingDecompressedData)
+
+		fullDecompressedData := append(firstChunk[:n], remainingDecompressedData...)
+		require.NotEmpty(t, fullDecompressedData)
+		require.Equal(t, data, fullDecompressedData)
+	})
+
+	t.Run("FailOnUnsupportedAlgorithm", func(t *testing.T) {
+		decompressedReader, err := cprss.InflateStream("UNKNOWN", io.NopCloser(bytes.NewReader([]byte("test data"))))
+		require.Nil(t, decompressedReader)
+		require.EqualError(t, err, `unsupported compression method "UNKNOWN"`)
+	})
+}
+
 func TestUnsupportedAlgorithm(t *testing.T) {
 	_, err := cprss.DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
 	if err == nil {
