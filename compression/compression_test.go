@@ -200,6 +200,40 @@ func TestInflateGzipStream(t *testing.T) {
 	})
 }
 
+func TestDeflateLZ4Stream(t *testing.T) {
+	t.Run("CompressData", func(t *testing.T) {
+		data := []byte("hello lz4")
+
+		compressedReader, err := cprss.DeflateLZ4Stream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "LZ4", compressedReader)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("CompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+
+		compressedReader, err := cprss.DeflateLZ4Stream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "LZ4", compressedReader)
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("Fails_IfSourceReaderFails", func(t *testing.T) {
+		compressedReader, err := cprss.DeflateLZ4Stream(&errorReader{})
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		_, err = io.ReadAll(compressedReader)
+		require.ErrorContains(t, err, "forced read error")
+	})
+}
+
 // Helper function to compress and then decompress data and verify correctness
 func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
 	// Compress data
