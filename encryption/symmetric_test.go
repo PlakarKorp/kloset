@@ -8,11 +8,79 @@ import (
 
 	"github.com/PlakarKorp/kloset/compression"
 	enc "github.com/PlakarKorp/kloset/encryption"
+	"github.com/stretchr/testify/require"
 )
 
 type SymmetricParams struct {
 	config *enc.Configuration
 	key    []byte
+}
+
+func TestNewDefaultKDFParams(t *testing.T) {
+	t.Run("ARGON2ID", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams("ARGON2ID")
+		require.NoError(t, err)
+		require.NotNil(t, params)
+
+		require.Equal(t, "ARGON2ID", params.KDF)
+		require.NotNil(t, params.Salt)
+		require.Len(t, params.Salt, 16)
+
+		require.NotNil(t, params.Argon2idParams)
+		require.EqualValues(t, 16, params.Argon2idParams.SaltSize)
+		require.EqualValues(t, 4, params.Argon2idParams.Time)
+		require.EqualValues(t, 256*1024, params.Argon2idParams.Memory)
+		require.EqualValues(t, 1, params.Argon2idParams.Threads)
+		require.EqualValues(t, 32, params.Argon2idParams.KeyLen)
+
+		require.Nil(t, params.ScryptParams)
+		require.Nil(t, params.Pbkdf2Params)
+	})
+
+	t.Run("SCRYPT", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams("SCRYPT")
+		require.NoError(t, err)
+		require.NotNil(t, params)
+
+		require.Equal(t, "SCRYPT", params.KDF)
+		require.NotNil(t, params.Salt)
+		require.Len(t, params.Salt, 16)
+
+		require.NotNil(t, params.ScryptParams)
+		require.EqualValues(t, 16, params.ScryptParams.SaltSize)
+		require.Equal(t, 1<<15, params.ScryptParams.N)
+		require.Equal(t, 8, params.ScryptParams.R)
+		require.Equal(t, 1, params.ScryptParams.P)
+		require.Equal(t, 32, params.ScryptParams.KeyLen)
+
+		require.Nil(t, params.Argon2idParams)
+		require.Nil(t, params.Pbkdf2Params)
+	})
+
+	t.Run("PBKDF2", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams("PBKDF2")
+		require.NoError(t, err)
+		require.NotNil(t, params)
+
+		require.Equal(t, "PBKDF2", params.KDF)
+		require.NotNil(t, params.Salt)
+		require.Len(t, params.Salt, 16)
+
+		require.NotNil(t, params.Pbkdf2Params)
+		require.EqualValues(t, 16, params.Pbkdf2Params.SaltSize)
+		require.Equal(t, 100000, params.Pbkdf2Params.Iterations)
+		require.Equal(t, 32, params.Pbkdf2Params.KeyLen)
+		require.Equal(t, "SHA256", params.Pbkdf2Params.Hashing)
+
+		require.Nil(t, params.Argon2idParams)
+		require.Nil(t, params.ScryptParams)
+	})
+
+	t.Run("UnsupportedKDF", func(t *testing.T) {
+		params, err := enc.NewDefaultKDFParams("NOPE")
+		require.Error(t, err)
+		require.Nil(t, params)
+	})
 }
 
 func testSetup(t *testing.T, hashing string) SymmetricParams {
