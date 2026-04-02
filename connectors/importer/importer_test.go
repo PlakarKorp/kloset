@@ -1,4 +1,4 @@
-package importer
+package importer_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/connectors"
+	con "github.com/PlakarKorp/kloset/connectors/importer"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
@@ -43,18 +44,17 @@ func (m MockedImporter) Close(ctx context.Context) error {
 }
 
 func TestBackends(t *testing.T) {
-
 	// Setup: Register some backends
-	Register("local1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
+	con.Register("local1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
 		return nil, nil
 	})
-	Register("remote1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
+	con.Register("remote1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
 		return nil, nil
 	})
 
 	// Test: Retrieve the list of registered backends
 	expectedBackends := []string{"local1", "remote1"}
-	actualBackends := Backends()
+	actualBackends := con.Backends()
 
 	// Assert: Check if the actual backends match the expected
 	require.ElementsMatch(t, expectedBackends, actualBackends)
@@ -62,13 +62,13 @@ func TestBackends(t *testing.T) {
 
 func TestNewImporter(t *testing.T) {
 	// Setup: Register some backends
-	Register("fs", location.FLAG_LOCALFS, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
+	con.Register("fs", location.FLAG_LOCALFS, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
 		return MockedImporter{}, nil
 	})
-	Register("s3", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
+	con.Register("s3", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
 		return MockedImporter{}, nil
 	})
-	Register("ftp", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (Importer, error) {
+	con.Register("ftp", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
 		return MockedImporter{}, nil
 	})
 
@@ -88,7 +88,7 @@ func TestNewImporter(t *testing.T) {
 		t.Run(test.location, func(t *testing.T) {
 			appCtx := kcontext.NewKContext()
 
-			importer, err := NewImporter(appCtx, nil, map[string]string{"location": test.location})
+			importer, err := con.NewImporter(appCtx, nil, map[string]string{"location": test.location})
 
 			if test.expectedError != "" {
 				require.Error(t, err)
