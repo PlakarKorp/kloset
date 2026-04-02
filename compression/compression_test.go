@@ -114,6 +114,80 @@ func TestDeflateGzipStream(t *testing.T) {
 	})
 }
 
+func TestInflateGzipStream(t *testing.T) {
+	t.Run("InflateData", func(t *testing.T) {
+		data := []byte("hello gzip")
+
+		var compressedData bytes.Buffer
+		gzipWriter := gzip.NewWriter(&compressedData)
+		require.NotNil(t, gzipWriter)
+
+		_, err := gzipWriter.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, gzipWriter.Close())
+
+		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(compressedData.Bytes())))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NoError(t, decompressedReader.Close())
+		require.NotEmpty(t, decompressedData)
+
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("CompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+
+		var compressedData bytes.Buffer
+		gzipWriter := gzip.NewWriter(&compressedData)
+		require.NotNil(t, gzipWriter)
+
+		_, err := gzipWriter.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, gzipWriter.Close())
+
+		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(compressedData.Bytes())))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NoError(t, decompressedReader.Close())
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("FailOnInvalidData", func(t *testing.T) {
+		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader([]byte("not gzip"))))
+		require.Error(t, err)
+		require.Nil(t, decompressedReader)
+	})
+
+	t.Run("FailsOnCorruptedData", func(t *testing.T) {
+		data := []byte("hello gzip")
+
+		var compressedData bytes.Buffer
+		gzipWriter := gzip.NewWriter(&compressedData)
+		require.NotNil(t, gzipWriter)
+
+		_, err := gzipWriter.Write(data)
+		require.NoError(t, err)
+		require.NoError(t, gzipWriter.Close())
+
+		corruptedData := compressedData.Bytes()[:len(compressedData.Bytes())-1]
+
+		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(corruptedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+		require.NoError(t, decompressedReader.Close())
+	})
+}
+
 // Helper function to compress and then decompress data and verify correctness
 func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
 	// Compress data
