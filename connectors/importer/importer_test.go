@@ -2,8 +2,10 @@ package importer_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -163,44 +165,166 @@ func TestBackends(t *testing.T) {
 }
 
 func TestNewImporter(t *testing.T) {
-	// Setup: Register some backends
-	con.Register("fs", location.FLAG_LOCALFS, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
-		return MockedImporter{}, nil
-	})
-	con.Register("s3", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
-		return MockedImporter{}, nil
-	})
-	con.Register("ftp", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
-		return MockedImporter{}, nil
-	})
+	registerBackend := func(
+		t *testing.T,
+		name string,
+		flags location.Flags,
+		backendFn con.ImporterFn,
+	) {
+		t.Helper()
 
-	tests := []struct {
-		location        string
-		expectedError   string
-		expectedBackend string
-	}{
-		{location: "/", expectedError: "", expectedBackend: "fs"},
-		{location: "fs://some/path", expectedError: "", expectedBackend: "fs"},
-		{location: "s3://bucket/path", expectedError: "", expectedBackend: "s3"},
-		{location: "ftp://some/path", expectedError: "", expectedBackend: "ftp"},
-		{location: "http://unsupported", expectedError: "unsupported importer protocol", expectedBackend: ""},
+		err := con.Register(name, flags, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = con.Unregister(name) })
 	}
 
-	for _, test := range tests {
-		t.Run(test.location, func(t *testing.T) {
-			appCtx := kcontext.NewKContext()
+	t.Run("FailsIfLocationIsMissing", func(t *testing.T) {
+		appCtx := kcontext.NewKContext()
 
-			importer, err := con.NewImporter(appCtx, nil, map[string]string{"location": test.location})
+		importer, err := con.NewImporter(appCtx, nil, map[string]string{})
+		require.Nil(t, importer)
+		require.EqualError(t, err, "missing location")
+	})
 
-			if test.expectedError != "" {
-				require.Error(t, err)
-				require.Contains(t, err.Error(), test.expectedError)
-			} else {
-				require.NoError(t, err)
-				require.NotNil(t, importer)
-			}
+	t.Run("FailsIfProtocolIsUnsupported", func(t *testing.T) {
+		appCtx := kcontext.NewKContext()
+
+		importer, err := con.NewImporter(appCtx, nil, map[string]string{
+			"location": "unsupported://some/path",
 		})
-	}
+		require.Nil(t, importer)
+		require.EqualError(t, err, "unsupported importer protocol")
+	})
+
+	t.Run("UseDefaultFSProtocolForRelativeLocalPath", func(t *testing.T) {
+		var (
+			called           bool
+			receivedCtx      context.Context
+			receivedOpts     *connectors.Options
+			receivedProto    string
+			receivedLocation string
+		)
+
+		backend := func(
+			ctx context.Context,
+			opts *connectors.Options,
+			proto string,
+			config map[string]string,
+		) (con.Importer, error) {
+			called = true
+			receivedCtx = ctx
+			receivedOpts = opts
+			receivedProto = proto
+			receivedLocation = config["location"]
+			return MockedImporter{}, nil
+		}
+
+		registerBackend(t, "fs", location.FLAG_LOCALFS, backend)
+
+		appCtx := kcontext.NewKContext()
+		appCtx.CWD = t.TempDir()
+
+		opts := &connectors.Options{}
+		config := map[string]string{
+			"location": "relative/path",
+		}
+
+		importer, err := con.NewImporter(appCtx, opts, config)
+		require.NoError(t, err)
+		require.NotNil(t, importer)
+		require.True(t, called)
+		require.Same(t, appCtx, receivedCtx)
+		require.Same(t, opts, receivedOpts)
+		require.Equal(t, "fs", receivedProto)
+
+		expectedLocation := "fs://" + filepath.Join(appCtx.CWD, "relative/path")
+		require.Equal(t, expectedLocation, receivedLocation)
+		require.Equal(t, expectedLocation, config["location"])
+	})
+
+	t.Run("KeepAbsoluteLocalPathUnchanged", func(t *testing.T) {
+		var receivedLocation string
+
+		backend := func(
+			ctx context.Context,
+			opts *connectors.Options,
+			proto string,
+			config map[string]string,
+		) (con.Importer, error) {
+			receivedLocation = config["location"]
+			return MockedImporter{}, nil
+		}
+
+		registerBackend(t, "fs", location.FLAG_LOCALFS, backend)
+
+		appCtx := kcontext.NewKContext()
+		absolutePath := filepath.Join(t.TempDir(), "some", "path")
+		config := map[string]string{
+			"location": "fs://" + absolutePath,
+		}
+
+		importer, err := con.NewImporter(appCtx, nil, config)
+		require.NoError(t, err)
+		require.NotNil(t, importer)
+		require.Equal(t, "fs://"+absolutePath, receivedLocation)
+		require.Equal(t, "fs://"+absolutePath, config["location"])
+	})
+
+	t.Run("DoNotRewriteNonLocalLocation", func(t *testing.T) {
+		var (
+			receivedProto    string
+			receivedLocation string
+		)
+
+		backend := func(
+			ctx context.Context,
+			opts *connectors.Options,
+			proto string,
+			config map[string]string,
+		) (con.Importer, error) {
+			receivedProto = proto
+			receivedLocation = config["location"]
+			return MockedImporter{}, nil
+		}
+
+		registerBackend(t, "s3", 0, backend)
+
+		appCtx := kcontext.NewKContext()
+		config := map[string]string{
+			"location": "s3://bucket/path",
+		}
+
+		importer, err := con.NewImporter(appCtx, nil, config)
+		require.NoError(t, err)
+		require.NotNil(t, importer)
+		require.Equal(t, "s3", receivedProto)
+		require.Equal(t, "s3://bucket/path", receivedLocation)
+		require.Equal(t, "s3://bucket/path", config["location"])
+	})
+
+	t.Run("PropagateBackendError", func(t *testing.T) {
+		expectedErr := errors.New("backend failure")
+
+		backend := func(
+			ctx context.Context,
+			opts *connectors.Options,
+			proto string,
+			config map[string]string,
+		) (con.Importer, error) {
+			return nil, expectedErr
+		}
+		registerBackend(t, "ftp", 0, backend)
+
+		appCtx := kcontext.NewKContext()
+		config := map[string]string{
+			"location": "ftp://some/path",
+		}
+
+		importer, err := con.NewImporter(appCtx, nil, config)
+		require.Nil(t, importer)
+		require.ErrorIs(t, err, expectedErr)
+	})
 }
 
 func TestNewScanRecord(t *testing.T) {
