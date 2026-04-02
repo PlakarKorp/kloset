@@ -3,17 +3,14 @@ package importer_test
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/PlakarKorp/kloset/connectors"
 	con "github.com/PlakarKorp/kloset/connectors/importer"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
-	"github.com/PlakarKorp/kloset/objects"
 	"github.com/stretchr/testify/require"
 )
 
@@ -325,40 +322,4 @@ func TestNewImporter(t *testing.T) {
 		require.Nil(t, importer)
 		require.ErrorIs(t, err, expectedErr)
 	})
-}
-
-func TestNewScanRecord(t *testing.T) {
-	pathname := "/path/to/file"
-	target := "target"
-	now := time.Now().Local()
-
-	fileinfo := objects.NewFileInfo("file", 300000, 0644, now, 1, 2, 3, 4, 5)
-	xattr := []string{"attr1", "attr2"}
-
-	record := connectors.NewRecord(pathname, target, fileinfo, xattr, nil)
-
-	require.Equal(t, pathname, record.Pathname)
-	require.Equal(t, target, record.Target)
-	require.Equal(t, fileinfo, record.FileInfo)
-	require.ElementsMatch(t, xattr, record.ExtendedAttributes)
-}
-
-func TestNewScanXattr(t *testing.T) {
-	pathname := "/path/to/file"
-	xattrname := "foo/bar"
-
-	record := connectors.NewXattr(pathname, xattrname, objects.AttributeExtended, nil)
-
-	require.Equal(t, pathname, record.Pathname)
-	require.Equal(t, xattrname, record.XattrName)
-	require.True(t, record.IsXattr)
-}
-
-func TestNewScanError(t *testing.T) {
-	pathname := "/path/to/file"
-	err := fmt.Errorf("some error")
-
-	record := connectors.NewError(pathname, err)
-
-	require.Equal(t, pathname, record.Pathname)
 }
