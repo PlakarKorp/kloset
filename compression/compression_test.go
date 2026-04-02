@@ -457,29 +457,44 @@ func TestInflateStream(t *testing.T) {
 	})
 }
 
-func TestLargeDataCompression(t *testing.T) {
-	largeData := make([]byte, 10*1024*1024) // 10MB of data
-	for i := range largeData {
-		largeData[i] = byte(i % 256)
-	}
+func TestLargeData(t *testing.T) {
+	t.Run("GZIP", func(t *testing.T) {
+		data := make([]byte, 10*1024*1024)
+		for i := range data {
+			data[i] = byte(i % 251)
+		}
 
-	compressedReader, err := cprss.DeflateStream("LZ4", bytes.NewReader(largeData))
-	if err != nil {
-		t.Fatalf("DeflateStream failed for large data: %v", err)
-	}
+		compressedReader, err := cprss.DeflateStream("GZIP", bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
 
-	decompressedReader, err := cprss.InflateStream("LZ4", io.NopCloser(compressedReader))
-	if err != nil {
-		t.Fatalf("InflateStream failed for large data: %v", err)
-	}
+		decompressedReader, err := cprss.InflateStream("GZIP", io.NopCloser(compressedReader))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
 
-	var decompressedData bytes.Buffer
-	_, err = io.Copy(&decompressedData, decompressedReader)
-	if err != nil {
-		t.Fatalf("Reading decompressed data failed for large data: %v", err)
-	}
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
 
-	if !bytes.Equal(largeData, decompressedData.Bytes()) {
-		t.Errorf("Decompressed large data does not match original. Lengths differ")
-	}
+	t.Run("LZ4", func(t *testing.T) {
+		data := make([]byte, 10*1024*1024)
+		for i := range data {
+			data[i] = byte(i % 251)
+		}
+
+		compressedReader, err := cprss.DeflateStream("LZ4", bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedReader, err := cprss.InflateStream("LZ4", io.NopCloser(compressedReader))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
 }
