@@ -234,6 +234,58 @@ func TestDeflateLZ4Stream(t *testing.T) {
 	})
 }
 
+func TestInflateLZ4Stream(t *testing.T) {
+	t.Run("InflateData", func(t *testing.T) {
+		data := []byte("hello lz4")
+		compressedData := compressDataForTest(t, "LZ4", data)
+
+		decompressedReader, err := cprss.InflateLZ4Stream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("CompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+		compressedData := compressDataForTest(t, "LZ4", data)
+
+		decompressedReader, err := cprss.InflateLZ4Stream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("FailOnInvalidData", func(t *testing.T) {
+		decompressedReader, err := cprss.InflateLZ4Stream(io.NopCloser(bytes.NewReader([]byte("not lz4"))))
+
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+	})
+
+	t.Run("FailsOnCorruptedData", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello lz4"), 1024)
+		compressedData := compressDataForTest(t, "LZ4", data)
+		corruptedData := compressedData[:len(compressedData)-1]
+
+		decompressedReader, err := cprss.InflateLZ4Stream(io.NopCloser(bytes.NewReader(corruptedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+	})
+}
+
 // Helper function to compress and then decompress data and verify correctness
 func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
 	// Compress data
