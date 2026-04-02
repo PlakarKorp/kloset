@@ -43,6 +43,38 @@ func (m MockedImporter) Close(ctx context.Context) error {
 	return nil
 }
 
+func TestRegister(t *testing.T) {
+	backendFn := func(
+		ctx context.Context,
+		opts *connectors.Options,
+		proto string,
+		config map[string]string,
+	) (con.Importer, error) {
+		return nil, nil
+	}
+
+	t.Run("ValidBackendRegistration", func(t *testing.T) {
+		backendName := "test-register-backend"
+
+		err := con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		t.Cleanup(func() { _ = con.Unregister(backendName) })
+
+		require.NoError(t, err)
+	})
+
+	t.Run("FailsIfBackendAlreadyRegistered", func(t *testing.T) {
+		backendName := "test-register-duplicate"
+
+		err := con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = con.Unregister(backendName) })
+
+		err = con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.EqualError(t, err, "importer backend 'test-register-duplicate' already registered")
+	})
+}
+
 func TestBackends(t *testing.T) {
 	// Setup: Register some backends
 	con.Register("local1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
