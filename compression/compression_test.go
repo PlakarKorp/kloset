@@ -2,6 +2,7 @@ package compression_test
 
 import (
 	"bytes"
+	"compress/gzip"
 	"errors"
 	"io"
 	"testing"
@@ -60,6 +61,59 @@ func TestLookupDefaultConfiguration(t *testing.T) {
 	})
 }
 
+type errorReader struct{}
+
+func (e *errorReader) Read(p []byte) (n int, err error) {
+	return 0, errors.New("forced read error")
+}
+
+func TestDeflateGzipStream(t *testing.T) {
+	t.Run("CompressData", func(t *testing.T) {
+		data := []byte("hello gzip")
+
+		compressedReader, err := cprss.DeflateGzipStream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		gzipReader, err := gzip.NewReader(compressedReader)
+		require.NoError(t, err)
+		require.NotNil(t, gzipReader)
+
+		decompressedData, err := io.ReadAll(gzipReader)
+		require.NoError(t, err)
+		require.NoError(t, gzipReader.Close())
+		require.NotEmpty(t, decompressedData)
+
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("CompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+
+		compressedReader, err := cprss.DeflateGzipStream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		gzipReader, err := gzip.NewReader(compressedReader)
+		require.NoError(t, err)
+		require.NotNil(t, gzipReader)
+
+		decompressedData, err := io.ReadAll(gzipReader)
+		require.NoError(t, err)
+		require.NoError(t, gzipReader.Close())
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("Fails_IfSourceReaderFails", func(t *testing.T) {
+		compressedReader, err := cprss.DeflateGzipStream(&errorReader{})
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		_, readErr := io.ReadAll(compressedReader)
+		require.ErrorContains(t, readErr, "forced read error")
+	})
+}
+
 // Helper function to compress and then decompress data and verify correctness
 func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
 	// Compress data
@@ -115,12 +169,6 @@ func TestUnsupportedAlgorithm(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for unsupported compression method, got nil")
 	}
-}
-
-type errorReader struct{}
-
-func (e *errorReader) Read(p []byte) (n int, err error) {
-	return 0, errors.New("forced read error")
 }
 
 func TestDeflateStreamErrorHandling(t *testing.T) {
