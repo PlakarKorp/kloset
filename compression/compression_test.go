@@ -8,7 +8,57 @@ import (
 
 	cprss "github.com/PlakarKorp/kloset/compression"
 	"github.com/pierrec/lz4/v4"
+	"github.com/stretchr/testify/require"
 )
+
+func TestNewDefaultConfiguration(t *testing.T) {
+	t.Run("CheckDefaults", func(t *testing.T) {
+		cfg := cprss.NewDefaultConfiguration()
+
+		require.NotNil(t, cfg)
+		require.Equal(t, "LZ4", cfg.Algorithm)
+		require.Equal(t, int(lz4.Level9), cfg.Level)
+		require.Equal(t, -1, cfg.WindowSize)
+		require.Equal(t, -1, cfg.ChunkSize)
+		require.Equal(t, -1, cfg.BlockSize)
+		require.False(t, cfg.EnableCRC)
+	})
+}
+
+func TestLookupDefaultConfiguration(t *testing.T) {
+	t.Run("CheckLZ4Defaults", func(t *testing.T) {
+		cfg, err := cprss.LookupDefaultConfiguration("LZ4")
+
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.Equal(t, "LZ4", cfg.Algorithm)
+		require.Equal(t, int(lz4.Level9), cfg.Level)
+		require.Equal(t, -1, cfg.WindowSize)
+		require.Equal(t, -1, cfg.ChunkSize)
+		require.Equal(t, -1, cfg.BlockSize)
+		require.False(t, cfg.EnableCRC)
+	})
+
+	t.Run("CheckGZIPDefaults", func(t *testing.T) {
+		cfg, err := cprss.LookupDefaultConfiguration("GZIP")
+
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.Equal(t, "GZIP", cfg.Algorithm)
+		require.Equal(t, -1, cfg.Level)
+		require.Equal(t, -1, cfg.WindowSize)
+		require.Equal(t, -1, cfg.ChunkSize)
+		require.Equal(t, -1, cfg.BlockSize)
+		require.False(t, cfg.EnableCRC)
+	})
+
+	t.Run("CheckUnknownAlgorithm", func(t *testing.T) {
+		cfg, err := cprss.LookupDefaultConfiguration("UNKNOWN")
+
+		require.Nil(t, cfg)
+		require.EqualError(t, err, "unknown hashing algorithm: UNKNOWN")
+	})
+}
 
 // Helper function to compress and then decompress data and verify correctness
 func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
@@ -52,15 +102,6 @@ func TestCompression(t *testing.T) {
 		t.Run(tt.algorithm, func(t *testing.T) {
 			testCompressionDecompression(t, tt.algorithm, tt.data)
 		})
-	}
-}
-
-func TestDefaultAlgorithm(t *testing.T) {
-	expected := "LZ4"
-	result := cprss.NewDefaultConfiguration().Algorithm
-
-	if result != expected {
-		t.Errorf("DefaultAlgorithm failed: expected %v, got %v", expected, result)
 	}
 }
 
@@ -144,38 +185,5 @@ func TestLargeDataCompression(t *testing.T) {
 
 	if !bytes.Equal(largeData, decompressedData.Bytes()) {
 		t.Errorf("Decompressed large data does not match original. Lengths differ")
-	}
-}
-
-func TestLookupNewDefaultConfigurationLZ4(t *testing.T) {
-	config, err := cprss.LookupDefaultConfiguration("LZ4")
-	if err != nil {
-		t.Errorf("LookupNewDefaultConfiguration(LZ4) returned an error: %v", err)
-	}
-	if config.Algorithm != "LZ4" {
-		t.Errorf("LookupNewDefaultConfiguration(LZ4) returned incorrect algorithm: %s", config.Algorithm)
-	}
-	if config.Level != int(lz4.Level9) {
-		t.Errorf("LookupNewDefaultConfiguration(LZ4) returned incorrect level: %d", config.Level)
-	}
-}
-
-func TestLookupNewDefaultConfigurationGZIP(t *testing.T) {
-	config, err := cprss.LookupDefaultConfiguration("GZIP")
-	if err != nil {
-		t.Errorf("LookupNewDefaultConfiguration(GZIP) returned an error: %v", err)
-	}
-	if config.Algorithm != "GZIP" {
-		t.Errorf("LookupNewDefaultConfiguration(GZIP) returned incorrect algorithm: %s", config.Algorithm)
-	}
-	if config.Level != -1 {
-		t.Errorf("LookupNewDefaultConfiguration(GZIP) returned incorrect level: %d", config.Level)
-	}
-}
-
-func TestLookupNewDefaultConfigurationUnknown(t *testing.T) {
-	_, err := cprss.LookupDefaultConfiguration("unknown")
-	if err == nil {
-		t.Errorf("LookupNewDefaultConfiguration(unknown) did not return an error")
 	}
 }
