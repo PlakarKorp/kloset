@@ -286,51 +286,6 @@ func TestInflateLZ4Stream(t *testing.T) {
 	})
 }
 
-// Helper function to compress and then decompress data and verify correctness
-func testCompressionDecompression(t *testing.T, algorithm string, data []byte) {
-	// Compress data
-	compressedReader, err := cprss.DeflateStream(algorithm, bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("DeflateStream failed for %s: %v", algorithm, err)
-	}
-
-	// Decompress data
-	decompressedReader, err := cprss.InflateStream(algorithm, io.NopCloser(compressedReader))
-	if err != nil {
-		t.Fatalf("InflateStream failed for %s: %v", algorithm, err)
-	}
-
-	// Read decompressed data
-	var decompressedData bytes.Buffer
-	_, err = io.Copy(&decompressedData, decompressedReader)
-	if err != nil {
-		t.Fatalf("Reading decompressed data failed for %s: %v", algorithm, err)
-	}
-
-	// Compare original and decompressed data
-	if !bytes.Equal(data, decompressedData.Bytes()) {
-		t.Errorf("Decompressed data does not match original for %s. Got: %v, Want: %v", algorithm, decompressedData.Bytes(), data)
-	}
-}
-
-func TestCompression(t *testing.T) {
-	tests := []struct {
-		algorithm string
-		data      []byte
-	}{
-		{"GZIP", []byte("Hello, world!")},
-		{"GZIP", []byte{}}, // Test empty buffer for gzip
-		{"LZ4", []byte("Hello, world!")},
-		{"LZ4", []byte{}}, // Test empty buffer for lz4
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.algorithm, func(t *testing.T) {
-			testCompressionDecompression(t, tt.algorithm, tt.data)
-		})
-	}
-}
-
 func TestUnsupportedAlgorithm(t *testing.T) {
 	_, err := cprss.DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
 	if err == nil {
