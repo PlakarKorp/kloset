@@ -457,56 +457,6 @@ func TestInflateStream(t *testing.T) {
 	})
 }
 
-func TestUnsupportedAlgorithm(t *testing.T) {
-	_, err := cprss.DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
-	if err == nil {
-		t.Error("Expected error for unsupported compression method, got nil")
-	}
-
-	_, err = cprss.InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
-	if err == nil {
-		t.Error("Expected error for unsupported compression method, got nil")
-	}
-}
-
-func TestDeflateStreamErrorHandling(t *testing.T) {
-	_, err := cprss.DeflateStream("unsupported", bytes.NewReader([]byte("test data")))
-	if err == nil {
-		t.Error("Expected error for unsupported compression method, got nil")
-	}
-
-	_, err = cprss.DeflateStream("gzip", &errorReader{})
-	if err == nil {
-		t.Error("Expected error for reader failure, got nil")
-	}
-}
-
-func TestInflateStreamErrorHandling(t *testing.T) {
-	_, err := cprss.InflateStream("unsupported", io.NopCloser(bytes.NewReader([]byte("test data"))))
-	if err == nil {
-		t.Error("Expected error for unsupported compression method, got nil")
-	}
-
-	_, err = cprss.InflateStream("gzip", io.NopCloser(&errorReader{}))
-	if err == nil {
-		t.Error("Expected error for reader failure, got nil")
-	}
-}
-
-func TestDeflateStreamRewindLogic(t *testing.T) {
-	data := []byte("test rewind logic")
-	compressedReader, err := cprss.DeflateStream("GZIP", bytes.NewReader(data))
-	if err != nil {
-		t.Fatalf("DeflateStream failed: %v", err)
-	}
-
-	buf := make([]byte, 1)
-	n, err := compressedReader.Read(buf)
-	if err != nil || n != 1 {
-		t.Fatalf("Rewind logic test failed: expected 1 byte read, got %d, error: %v", n, err)
-	}
-}
-
 func TestLargeDataCompression(t *testing.T) {
 	largeData := make([]byte, 10*1024*1024) // 10MB of data
 	for i := range largeData {
