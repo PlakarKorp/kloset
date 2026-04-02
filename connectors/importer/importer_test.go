@@ -75,6 +75,49 @@ func TestRegister(t *testing.T) {
 	})
 }
 
+func TestUnregister(t *testing.T) {
+	backendFn := func(
+		ctx context.Context,
+		opts *connectors.Options,
+		proto string,
+		config map[string]string,
+	) (con.Importer, error) {
+		return nil, nil
+	}
+
+	t.Run("ValidBackendUnregistration", func(t *testing.T) {
+		backendName := "test-unregister-backend"
+
+		err := con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = con.Unregister(backendName)
+		require.NoError(t, err)
+	})
+
+	t.Run("FailsIfBackendIsNotRegistered", func(t *testing.T) {
+		backendName := "test-unregister-missing"
+
+		err := con.Unregister(backendName)
+		require.EqualError(t, err, "importer backend 'test-unregister-missing' not registered")
+	})
+
+	t.Run("Register->Unregister->Register", func(t *testing.T) {
+		backendName := "test-unregister-backend"
+
+		err := con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = con.Unregister(backendName)
+		require.NoError(t, err)
+
+		err = con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = con.Unregister(backendName) })
+	})
+}
+
 func TestBackends(t *testing.T) {
 	// Setup: Register some backends
 	con.Register("local1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
