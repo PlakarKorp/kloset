@@ -67,6 +67,57 @@ func (e *errorReader) Read(p []byte) (n int, err error) {
 	return 0, errors.New("forced read error")
 }
 
+func compressDataForTest(t *testing.T, algorithm string, data []byte) []byte {
+	t.Helper()
+
+	var compressedData bytes.Buffer
+	var writer io.WriteCloser
+
+	switch algorithm {
+	case "GZIP":
+		writer = gzip.NewWriter(&compressedData)
+	case "LZ4":
+		writer = lz4.NewWriter(&compressedData)
+	default:
+		require.FailNow(t, "unsupported algorithm", "algorithm=%s", algorithm)
+	}
+
+	_, err := writer.Write(data)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+
+	return compressedData.Bytes()
+}
+
+func decompressDataForTest(t *testing.T, algorithm string, r io.Reader) []byte {
+	t.Helper()
+
+	var reader io.Reader
+	var closer io.Closer
+
+	switch algorithm {
+	case "GZIP":
+		r, err := gzip.NewReader(r)
+		require.NoError(t, err)
+		reader = r
+		closer = r
+	case "LZ4":
+		reader = lz4.NewReader(r)
+		closer = nil
+	default:
+		require.FailNow(t, "unsupported algorithm", "algorithm=%s", algorithm)
+	}
+
+	decompressedData, err := io.ReadAll(reader)
+	require.NoError(t, err)
+
+	if closer != nil {
+		require.NoError(t, closer.Close())
+	}
+
+	return decompressedData
+}
+
 func TestDeflateGzipStream(t *testing.T) {
 	t.Run("CompressData", func(t *testing.T) {
 		data := []byte("hello gzip")
@@ -75,15 +126,8 @@ func TestDeflateGzipStream(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, compressedReader)
 
-		gzipReader, err := gzip.NewReader(compressedReader)
-		require.NoError(t, err)
-		require.NotNil(t, gzipReader)
-
-		decompressedData, err := io.ReadAll(gzipReader)
-		require.NoError(t, err)
-		require.NoError(t, gzipReader.Close())
+		decompressedData := decompressDataForTest(t, "GZIP", compressedReader)
 		require.NotEmpty(t, decompressedData)
-
 		require.Equal(t, data, decompressedData)
 	})
 
@@ -94,13 +138,7 @@ func TestDeflateGzipStream(t *testing.T) {
 		require.NoError(t, err)
 		require.NotNil(t, compressedReader)
 
-		gzipReader, err := gzip.NewReader(compressedReader)
-		require.NoError(t, err)
-		require.NotNil(t, gzipReader)
-
-		decompressedData, err := io.ReadAll(gzipReader)
-		require.NoError(t, err)
-		require.NoError(t, gzipReader.Close())
+		decompressedData := decompressDataForTest(t, "GZIP", compressedReader)
 		require.Empty(t, decompressedData)
 	})
 
@@ -117,45 +155,28 @@ func TestDeflateGzipStream(t *testing.T) {
 func TestInflateGzipStream(t *testing.T) {
 	t.Run("InflateData", func(t *testing.T) {
 		data := []byte("hello gzip")
+		compressedData := compressDataForTest(t, "GZIP", data)
 
-		var compressedData bytes.Buffer
-		gzipWriter := gzip.NewWriter(&compressedData)
-		require.NotNil(t, gzipWriter)
-
-		_, err := gzipWriter.Write(data)
-		require.NoError(t, err)
-		require.NoError(t, gzipWriter.Close())
-
-		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(compressedData.Bytes())))
+		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(compressedData)))
 		require.NoError(t, err)
 		require.NotNil(t, decompressedReader)
 
 		decompressedData, err := io.ReadAll(decompressedReader)
 		require.NoError(t, err)
-		require.NoError(t, decompressedReader.Close())
 		require.NotEmpty(t, decompressedData)
-
 		require.Equal(t, data, decompressedData)
 	})
 
 	t.Run("CompressEmptyData", func(t *testing.T) {
 		data := []byte{}
+		compressedData := compressDataForTest(t, "GZIP", data)
 
-		var compressedData bytes.Buffer
-		gzipWriter := gzip.NewWriter(&compressedData)
-		require.NotNil(t, gzipWriter)
-
-		_, err := gzipWriter.Write(data)
-		require.NoError(t, err)
-		require.NoError(t, gzipWriter.Close())
-
-		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(compressedData.Bytes())))
+		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(compressedData)))
 		require.NoError(t, err)
 		require.NotNil(t, decompressedReader)
 
 		decompressedData, err := io.ReadAll(decompressedReader)
 		require.NoError(t, err)
-		require.NoError(t, decompressedReader.Close())
 		require.Empty(t, decompressedData)
 	})
 
@@ -167,16 +188,8 @@ func TestInflateGzipStream(t *testing.T) {
 
 	t.Run("FailsOnCorruptedData", func(t *testing.T) {
 		data := []byte("hello gzip")
-
-		var compressedData bytes.Buffer
-		gzipWriter := gzip.NewWriter(&compressedData)
-		require.NotNil(t, gzipWriter)
-
-		_, err := gzipWriter.Write(data)
-		require.NoError(t, err)
-		require.NoError(t, gzipWriter.Close())
-
-		corruptedData := compressedData.Bytes()[:len(compressedData.Bytes())-1]
+		compressedData := compressDataForTest(t, "GZIP", data)
+		corruptedData := compressedData[:len(compressedData)-4]
 
 		decompressedReader, err := cprss.InflateGzipStream(io.NopCloser(bytes.NewReader(corruptedData)))
 		require.NoError(t, err)
@@ -184,7 +197,6 @@ func TestInflateGzipStream(t *testing.T) {
 
 		_, err = io.ReadAll(decompressedReader)
 		require.Error(t, err)
-		require.NoError(t, decompressedReader.Close())
 	})
 }
 
