@@ -130,11 +130,6 @@ func NewDefaultConfiguration() *Configuration {
 	return NewConfiguration(DEFAULT_KDF)
 }
 
-func Salt() (salt []byte, err error) {
-	_, err = rand.Read(salt[:])
-	return
-}
-
 // DeriveKey generates a secret from a passphrase using configured KDF parameters
 func DeriveKey(params KDFParams, passphrase []byte) ([]byte, error) {
 	switch params.KDF {
@@ -268,6 +263,10 @@ func DecryptSubkey(algorithm string, key []byte, r io.Reader) ([]byte, error) {
 func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, error) {
 	if config.DataAlgorithm != "AES256-GCM-SIV" {
 		return nil, fmt.Errorf("unsupported data encryption algorithm: %s", config.DataAlgorithm)
+	}
+
+	if r == nil {
+		return nil, fmt.Errorf("reader is nil")
 	}
 
 	// Generate a random subkey for data encryption
