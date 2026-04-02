@@ -119,20 +119,47 @@ func TestUnregister(t *testing.T) {
 }
 
 func TestBackends(t *testing.T) {
-	// Setup: Register some backends
-	con.Register("local1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
+	backendFn := func(
+		ctx context.Context,
+		opts *connectors.Options,
+		proto string,
+		config map[string]string,
+	) (con.Importer, error) {
 		return nil, nil
-	})
-	con.Register("remote1", 0, func(appCtx context.Context, opts *connectors.Options, name string, config map[string]string) (con.Importer, error) {
-		return nil, nil
+	}
+
+	t.Run("GetRegisteredBackends", func(t *testing.T) {
+		backendName1 := "test-backends-first"
+		backendName2 := "test-backends-second"
+
+		err := con.Register(backendName1, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = con.Register(backendName2, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = con.Unregister(backendName1)
+			_ = con.Unregister(backendName2)
+		})
+
+		backends := con.Backends()
+		require.Contains(t, backends, backendName1)
+		require.Contains(t, backends, backendName2)
 	})
 
-	// Test: Retrieve the list of registered backends
-	expectedBackends := []string{"local1", "remote1"}
-	actualBackends := con.Backends()
+	t.Run("DoNotGetUnregisteredBackends", func(t *testing.T) {
+		backendName := "test-backends-removed"
 
-	// Assert: Check if the actual backends match the expected
-	require.ElementsMatch(t, expectedBackends, actualBackends)
+		err := con.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = con.Unregister(backendName)
+		require.NoError(t, err)
+
+		backends := con.Backends()
+		require.NotContains(t, backends, backendName)
+	})
 }
 
 func TestNewImporter(t *testing.T) {
