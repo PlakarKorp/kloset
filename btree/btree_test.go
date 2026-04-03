@@ -262,6 +262,59 @@ func TestInsert(t *testing.T) {
 	})
 }
 
+func TestClose(t *testing.T) {
+	t.Run("Close_Twice", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, _ := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, tree.Close())
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("EmptyTree", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("Close_AfterInsert", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("Close_Fails_WhenStoreCloseFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+
+		closeErr := errors.New("Store.Close() failed")
+		storage.CloseFn = func() error { return closeErr }
+
+		err = tree.Close()
+		require.ErrorIs(t, err, closeErr)
+	})
+
+	t.Run("Close_Fails_BecauseStoreUpdateFailsOnFlush", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+
+		flushErr := errors.New("Store.Update() failed")
+		storage.UpdateFn = func(ptr int, n *btree.Node[rune, int, int]) error {
+			return flushErr
+		}
+		require.ErrorIs(t, tree.Close(), flushErr)
+	})
+}
+
 func TestFind(t *testing.T) {
 	t.Run("EmptyTree", func(t *testing.T) {
 		storage := btree.InMemoryStore_t[rune, int]{}
@@ -346,5 +399,252 @@ func TestFind(t *testing.T) {
 		_, _, err = fresh.Find('a')
 		require.Equal(t, call, 1)
 		require.ErrorIs(t, err, getErr)
+	})
+}
+
+func TestUpdate(t *testing.T) {
+	t.Run("UpdateNewKey_InsertInLeaf", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		err = tree.Update('k', 11)
+		require.NoError(t, err)
+
+		v, found, err := tree.Find('k')
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 11, v)
+	})
+
+	t.Run("UpdateSameKey_Overwrite", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		err = tree.Update('k', 1)
+		require.NoError(t, err)
+		err = tree.Update('k', 2)
+		require.NoError(t, err)
+
+		v, found, err := tree.Find('k')
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, 2, v)
+	})
+
+	t.Run("UpdateManyKeys_triggersSplits_butAllKeysPresent", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 4)
+		require.NoError(t, err)
+
+		const n = 1550
+		const upN = 450
+		base := rune(0)
+		for i := range n {
+			k := base + rune(i)
+			err = tree.Insert(k, i)
+			require.NoError(t, err)
+		}
+
+		for i := range n {
+			k := base + rune(i) + upN
+			err = tree.Update(k, i)
+			require.NoError(t, err)
+		}
+
+		for i := range n {
+			k := base + rune(i) + upN
+			v, found, err := tree.Find(k)
+			require.NoError(t, err)
+			require.True(t, found)
+			require.Equal(t, i, v)
+		}
+	})
+
+	t.Run("UpdateFails_BecauseStoreGetFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		getErr := errors.New("Store.Get() failed")
+		storage.GetFn = func(ptr int) (*btree.Node[rune, int, int], error) {
+			return nil, getErr
+		}
+
+		err = tree.Update('x', 99)
+		require.ErrorIs(t, err, getErr)
+	})
+
+	t.Run("UpdateFails_BecauseStorePutFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		for _, k := range []rune{'a', 'b', 'c', 'd', 'e', 'f'} {
+			require.NoError(t, tree.Insert(k, int(k)))
+		}
+
+		putErr := errors.New("Store.Put() failed")
+		storage.PutFn = func(*btree.Node[rune, int, int]) (int, error) {
+			return 0, putErr
+		}
+		err = tree.Update('x', 99)
+		require.ErrorIs(t, err, putErr)
+	})
+
+	t.Run("UpdateThenClose", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Update('a', 2))
+		require.NoError(t, tree.Close())
+	})
+
+	t.Run("UpdateFails_BecauseStoreUpdateFails", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.NoError(t, tree.Update('a', 2))
+
+		updateErr := errors.New("Store.Update() failed")
+		storage.UpdateFn = func(ptr int, n *btree.Node[rune, int, int]) error {
+			return updateErr
+		}
+
+		err = tree.Close()
+		require.ErrorIs(t, err, updateErr)
+	})
+}
+
+func TestCount(t *testing.T) {
+	t.Run("EmptyTree", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New(storage, cmp.Compare, 3)
+		require.NoError(t, err)
+		require.Equal(t, 0, tree.Count)
+	})
+
+	t.Run("Insert_onlyNewKeys", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		alphabet := []rune("abcdefghijklmnopqrstuvwxyz")
+		for i, r := range alphabet {
+			require.NoError(t, tree.Insert(r, i))
+			require.Equal(t, i+1, tree.Count)
+		}
+	})
+
+	t.Run("InsertDuplicates", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.Equal(t, 1, tree.Count)
+
+		require.ErrorIs(t, tree.Insert('a', 2), btree.ErrExists)
+		require.Equal(t, 1, tree.Count)
+	})
+
+	t.Run("UpdateExistingKey", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Insert('a', 1))
+		require.Equal(t, 1, tree.Count)
+
+		require.NoError(t, tree.Update('a', 99))
+		require.Equal(t, 1, tree.Count)
+	})
+
+	t.Run("UpdateOnMissingKey", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		require.NoError(t, tree.Update('x', 7))
+		require.Equal(t, 1, tree.Count)
+	})
+
+	t.Run("ManySameKeyInserts", func(t *testing.T) {
+		storage := &btree.InMemoryStore[rune, int]{}
+		tree, err := btree.New[rune, int, int](storage, cmp.Compare, 4)
+		require.NoError(t, err)
+
+		const n = 1000
+		for i := range 1000 {
+			require.NoError(t, tree.Insert(rune(i), i))
+		}
+		require.Equal(t, n, tree.Count)
+
+		for i := range n / 2 {
+			require.ErrorIs(t, tree.Insert(rune(i), i), btree.ErrExists)
+		}
+		require.Equal(t, n, tree.Count)
+	})
+}
+
+func TestStats(t *testing.T) {
+	t.Run("Stats_missThenHit", func(t *testing.T) {
+		storage := btree.InMemoryStore_t[rune, int]{}
+		tree, err := btree.New(&storage, cmp.Compare, 3)
+		require.NoError(t, err)
+
+		h0, m0, s0 := tree.Stats()
+		require.Zero(t, h0, "an new empty tree can not generate any access on cache")
+		require.Zero(t, m0, "an new empty tree should have an empty cache")
+		require.Zero(t, s0, "an new empty tree should have an empty cache")
+
+		// Trigger one cache miss + one item in cache
+		require.NoError(t, tree.Insert('a', 1))
+		h1, m1, s1 := tree.Stats()
+		require.Equal(t, h1, h0, "no hit should happend on a first insertion in cache")
+		require.Equal(t, m1, m0+1, "expected at least one cache miss on first insertion")
+		require.Equal(t, s1, s0+1, "cache size should increase once on first insertion")
+
+		// Trigger one access
+		_, _, err = tree.Find('a')
+		require.NoError(t, err)
+		h2, m2, s2 := tree.Stats()
+		require.Equal(t, h2, h1+1, "expected a hit on a cache access")
+		require.Equal(t, m2, m1, "expected no cache miss on an access")
+		require.Equal(t, s2, s1, "cache size should not vary on an access")
+
+		// Trigger one access again
+		_, _, err = tree.Find('a')
+		require.NoError(t, err)
+		h3, m3, s3 := tree.Stats()
+		require.Equal(t, h3, h2+1, "expected a hit on a cache access")
+		require.Equal(t, m3, m1, "expected no cache miss on an access")
+		require.Equal(t, s3, s1, "cache size should not vary on an access")
+
+		// Trigger one access yet again
+		require.NoError(t, tree.Update('a', 42))
+		h4, m4, s4 := tree.Stats()
+		require.Equal(t, h4, h3+1, "expected a hit on an cache update")
+		require.Equal(t, m4, m1, "expected no cache miss on an update")
+		require.Equal(t, s4, s1, "cache size should not increase on an update")
+
+		// Trigger cache flush
+		require.NoError(t, tree.Close())
+		h5, m5, s5 := tree.Stats()
+		require.Equal(t, h5, h4, "flushing the cache should not generate any access")
+		require.NotZero(t, m5, "flushing the cache should not reset the cache miss value")
+		require.Zero(t, s5, "flushing the cache should generate an empty cache")
+
+		// Trigger no access, a cache miss, one iten in cache
+		require.NoError(t, tree.Update('a', 2))
+		h6, m6, s6 := tree.Stats()
+		require.Equal(t, h6, h5, "expected no hit on an update after a flush")
+		require.Equal(t, m6, m5+1, "expected a cache miss on an update after a flush")
+		require.Equal(t, s6, s5+1, "cache size should increase on an update after a flush")
 	})
 }
