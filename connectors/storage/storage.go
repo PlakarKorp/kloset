@@ -17,8 +17,8 @@
 package storage
 
 import (
+	"bytes"
 	"context"
-	"encoding/binary"
 	"flag"
 	"fmt"
 	"io"
@@ -91,19 +91,27 @@ func NewConfigurationFromBytes(version versioning.Version, data []byte) (*Config
 }
 
 func NewConfigurationFromWrappedBytes(data []byte) (*Configuration, error) {
-	var configuration Configuration
+	hasher := hashing.GetHasher(DEFAULT_HASHING_ALGORITHM)
+	if hasher == nil {
+		return nil, fmt.Errorf("unsupported hashing algorithm: %s", DEFAULT_HASHING_ALGORITHM)
+	}
 
-	version := versioning.Version(binary.LittleEndian.Uint32(data[12:16]))
-
-	data = data[:len(data)-int(STORAGE_FOOTER_SIZE)]
-	data = data[STORAGE_HEADER_SIZE:]
-
-	err := msgpack.Unmarshal(data, &configuration)
+	version, reader, err := Deserialize(
+		hasher,
+		resources.RT_CONFIG,
+		io.NopCloser(bytes.NewReader(data)),
+	)
 	if err != nil {
 		return nil, err
 	}
-	configuration.Version = version
-	return &configuration, nil
+	defer reader.Close()
+
+	payload, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewConfigurationFromBytes(version, payload)
 }
 
 func (c *Configuration) ToBytes() ([]byte, error) {
