@@ -16,6 +16,7 @@ import (
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/resources"
@@ -347,6 +348,35 @@ func TestNewConfigurationFromWrappedBytes(t *testing.T) {
 		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
 		require.Nil(t, decoded)
 		require.EqualError(t, err, "hmac mismatch")
+	})
+}
+
+func TestRegister(t *testing.T) {
+	backendFn := func(
+		ctx context.Context,
+		proto string,
+		config map[string]string,
+	) (storage.Store, error) {
+		return nil, nil
+	}
+
+	t.Run("ValidBackendRegistration", func(t *testing.T) {
+		backendName := "test-register-backend"
+
+		err := storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		t.Cleanup(func() { _ = storage.Unregister(backendName) })
+		require.NoError(t, err)
+	})
+
+	t.Run("FailsIfBackendAlreadyRegistered", func(t *testing.T) {
+		backendName := "test-register-duplicate"
+
+		err := storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = storage.Unregister(backendName) })
+
+		err = storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.EqualError(t, err, "storage backend 'test-register-duplicate' already registered")
 	})
 }
 
