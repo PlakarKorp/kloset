@@ -6,9 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
-	"runtime"
 	"testing"
 	"time"
 
@@ -19,7 +17,6 @@ import (
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
-	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/resources"
@@ -792,31 +789,75 @@ func TestOpen(t *testing.T) {
 	})
 }
 
-func TestCreateStore(t *testing.T) {
-	ctx := kcontext.NewKContext()
-	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
+func TestCreate(t *testing.T) {
+	registerBackend := func(
+		t *testing.T,
+		name string,
+		flags location.Flags,
+		backendFn storage.StoreFn,
+	) {
+		t.Helper()
 
-	config := storage.NewConfiguration()
-	serializedConfig, err := config.ToBytes()
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		err := storage.Register(name, flags, backendFn)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = storage.Unregister(name) })
 	}
 
-	_, err = storage.Create(ctx, map[string]string{"location": "mock:///test/location"}, serializedConfig)
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
+	t.Run("ValidCreation", func(t *testing.T) {
+		expectedConfig := []byte("serialized config")
+		expectedStore := mockStore{}
+		registerBackend(t, "test-create-success", 0, newMockBackend(&expectedStore, nil))
+		appCtx := kcontext.NewKContext()
 
-	// should return an error as the backend Create will return an error
-	_, err = storage.Create(ctx, map[string]string{"location": "mock:///test/location/musterror"}, serializedConfig)
-	if err.Error() != "creating error" {
-		t.Fatalf("Expected %s but got %v", "opening error", err)
-	}
+		store, err := storage.Create(appCtx, map[string]string{
+			"location": "test-create-success://some/path",
+		}, expectedConfig)
 
-	// should return an error as the backend does not exist
-	_, err = storage.Create(ctx, map[string]string{"location": "unknown://dummy"}, serializedConfig)
-	if err.Error() != "backend 'unknown' does not exist" {
-		t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
-	}
+		require.NoError(t, err)
+		require.Same(t, &expectedStore, store)
+		require.True(t, expectedStore.createCalled)
+		require.Equal(t, expectedConfig, expectedStore.createInput)
+	})
+
+	t.Run("NilConfigurationIsValid", func(t *testing.T) {
+		expectedStore := mockStore{}
+		registerBackend(t, "test-create-nil-config", 0, newMockBackend(&expectedStore, nil))
+		appCtx := kcontext.NewKContext()
+
+		store, err := storage.Create(appCtx, map[string]string{
+			"location": "test-create-nil-config://some/path",
+		}, nil)
+		require.NoError(t, err)
+		require.Same(t, &expectedStore, store)
+		require.True(t, expectedStore.createCalled)
+		require.Nil(t, expectedStore.createInput)
+	})
+
+	t.Run("PropagatesStoreCreateError", func(t *testing.T) {
+		expectedErr := errors.New("creating error")
+		expectedConfig := []byte("serialized config")
+		expectedStore := mockStore{
+			createErr: expectedErr,
+		}
+		registerBackend(t, "test-create-error", 0, newMockBackend(&expectedStore, nil))
+		appCtx := kcontext.NewKContext()
+
+		store, err := storage.Create(appCtx, map[string]string{
+			"location": "test-create-error://some/path",
+		}, expectedConfig)
+		require.Nil(t, store)
+		require.ErrorIs(t, err, expectedErr)
+		require.True(t, expectedStore.createCalled)
+		require.Equal(t, expectedConfig, expectedStore.createInput)
+	})
+
+	t.Run("FailsIfStoreCreationFails", func(t *testing.T) {
+		appCtx := kcontext.NewKContext()
+
+		store, err := storage.Create(appCtx, map[string]string{
+			"location": "unknown://some/path",
+		}, []byte("serialized config"))
+		require.Nil(t, store)
+		require.EqualError(t, err, "backend 'unknown' does not exist")
+	})
 }
