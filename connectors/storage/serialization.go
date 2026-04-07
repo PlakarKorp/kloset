@@ -100,6 +100,10 @@ func (s *deserializeReader) Read(p []byte) (int, error) {
 			s.leftOver = s.leftOver[nFlush:]
 		}
 
+		if s.eof && len(s.leftOver) < 32 {
+			return total, io.ErrUnexpectedEOF
+		}
+
 		if s.eof && len(s.leftOver) == 32 {
 			copy(s.hmac[:], s.leftOver)
 			if !bytes.Equal(s.hmac[:], s.hasher.Sum(nil)) {
