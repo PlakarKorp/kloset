@@ -1,7 +1,10 @@
 package storage_test
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"io"
 	"os"
 	"runtime"
 	"testing"
@@ -15,6 +18,7 @@ import (
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/packfile"
+	"github.com/PlakarKorp/kloset/resources"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
@@ -181,6 +185,168 @@ func TestNewConfigurationFromBytes(t *testing.T) {
 		decoded, err := storage.NewConfigurationFromBytes(versioning.Version(1), []byte("not msgpack"))
 		require.Nil(t, decoded)
 		require.Error(t, err)
+	})
+}
+
+func TestNewConfigurationFromWrappedBytes(t *testing.T) {
+	t.Run("DeserializesWrappedConfiguration", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		require.NotNil(t, cfg)
+
+		payload, err := cfg.ToBytes()
+		require.NoError(t, err)
+
+		hasher := hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
+		require.NotNil(t, hasher)
+
+		wrappedReader, err := storage.Serialize(
+			hasher,
+			resources.RT_CONFIG,
+			versioning.Version(42),
+			bytes.NewReader(payload),
+		)
+		require.NoError(t, err)
+
+		wrappedData, err := io.ReadAll(wrappedReader)
+		require.NoError(t, err)
+
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.NoError(t, err)
+		require.NotNil(t, decoded)
+		require.Equal(t, versioning.Version(42), decoded.Version)
+		require.True(t, cfg.Timestamp.Equal(decoded.Timestamp))
+		require.Equal(t, cfg.RepositoryID, decoded.RepositoryID)
+		require.Equal(t, cfg.Packfile, decoded.Packfile)
+		require.Equal(t, cfg.Chunking, decoded.Chunking)
+		require.Equal(t, cfg.Hashing, decoded.Hashing)
+		require.Equal(t, cfg.Compression, decoded.Compression)
+		require.Equal(t, cfg.Encryption, decoded.Encryption)
+	})
+
+	t.Run("UsesVersionFromHeader", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		require.NotNil(t, cfg)
+
+		cfg.Version = versioning.Version(999)
+		payload, err := cfg.ToBytes()
+		require.NoError(t, err)
+
+		hasher := hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
+		require.NotNil(t, hasher)
+
+		wrappedReader, err := storage.Serialize(
+			hasher,
+			resources.RT_CONFIG,
+			versioning.Version(7),
+			bytes.NewReader(payload),
+		)
+		require.NoError(t, err)
+
+		wrappedData, err := io.ReadAll(wrappedReader)
+		require.NoError(t, err)
+
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.NoError(t, err)
+		require.NotNil(t, decoded)
+		require.Equal(t, versioning.Version(7), decoded.Version)
+	})
+
+	t.Run("Fails_IfPayloadIsInvalid", func(t *testing.T) {
+		wrappedReader, err := storage.Serialize(
+			sha256.New(),
+			resources.RT_CONFIG,
+			versioning.Version(1),
+			bytes.NewReader([]byte("not msgpack")),
+		)
+		require.NoError(t, err)
+
+		wrappedData, err := io.ReadAll(wrappedReader)
+		require.NoError(t, err)
+
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.Nil(t, decoded)
+		require.Error(t, err)
+	})
+
+	t.Run("Fails_IfDataIsTooShort", func(t *testing.T) {
+		decoded, err := storage.NewConfigurationFromWrappedBytes([]byte("short"))
+		require.Nil(t, decoded)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("Fails_IfMagicIsInvalid", func(t *testing.T) {
+		payload := []byte{0x80}
+		wrappedData := expectedSerializedData(
+			t,
+			"INVALID!",
+			resources.RT_CONFIG,
+			versioning.Version(1),
+			payload,
+		)
+
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.Nil(t, decoded)
+		require.EqualError(t, err, "invalid plakar magic: INVALID!")
+	})
+
+	t.Run("FailsIfWrappedResourceTypeIsInvalid", func(t *testing.T) {
+		payload := []byte{0x80}
+		wrappedData := expectedSerializedData(
+			t,
+			"_KLOSET_",
+			resources.Type(9999),
+			versioning.Version(1),
+			payload,
+		)
+
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.Nil(t, decoded)
+		require.EqualError(t, err, "invalid resource type")
+	})
+
+	t.Run("Fails_IfFooterIsTruncated", func(t *testing.T) {
+		hasher := hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
+		require.NotNil(t, hasher)
+
+		wrappedReader, err := storage.Serialize(
+			hasher,
+			resources.RT_CONFIG,
+			versioning.Version(2),
+			bytes.NewReader([]byte{}),
+		)
+		require.NoError(t, err)
+
+		wrappedData, err := io.ReadAll(wrappedReader)
+		require.NoError(t, err)
+
+		wrappedData = wrappedData[:len(wrappedData)-1]
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.Nil(t, decoded)
+		require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	})
+
+	t.Run("Fails_IfHMACIsInvalid", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		require.NotNil(t, cfg)
+
+		payload, err := cfg.ToBytes()
+		require.NoError(t, err)
+
+		wrappedReader, err := storage.Serialize(
+			sha256.New(),
+			resources.RT_CONFIG,
+			versioning.Version(3),
+			bytes.NewReader(payload),
+		)
+		require.NoError(t, err)
+
+		wrappedData, err := io.ReadAll(wrappedReader)
+		require.NoError(t, err)
+
+		wrappedData[len(wrappedData)-1] ^= 0xff
+		decoded, err := storage.NewConfigurationFromWrappedBytes(wrappedData)
+		require.Nil(t, decoded)
+		require.EqualError(t, err, "hmac mismatch")
 	})
 }
 
