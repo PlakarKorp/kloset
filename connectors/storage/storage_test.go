@@ -19,6 +19,7 @@ import (
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestStorageResourceString(t *testing.T) {
@@ -95,6 +96,48 @@ func TestNewConfiguration(t *testing.T) {
 		require.NotEqual(t, uuid.Nil, cfg1.RepositoryID)
 		require.NotEqual(t, uuid.Nil, cfg2.RepositoryID)
 		require.NotEqual(t, cfg1.RepositoryID, cfg2.RepositoryID)
+	})
+}
+
+func TestConfigurationToBytes(t *testing.T) {
+	t.Run("ValidConfiguration", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		cfg.Version = versioning.Version(42)
+
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+		require.NotEmpty(t, data)
+
+		var decoded storage.Configuration
+		err = msgpack.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+
+		require.True(t, cfg.Timestamp.Equal(decoded.Timestamp))
+		require.Equal(t, cfg.RepositoryID, decoded.RepositoryID)
+		require.Equal(t, cfg.Packfile, decoded.Packfile)
+		require.Equal(t, cfg.Chunking, decoded.Chunking)
+		require.Equal(t, cfg.Hashing, decoded.Hashing)
+		require.Equal(t, cfg.Compression, decoded.Compression)
+		require.Equal(t, cfg.Encryption, decoded.Encryption)
+		require.Equal(t, versioning.Version(0), decoded.Version)
+	})
+
+	t.Run("ConfigurationsWithoutCompressionAndEncryption", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		require.NotNil(t, cfg)
+
+		cfg.Compression = nil
+		cfg.Encryption = nil
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+		require.NotEmpty(t, data)
+
+		var decoded storage.Configuration
+		err = msgpack.Unmarshal(data, &decoded)
+		require.NoError(t, err)
+		require.Nil(t, decoded.Compression)
+		require.Nil(t, decoded.Encryption)
+		require.Equal(t, versioning.Version(0), decoded.Version)
 	})
 }
 
