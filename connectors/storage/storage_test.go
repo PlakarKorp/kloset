@@ -20,6 +20,7 @@ import (
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
@@ -27,6 +28,59 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/vmihailenco/msgpack/v5"
 )
+
+type mockStore struct {
+	openData []byte
+	openErr  error
+
+	createCalled bool
+	createInput  []byte
+	createErr    error
+}
+
+func (m *mockStore) Create(_ context.Context, data []byte) error {
+	m.createCalled = true
+	m.createInput = append([]byte(nil), data...)
+	return m.createErr
+}
+
+func (m *mockStore) Open(context.Context) ([]byte, error) {
+	return m.openData, m.openErr
+}
+
+func (m *mockStore) Ping(context.Context) error                 { return nil }
+func (m *mockStore) Origin() string                             { return "" }
+func (m *mockStore) Type() string                               { return "" }
+func (m *mockStore) Root() string                               { return "" }
+func (m *mockStore) Flags() location.Flags                      { return 0 }
+func (m *mockStore) Mode(context.Context) (storage.Mode, error) { return 0, nil }
+func (m *mockStore) Size(context.Context) (int64, error)        { return 0, nil }
+
+func (m *mockStore) List(context.Context, storage.StorageResource) ([]objects.MAC, error) {
+	return nil, nil
+}
+
+func (m *mockStore) Put(context.Context, storage.StorageResource, objects.MAC, io.Reader) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockStore) Get(context.Context, storage.StorageResource, objects.MAC, *storage.Range) (io.ReadCloser, error) {
+	return nil, nil
+}
+
+func (m *mockStore) Delete(context.Context, storage.StorageResource, objects.MAC) error {
+	return nil
+}
+
+func (m *mockStore) Close(context.Context) error {
+	return nil
+}
+
+func newMockBackend(store storage.Store, err error) storage.StoreFn {
+	return func(context.Context, string, map[string]string) (storage.Store, error) {
+		return store, err
+	}
+}
 
 func TestStorageResourceString(t *testing.T) {
 	t.Run("StorageResourceUndefined", func(t *testing.T) {
@@ -679,6 +733,65 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestOpen(t *testing.T) {
+	registerBackend := func(
+		t *testing.T,
+		name string,
+		flags location.Flags,
+		backendFn storage.StoreFn,
+	) {
+		t.Helper()
+
+		err := storage.Register(name, flags, backendFn)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = storage.Unregister(name) })
+	}
+
+	t.Run("ReturnsValidStoreAndSerializedConfig", func(t *testing.T) {
+		expectedData := []byte("serialized config")
+		expectedStore := mockStore{
+			openData: expectedData,
+		}
+		registerBackend(t, "test-open-success", 0, newMockBackend(&expectedStore, nil))
+		appCtx := kcontext.NewKContext()
+
+		store, serializedConfig, err := storage.Open(appCtx, map[string]string{
+			"location": "test-open-success://some/path",
+		})
+		require.NoError(t, err)
+		require.Same(t, &expectedStore, store)
+		require.Equal(t, expectedData, serializedConfig)
+	})
+
+	t.Run("PropagatesStoreOpenError", func(t *testing.T) {
+		expectedErr := errors.New("opening error")
+		expectedStore := &mockStore{
+			openErr: expectedErr,
+		}
+
+		registerBackend(t, "test-open-error", 0, newMockBackend(expectedStore, nil))
+		appCtx := kcontext.NewKContext()
+
+		store, serializedConfig, err := storage.Open(appCtx, map[string]string{
+			"location": "test-open-error://some/path",
+		})
+		require.Nil(t, store)
+		require.Nil(t, serializedConfig)
+		require.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("Fails_IfStoreCreationFails", func(t *testing.T) {
+		appCtx := kcontext.NewKContext()
+
+		store, serializedConfig, err := storage.Open(appCtx, map[string]string{
+			"location": "unknown://some/path",
+		})
+		require.Nil(t, store)
+		require.Nil(t, serializedConfig)
+		require.EqualError(t, err, "backend 'unknown' does not exist")
+	})
+}
+
 func TestCreateStore(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
@@ -703,33 +816,6 @@ func TestCreateStore(t *testing.T) {
 
 	// should return an error as the backend does not exist
 	_, err = storage.Create(ctx, map[string]string{"location": "unknown://dummy"}, serializedConfig)
-	if err.Error() != "backend 'unknown' does not exist" {
-		t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
-	}
-}
-
-func TestOpenStore(t *testing.T) {
-	ctx := kcontext.NewKContext()
-	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
-
-	store, _, err := storage.Open(ctx, map[string]string{"location": "mock:///test/location"})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
-	}
-
-	if loc := store.Origin(); loc != "mock:///test/location" {
-		t.Errorf("expected location to be '/test/location', got %v", loc)
-	}
-
-	// should return an error as the backend Open will return an error
-	_, _, err = storage.Open(ctx, map[string]string{"location": "mock:///test/location/musterror"})
-	if err.Error() != "opening error" {
-		t.Fatalf("Expected %s but got %v", "opening error", err)
-	}
-
-	// should return an error as the backend does not exist
-	_, _, err = storage.Open(ctx, map[string]string{"location": "unknown://dummy"})
 	if err.Error() != "backend 'unknown' does not exist" {
 		t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
 	}
