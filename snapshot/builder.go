@@ -327,8 +327,6 @@ func (snap *Builder) Unlock() {
 func (snap *Builder) flushDeltaState() {
 	for {
 		select {
-		case <-snap.appContext.Done():
-			return
 		case <-snap.flushEnd:
 			// End of backup we push the last and final State.
 			err := snap.repository.CommitTransaction(snap.stateId)
