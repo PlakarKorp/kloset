@@ -141,6 +141,49 @@ func TestConfigurationToBytes(t *testing.T) {
 	})
 }
 
+func TestNewConfigurationFromBytes(t *testing.T) {
+	t.Run("ValidConfiguration", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+
+		version := versioning.Version(42)
+		decoded, err := storage.NewConfigurationFromBytes(version, data)
+		require.NoError(t, err)
+		require.NotNil(t, decoded)
+
+		require.Equal(t, version, decoded.Version)
+		require.True(t, cfg.Timestamp.Equal(decoded.Timestamp))
+		require.Equal(t, cfg.RepositoryID, decoded.RepositoryID)
+		require.Equal(t, cfg.Packfile, decoded.Packfile)
+		require.Equal(t, cfg.Chunking, decoded.Chunking)
+		require.Equal(t, cfg.Hashing, decoded.Hashing)
+		require.Equal(t, cfg.Compression, decoded.Compression)
+		require.Equal(t, cfg.Encryption, decoded.Encryption)
+	})
+
+	t.Run("UsesVersionArgument", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		require.NotNil(t, cfg)
+
+		cfg.Version = versioning.Version(999)
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+
+		decoded, err := storage.NewConfigurationFromBytes(versioning.Version(7), data)
+		require.NoError(t, err)
+		require.NotNil(t, decoded)
+		require.Equal(t, versioning.Version(7), decoded.Version)
+	})
+
+	t.Run("Fails_IfDataInvalid", func(t *testing.T) {
+		decoded, err := storage.NewConfigurationFromBytes(versioning.Version(1), []byte("not msgpack"))
+		require.Nil(t, decoded)
+		require.Error(t, err)
+	})
+}
+
 func TestNewStore(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
