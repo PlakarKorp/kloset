@@ -20,7 +20,7 @@ func TestSourceDedupEqual(t *testing.T) {
 		FakeRoot: "/home/bar",
 	}
 
-	s, err := snapshot.NewSource(context.Background(), 0, imp1, imp2, imp3)
+	s, err := snapshot.NewSource(context.Background(), imp1, imp2, imp3)
 	require.NoError(t, err)
 
 	require.Len(t, s.Importers(), 1)
@@ -43,7 +43,7 @@ func TestSourceDedupCommonPrefix(t *testing.T) {
 		FakeRoot: "/home/bar",
 	}
 
-	s, err := snapshot.NewSource(t.Context(), 0, imp1, imp2, imp3, imp4, imp5)
+	s, err := snapshot.NewSource(t.Context(), imp1, imp2, imp3, imp4, imp5)
 	require.NoError(t, err)
 
 	roots := []string{}

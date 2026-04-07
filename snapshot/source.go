@@ -28,10 +28,9 @@ type Source struct {
 	failure error
 }
 
-func NewSource(ctx context.Context, flags location.Flags, importers ...importer.Importer) (*Source, error) {
+func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, error) {
 	s := &Source{
 		ctx:      ctx,
-		flags:    flags,
 		excludes: exclude.NewRuleSet(),
 	}
 
