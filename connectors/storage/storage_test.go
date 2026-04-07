@@ -20,7 +20,6 @@ import (
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/resources"
-	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -422,6 +421,49 @@ func TestUnregister(t *testing.T) {
 	})
 }
 
+func TestBackends(t *testing.T) {
+	backendFn := func(
+		ctx context.Context,
+		proto string,
+		config map[string]string,
+	) (storage.Store, error) {
+		return nil, nil
+	}
+
+	t.Run("GetRegisteredBackends", func(t *testing.T) {
+		backendName1 := "test-backends-first"
+		backendName2 := "test-backends-second"
+
+		err := storage.Register(backendName1, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = storage.Register(backendName2, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = storage.Unregister(backendName1)
+			_ = storage.Unregister(backendName2)
+		})
+
+		backends := storage.Backends()
+		require.Contains(t, backends, backendName1)
+		require.Contains(t, backends, backendName2)
+	})
+
+	t.Run("DoNotGetUnregisteredBackends", func(t *testing.T) {
+		backendName := "test-backends-removed"
+
+		err := storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = storage.Unregister(backendName)
+		require.NoError(t, err)
+
+		backends := storage.Backends()
+		require.NotContains(t, backends, backendName)
+	})
+}
+
 func TestNewStore(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
@@ -497,73 +539,4 @@ func TestOpenStore(t *testing.T) {
 	if err.Error() != "backend 'unknown' does not exist" {
 		t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
 	}
-}
-
-func TestBackends(t *testing.T) {
-	ctx := kcontext.NewKContext()
-	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
-
-	storage.Register("test", 0, func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
-		return &ptesting.MockBackend{}, nil
-	})
-
-	expected := []string{"mock", "test"}
-	actual := storage.Backends()
-	require.Equal(t, expected, actual)
-}
-
-func TestNew(t *testing.T) {
-	locations := []string{
-		"foo",
-		"bar",
-		"baz",
-		"quux",
-	}
-
-	for _, name := range locations {
-		t.Run(name, func(t *testing.T) {
-			ctx := kcontext.NewKContext()
-			ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-			ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
-
-			storage.Register(name, 0, func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
-				return ptesting.NewMockBackend(storeConfig), nil
-			})
-
-			location := name + ":///test/location"
-
-			store, err := storage.New(ctx, map[string]string{"location": location})
-			if err != nil {
-				t.Fatalf("expected no error, got %v", err)
-			}
-
-			if loc := store.Origin(); loc != location {
-				t.Errorf("expected location to be '%s', got %v", location, loc)
-			}
-		})
-	}
-
-	t.Run("unknown backend", func(t *testing.T) {
-		ctx := kcontext.NewKContext()
-		ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-		ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
-
-		// storage.Register("unknown", func(location string) storage.Store { return ptesting.NewMockBackend(location) })
-		_, err := storage.New(ctx, map[string]string{"location": "unknown://dummy"})
-		if err.Error() != "backend 'unknown' does not exist" {
-			t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
-		}
-	})
-
-	t.Run("absolute fs path", func(t *testing.T) {
-		ctx := kcontext.NewKContext()
-		ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-		ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
-
-		// storage.Register("unknown", func(location string) storage.Store { return ptesting.NewMockBackend(location) })
-		store, err := storage.New(ctx, map[string]string{"location": "dummy"})
-		require.Nil(t, store)
-		require.ErrorContains(t, err, "backend 'fs' does not exist")
-	})
 }
