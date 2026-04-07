@@ -5,11 +5,19 @@ import (
 	"os"
 	"runtime"
 	"testing"
+	"time"
 
+	"github.com/PlakarKorp/kloset/chunking"
+	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/connectors/storage"
+	"github.com/PlakarKorp/kloset/encryption"
+	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
+	"github.com/PlakarKorp/kloset/packfile"
 	ptesting "github.com/PlakarKorp/kloset/testing"
+	"github.com/PlakarKorp/kloset/versioning"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -40,6 +48,53 @@ func TestStorageResourceString(t *testing.T) {
 
 	t.Run("UnknownStorageResource", func(t *testing.T) {
 		require.Equal(t, "unknown", storage.StorageResource(999).String())
+	})
+}
+
+func TestNewConfiguration(t *testing.T) {
+	t.Run("ReturnsDefaultConfiguration", func(t *testing.T) {
+		before := time.Now()
+		cfg := storage.NewConfiguration()
+		after := time.Now()
+
+		require.NotNil(t, cfg)
+		require.Equal(t, versioning.FromString(storage.VERSION), cfg.Version)
+
+		require.False(t, cfg.Timestamp.IsZero())
+		require.False(t, cfg.Timestamp.Before(before))
+		require.False(t, cfg.Timestamp.After(after))
+
+		require.NotEqual(t, uuid.Nil, cfg.RepositoryID)
+
+		require.Equal(t, *packfile.NewDefaultConfiguration(), cfg.Packfile)
+		require.Equal(t, *chunking.NewDefaultConfiguration(), cfg.Chunking)
+		require.Equal(t, *hashing.NewDefaultConfiguration(), cfg.Hashing)
+
+		require.NotNil(t, cfg.Compression)
+		require.Equal(t, *compression.NewDefaultConfiguration(), *cfg.Compression)
+
+		expectedEncryption := encryption.NewDefaultConfiguration()
+		require.NotNil(t, cfg.Encryption)
+		require.Equal(t, expectedEncryption.SubKeyAlgorithm, cfg.Encryption.SubKeyAlgorithm)
+		require.Equal(t, expectedEncryption.DataAlgorithm, cfg.Encryption.DataAlgorithm)
+		require.Equal(t, expectedEncryption.ChunkSize, cfg.Encryption.ChunkSize)
+		require.Equal(t, expectedEncryption.KDFParams.KDF, cfg.Encryption.KDFParams.KDF)
+		require.Len(t, cfg.Encryption.KDFParams.Salt, len(expectedEncryption.KDFParams.Salt))
+		require.NotNil(t, cfg.Encryption.KDFParams.Argon2idParams)
+		require.Nil(t, cfg.Encryption.KDFParams.ScryptParams)
+		require.Nil(t, cfg.Encryption.KDFParams.Pbkdf2Params)
+		require.Equal(t, expectedEncryption.Canary, cfg.Encryption.Canary)
+	})
+
+	t.Run("TwoNewConfigurations_DistinctRepositoryIDs", func(t *testing.T) {
+		cfg1 := storage.NewConfiguration()
+		cfg2 := storage.NewConfiguration()
+
+		require.NotNil(t, cfg1)
+		require.NotNil(t, cfg2)
+		require.NotEqual(t, uuid.Nil, cfg1.RepositoryID)
+		require.NotEqual(t, uuid.Nil, cfg2.RepositoryID)
+		require.NotEqual(t, cfg1.RepositoryID, cfg2.RepositoryID)
 	})
 }
 
