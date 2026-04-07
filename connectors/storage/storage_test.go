@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"errors"
 	"io"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 	"time"
@@ -464,25 +466,217 @@ func TestBackends(t *testing.T) {
 	})
 }
 
-func TestNewStore(t *testing.T) {
-	ctx := kcontext.NewKContext()
-	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
-	ctx.MaxConcurrency = runtime.NumCPU()*8 + 1
+func TestNew(t *testing.T) {
+	registerBackend := func(
+		t *testing.T,
+		name string,
+		flags location.Flags,
+		backendFn storage.StoreFn,
+	) {
+		t.Helper()
 
-	store, err := storage.New(ctx, map[string]string{"location": "mock:///test/location"})
-	if err != nil {
-		t.Fatalf("expected no error, got %v", err)
+		err := storage.Register(name, flags, backendFn)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = storage.Unregister(name) })
 	}
 
-	if loc := store.Origin(); loc != "mock:///test/location" {
-		t.Errorf("expected location to be '/test/location', got %v", loc)
-	}
+	t.Run("Fails_IfLocationIsMissing", func(t *testing.T) {
+		appCtx := kcontext.NewKContext()
 
-	// should return an error as the backend does not exist
-	_, err = storage.New(ctx, map[string]string{"location": "unknown:///test/location"})
-	if err.Error() != "backend 'unknown' does not exist" {
-		t.Fatalf("Expected %s but got %v", "backend 'unknown' does not exist", err)
-	}
+		store, err := storage.New(appCtx, map[string]string{})
+		require.Nil(t, store)
+		require.EqualError(t, err, "missing location")
+	})
+
+	t.Run("Fails_IfBackendDoesNotExist", func(t *testing.T) {
+		appCtx := kcontext.NewKContext()
+
+		store, err := storage.New(appCtx, map[string]string{
+			"location": "unknown://some/path",
+		})
+		require.Nil(t, store)
+		require.EqualError(t, err, "backend 'unknown' does not exist")
+	})
+
+	t.Run("UseDefaultFSProtocolForRelativeLocalPath", func(t *testing.T) {
+		var (
+			called           bool
+			receivedCtx      context.Context
+			receivedProto    string
+			receivedLocation string
+			receivedConfig   map[string]string
+		)
+
+		backend := func(
+			ctx context.Context,
+			proto string,
+			storeConfig map[string]string,
+		) (storage.Store, error) {
+			called = true
+			receivedCtx = ctx
+			receivedProto = proto
+			receivedLocation = storeConfig["location"]
+			receivedConfig = storeConfig
+			return nil, nil
+		}
+
+		registerBackend(t, "fs", location.FLAG_LOCALFS, backend)
+
+		appCtx := kcontext.NewKContext()
+		appCtx.CWD = t.TempDir()
+		storeConfig := map[string]string{
+			"location": "relative/path",
+		}
+
+		store, err := storage.New(appCtx, storeConfig)
+		require.NoError(t, err)
+		require.Nil(t, store)
+		require.True(t, called)
+		require.Same(t, appCtx, receivedCtx)
+		require.Equal(t, "fs", receivedProto)
+		expectedLocation := "fs://" + filepath.Join(appCtx.CWD, "relative/path")
+		require.Equal(t, expectedLocation, receivedLocation)
+		require.Equal(t, expectedLocation, storeConfig["location"])
+		require.Equal(t, storeConfig, receivedConfig)
+	})
+
+	t.Run("KeepAbsoluteLocalPathUnchanged", func(t *testing.T) {
+		var (
+			receivedProto    string
+			receivedLocation string
+		)
+
+		backend := func(
+			ctx context.Context,
+			proto string,
+			storeConfig map[string]string,
+		) (storage.Store, error) {
+			receivedProto = proto
+			receivedLocation = storeConfig["location"]
+			return nil, nil
+		}
+
+		registerBackend(t, "fs", location.FLAG_LOCALFS, backend)
+
+		appCtx := kcontext.NewKContext()
+		absolutePath := filepath.Join(t.TempDir(), "some", "path")
+		storeConfig := map[string]string{
+			"location": "fs://" + absolutePath,
+		}
+
+		store, err := storage.New(appCtx, storeConfig)
+		require.NoError(t, err)
+		require.Nil(t, store)
+		require.Equal(t, "fs", receivedProto)
+		require.Equal(t, "fs://"+absolutePath, receivedLocation)
+		require.Equal(t, "fs://"+absolutePath, storeConfig["location"])
+	})
+
+	t.Run("DoNotRewriteNonLocalLocation", func(t *testing.T) {
+		var (
+			receivedProto    string
+			receivedLocation string
+		)
+
+		backend := func(
+			ctx context.Context,
+			proto string,
+			storeConfig map[string]string,
+		) (storage.Store, error) {
+			receivedProto = proto
+			receivedLocation = storeConfig["location"]
+			return nil, nil
+		}
+
+		registerBackend(t, "s3", 0, backend)
+
+		appCtx := kcontext.NewKContext()
+		storeConfig := map[string]string{
+			"location": "s3://bucket/path",
+		}
+
+		store, err := storage.New(appCtx, storeConfig)
+		require.NoError(t, err)
+		require.Nil(t, store)
+		require.Equal(t, "s3", receivedProto)
+		require.Equal(t, "s3://bucket/path", receivedLocation)
+		require.Equal(t, "s3://bucket/path", storeConfig["location"])
+	})
+
+	t.Run("RedirectFSArchiveToPTARBackend", func(t *testing.T) {
+		var (
+			fsCalled            bool
+			ptarCalled          bool
+			receivedProto       string
+			receivedLocation    string
+			receivedStoreConfig map[string]string
+		)
+
+		fsBackend := func(
+			ctx context.Context,
+			proto string,
+			storeConfig map[string]string,
+		) (storage.Store, error) {
+			fsCalled = true
+			return nil, nil
+		}
+
+		ptarBackend := func(
+			ctx context.Context,
+			proto string,
+			storeConfig map[string]string,
+		) (storage.Store, error) {
+			ptarCalled = true
+			receivedProto = proto
+			receivedLocation = storeConfig["location"]
+			receivedStoreConfig = storeConfig
+			return nil, nil
+		}
+
+		registerBackend(t, "fs", location.FLAG_LOCALFS, fsBackend)
+		registerBackend(t, "ptar", 0, ptarBackend)
+
+		appCtx := kcontext.NewKContext()
+		appCtx.CWD = t.TempDir()
+
+		storeConfig := map[string]string{
+			"location": "archive.ptar",
+		}
+
+		store, err := storage.New(appCtx, storeConfig)
+		require.NoError(t, err)
+		require.Nil(t, store)
+		require.False(t, fsCalled)
+		require.True(t, ptarCalled)
+		require.Equal(t, "ptar", receivedProto)
+		expectedLocation := "ptar://" + filepath.Join(appCtx.CWD, "archive.ptar")
+		require.Equal(t, expectedLocation, receivedLocation)
+		require.Equal(t, expectedLocation, storeConfig["location"])
+		require.Equal(t, storeConfig, receivedStoreConfig)
+	})
+
+	t.Run("PropagateBackendError", func(t *testing.T) {
+		expectedErr := errors.New("backend failure")
+
+		backend := func(
+			ctx context.Context,
+			proto string,
+			storeConfig map[string]string,
+		) (storage.Store, error) {
+			return nil, expectedErr
+		}
+
+		registerBackend(t, "s3", 0, backend)
+
+		appCtx := kcontext.NewKContext()
+		storeConfig := map[string]string{
+			"location": "s3://bucket/path",
+		}
+
+		store, err := storage.New(appCtx, storeConfig)
+		require.Nil(t, store)
+		require.ErrorIs(t, err, expectedErr)
+	})
 }
 
 func TestCreateStore(t *testing.T) {
