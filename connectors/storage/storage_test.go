@@ -13,6 +13,36 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestStorageResourceString(t *testing.T) {
+	t.Run("StorageResourceUndefined", func(t *testing.T) {
+		require.Equal(t, "undefined", storage.StorageResourceUndefined.String())
+	})
+
+	t.Run("StorageResourcePackfile", func(t *testing.T) {
+		require.Equal(t, "packfile", storage.StorageResourcePackfile.String())
+	})
+
+	t.Run("StorageResourceState", func(t *testing.T) {
+		require.Equal(t, "state", storage.StorageResourceState.String())
+	})
+
+	t.Run("StorageResourceLock", func(t *testing.T) {
+		require.Equal(t, "lock", storage.StorageResourceLock.String())
+	})
+
+	t.Run("StorageResourceECCPackfile", func(t *testing.T) {
+		require.Equal(t, "ECC packfile", storage.StorageResourceECCPackfile.String())
+	})
+
+	t.Run("StorageResourceECCState", func(t *testing.T) {
+		require.Equal(t, "ECC state", storage.StorageResourceECCState.String())
+	})
+
+	t.Run("UnknownStorageResource", func(t *testing.T) {
+		require.Equal(t, "unknown", storage.StorageResource(999).String())
+	})
+}
+
 func TestNewStore(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
