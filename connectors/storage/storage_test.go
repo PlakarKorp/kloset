@@ -380,6 +380,48 @@ func TestRegister(t *testing.T) {
 	})
 }
 
+func TestUnregister(t *testing.T) {
+	backendFn := func(
+		ctx context.Context,
+		proto string,
+		config map[string]string,
+	) (storage.Store, error) {
+		return nil, nil
+	}
+
+	t.Run("ValidBackendUnregistration", func(t *testing.T) {
+		backendName := "test-unregister-backend"
+
+		err := storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = storage.Unregister(backendName)
+		require.NoError(t, err)
+	})
+
+	t.Run("Fails_IfBackendNotRegistered", func(t *testing.T) {
+		backendName := "test-unregister-missing"
+
+		err := storage.Unregister(backendName)
+		require.EqualError(t, err, "storage backend 'test-unregister-missing' not registered")
+	})
+
+	t.Run("Register->Unregister->Register", func(t *testing.T) {
+		backendName := "test-unregister-reregister"
+
+		err := storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = storage.Unregister(backendName)
+		require.NoError(t, err)
+
+		err = storage.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() { _ = storage.Unregister(backendName) })
+	})
+}
+
 func TestNewStore(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logging.NewLogger(os.Stdout, os.Stderr))
