@@ -158,34 +158,48 @@ func TestYears(t *testing.T) {
 	})
 }
 
-func TestWeeks_Key_And_Start(t *testing.T) {
-	// ISO week tricky boundary: 2021-01-01 is still 2020-W53
-	d1 := mustParse(t, "2020-12-31T10:00:00Z")
-	if got, want := loc.Weeks.Key(d1), "2020-W53"; got != want {
-		t.Fatalf("Weeks.Key 2020-12-31: got %q want %q", got, want)
-	}
-	d2 := mustParse(t, "2021-01-01T10:00:00Z")
-	if got, want := loc.Weeks.Key(d2), "2020-W53"; got != want {
-		t.Fatalf("Weeks.Key 2021-01-01: got %q want %q", got, want)
-	}
+func TestWeeks(t *testing.T) {
+	t.Run("Key", func(t *testing.T) {
+		t.Run("returns ISO week for a regular date", func(t *testing.T) {
+			got := loc.Weeks.Key(dateRef)
+			require.Equal(t, "2023-W11", got)
+		})
 
-	// Start is Monday 00:00:00Z of the ISO week.
-	wd := mustParse(t, "2023-03-15T13:45:00Z") // Wed
-	start := loc.Weeks.Start(wd)
-	if got, want := start, mustParse(t, "2023-03-13T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Weeks.Start (Wed): got %v want %v", got, want)
-	}
+		t.Run("handles ISO year boundary", func(t *testing.T) {
+			input := time.Date(2021, 1, 1, 10, 0, 0, 0, time.UTC)
+			got := loc.Weeks.Key(input)
+			require.Equal(t, "2020-W53", got)
+		})
+	})
 
-	// For a Sunday, start is the previous Monday.
-	sun := mustParse(t, "2023-03-19T23:59:59Z")
-	if got, want := loc.Weeks.Start(sun), mustParse(t, "2023-03-13T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Weeks.Start (Sun): got %v want %v", got, want)
-	}
+	t.Run("Start", func(t *testing.T) {
+		t.Run("returns monday at midnight for a weekday", func(t *testing.T) {
+			got := loc.Weeks.Start(dateRef)
+			want := time.Date(2023, 3, 13, 0, 0, 0, 0, time.UTC)
+			require.Equal(t, want, got)
+		})
 
-	// Prev goes back one week exactly.
-	if got, want := loc.Weeks.Prev(start), mustParse(t, "2023-03-06T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Weeks.Prev: got %v want %v", got, want)
-	}
+		t.Run("returns previous monday for a sunday", func(t *testing.T) {
+			input := time.Date(2023, 3, 19, 23, 59, 59, 0, time.UTC)
+			got := loc.Weeks.Start(input)
+			want := time.Date(2023, 3, 13, 0, 0, 0, 0, time.UTC)
+			require.Equal(t, want, got)
+		})
+
+		t.Run("normalizes input from another timezone", func(t *testing.T) {
+			input := time.Date(2023, 7, 9, 23, 59, 59, 0, time.FixedZone("UTC-4", -4*60*60))
+			got := loc.Weeks.Start(input)
+			want := time.Date(2023, 7, 10, 0, 0, 0, 0, time.UTC)
+			require.Equal(t, want, got)
+		})
+	})
+
+	t.Run("Prev", func(t *testing.T) {
+		start := loc.Weeks.Start(dateRef)
+		got := loc.Weeks.Prev(start)
+		want := time.Date(2023, 3, 6, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
 }
 
 // --- weekday-aligned periods (with date+name key) ---
