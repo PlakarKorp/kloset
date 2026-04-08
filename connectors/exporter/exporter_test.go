@@ -83,3 +83,47 @@ func TestUnregister(t *testing.T) {
 		t.Cleanup(func() { _ = xport.Unregister(backendName) })
 	})
 }
+
+func TestBackends(t *testing.T) {
+	backendFn := func(
+		ctx context.Context,
+		opts *connectors.Options,
+		proto string,
+		config map[string]string,
+	) (xport.Exporter, error) {
+		return nil, nil
+	}
+
+	t.Run("GetRegisteredBackends", func(t *testing.T) {
+		backendName1 := "test-exporter-backends-first"
+		backendName2 := "test-exporter-backends-second"
+
+		err := xport.Register(backendName1, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = xport.Register(backendName2, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		t.Cleanup(func() {
+			_ = xport.Unregister(backendName1)
+			_ = xport.Unregister(backendName2)
+		})
+
+		backends := xport.Backends()
+		require.Contains(t, backends, backendName1)
+		require.Contains(t, backends, backendName2)
+	})
+
+	t.Run("DoNotGetUnregisteredBackends", func(t *testing.T) {
+		backendName := "test-exporter-backends-removed"
+
+		err := xport.Register(backendName, location.FLAG_LOCALFS, backendFn)
+		require.NoError(t, err)
+
+		err = xport.Unregister(backendName)
+		require.NoError(t, err)
+
+		backends := xport.Backends()
+		require.NotContains(t, backends, backendName)
+	})
+}
