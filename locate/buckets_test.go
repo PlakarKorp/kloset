@@ -7,6 +7,8 @@ import (
 	loc "github.com/PlakarKorp/kloset/locate"
 )
 
+var dateRef = time.Date(2023, time.March, 15, 13, 45, 59, 0, time.UTC)
+
 // --- helpers ---
 
 func mustParse(t *testing.T, s string) time.Time {
@@ -21,40 +23,37 @@ func mustParse(t *testing.T, s string) time.Time {
 // --- standard periods ---
 
 func TestMinutes(t *testing.T) {
-	now := mustParse(t, "2023-03-15T13:45:59Z")
-	if got, want := loc.Minutes.Key(now), "2023-03-15-13:45"; got != want {
+	if got, want := loc.Minutes.Key(dateRef), "2023-03-15-13:45"; got != want {
 		t.Fatalf("Minutes.Key: got %q want %q", got, want)
 	}
-	if got, want := loc.Minutes.Start(now), mustParse(t, "2023-03-15T13:45:00Z"); !got.Equal(want) {
+	if got, want := loc.Minutes.Start(dateRef), mustParse(t, "2023-03-15T13:45:00Z"); !got.Equal(want) {
 		t.Fatalf("Minutes.Start: got %v want %v", got, want)
 	}
-	if got, want := loc.Minutes.Prev(loc.Minutes.Start(now)), mustParse(t, "2023-03-15T13:44:00Z"); !got.Equal(want) {
+	if got, want := loc.Minutes.Prev(loc.Minutes.Start(dateRef)), mustParse(t, "2023-03-15T13:44:00Z"); !got.Equal(want) {
 		t.Fatalf("Minutes.Prev: got %v want %v", got, want)
 	}
 }
 
 func TestHours(t *testing.T) {
-	now := mustParse(t, "2023-03-15T13:45:59Z")
-	if got, want := loc.Hours.Key(now), "2023-03-15-13"; got != want {
+	if got, want := loc.Hours.Key(dateRef), "2023-03-15-13"; got != want {
 		t.Fatalf("Hours.Key: got %q want %q", got, want)
 	}
-	if got, want := loc.Hours.Start(now), mustParse(t, "2023-03-15T13:00:00Z"); !got.Equal(want) {
+	if got, want := loc.Hours.Start(dateRef), mustParse(t, "2023-03-15T13:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Hours.Start: got %v want %v", got, want)
 	}
-	if got, want := loc.Hours.Prev(loc.Hours.Start(now)), mustParse(t, "2023-03-15T12:00:00Z"); !got.Equal(want) {
+	if got, want := loc.Hours.Prev(loc.Hours.Start(dateRef)), mustParse(t, "2023-03-15T12:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Hours.Prev: got %v want %v", got, want)
 	}
 }
 
 func TestDays(t *testing.T) {
-	now := mustParse(t, "2023-03-15T13:45:59Z")
-	if got, want := loc.Days.Key(now), "2023-03-15"; got != want {
+	if got, want := loc.Days.Key(dateRef), "2023-03-15"; got != want {
 		t.Fatalf("Days.Key: got %q want %q", got, want)
 	}
-	if got, want := loc.Days.Start(now), mustParse(t, "2023-03-15T00:00:00Z"); !got.Equal(want) {
+	if got, want := loc.Days.Start(dateRef), mustParse(t, "2023-03-15T00:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Days.Start: got %v want %v", got, want)
 	}
-	if got, want := loc.Days.Prev(loc.Days.Start(now)), mustParse(t, "2023-03-14T00:00:00Z"); !got.Equal(want) {
+	if got, want := loc.Days.Prev(loc.Days.Start(dateRef)), mustParse(t, "2023-03-14T00:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Days.Prev: got %v want %v", got, want)
 	}
 }
