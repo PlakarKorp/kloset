@@ -123,3 +123,63 @@ func TestLazyReaderRead(t *testing.T) {
 		require.Equal(t, 1, openCalls)
 	})
 }
+
+func TestLazyReaderClose(t *testing.T) {
+	t.Run("DoesNothingIfReaderWasNeverOpened", func(t *testing.T) {
+		openCalls := 0
+		reader := con.NewLazyReader(func() (io.ReadCloser, error) {
+			openCalls++
+			return &readerReadCloser{reader: strings.NewReader("hello")}, nil
+		})
+
+		err := reader.Close()
+		require.NoError(t, err)
+		require.Equal(t, 0, openCalls)
+	})
+
+	t.Run("CloseOpenedReader", func(t *testing.T) {
+		underlying := &readerReadCloser{reader: strings.NewReader("hello")}
+		reader := con.NewLazyReader(func() (io.ReadCloser, error) {
+			return underlying, nil
+		})
+
+		buf := make([]byte, 1)
+		_, err := reader.Read(buf)
+		require.NoError(t, err)
+
+		err = reader.Close()
+		require.NoError(t, err)
+		require.Equal(t, 1, underlying.closeCalls)
+	})
+
+	t.Run("ReturnStoredOpenError", func(t *testing.T) {
+		expectedErr := errors.New("open failure")
+		reader := con.NewLazyReader(func() (io.ReadCloser, error) {
+			return nil, expectedErr
+		})
+
+		_, err := reader.Read(make([]byte, 1))
+		require.ErrorIs(t, err, expectedErr)
+
+		err = reader.Close()
+		require.ErrorIs(t, err, expectedErr)
+	})
+
+	t.Run("PropagatesReaderCloseError", func(t *testing.T) {
+		expectedErr := errors.New("close failure")
+		underlying := &readerReadCloser{
+			reader:   strings.NewReader("hello"),
+			closeErr: expectedErr,
+		}
+		reader := con.NewLazyReader(func() (io.ReadCloser, error) {
+			return underlying, nil
+		})
+
+		_, err := reader.Read(make([]byte, 1))
+		require.NoError(t, err)
+
+		err = reader.Close()
+		require.ErrorIs(t, err, expectedErr)
+		require.Equal(t, 1, underlying.closeCalls)
+	})
+}
