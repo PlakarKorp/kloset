@@ -64,17 +64,22 @@ func TestParseFlag(t *testing.T) {
 }
 
 func TestRegister(t *testing.T) {
-	loc := location.New[string]("default")
+	t.Run("NewItem", func(t *testing.T) {
+		loc := location.New[string]("default")
 
-	// Test successful registration
-	if !loc.Register("test", "value", 0) {
-		t.Error("Register failed to register new item")
-	}
+		ok := loc.Register("test", "value", location.FLAG_LOCALFS)
+		require.True(t, ok)
+	})
 
-	// Test duplicate registration
-	if loc.Register("test", "value2", 0) {
-		t.Error("Register succeeded when it should have failed for duplicate")
-	}
+	t.Run("FailsIfDuplicateName", func(t *testing.T) {
+		loc := location.New[string]("default")
+
+		ok := loc.Register("test", "value", location.FLAG_LOCALFS)
+		require.True(t, ok)
+
+		ok = loc.Register("test", "other-value", location.FLAG_FILE)
+		require.False(t, ok)
+	})
 }
 
 func TestNames(t *testing.T) {
