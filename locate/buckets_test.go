@@ -131,6 +131,33 @@ func TestMonths(t *testing.T) {
 	})
 }
 
+func TestYears(t *testing.T) {
+	t.Run("Key", func(t *testing.T) {
+		got := loc.Years.Key(dateRef)
+		require.Equal(t, "2023", got)
+	})
+
+	t.Run("Start", func(t *testing.T) {
+		got := loc.Years.Start(dateRef)
+		want := time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Prev", func(t *testing.T) {
+		start := loc.Years.Start(dateRef)
+		got := loc.Years.Prev(start)
+		want := time.Date(2022, 1, 1, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("normalizes input from another timezone", func(t *testing.T) {
+		input := time.Date(2023, 12, 31, 23, 59, 59, 0, time.FixedZone("UTC-4", -4*60*60))
+		got := loc.Years.Start(input)
+		want := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+}
+
 func TestWeeks_Key_And_Start(t *testing.T) {
 	// ISO week tricky boundary: 2021-01-01 is still 2020-W53
 	d1 := mustParse(t, "2020-12-31T10:00:00Z")
@@ -158,19 +185,6 @@ func TestWeeks_Key_And_Start(t *testing.T) {
 	// Prev goes back one week exactly.
 	if got, want := loc.Weeks.Prev(start), mustParse(t, "2023-03-06T00:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Weeks.Prev: got %v want %v", got, want)
-	}
-}
-
-func TestYears(t *testing.T) {
-	now := mustParse(t, "2023-08-05T11:22:33Z")
-	if got, want := loc.Years.Key(now), "2023"; got != want {
-		t.Fatalf("Years.Key: got %q want %q", got, want)
-	}
-	if got, want := loc.Years.Start(now), mustParse(t, "2023-01-01T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Years.Start: got %v want %v", got, want)
-	}
-	if got, want := loc.Years.Prev(loc.Years.Start(now)), mustParse(t, "2022-01-01T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Years.Prev: got %v want %v", got, want)
 	}
 }
 
