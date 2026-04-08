@@ -248,3 +248,71 @@ func TestLookup(t *testing.T) {
 		require.True(t, found)
 	})
 }
+
+func TestLocationLifecycle(t *testing.T) {
+	t.Run("Register->Lookup", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("http", "http-value", location.FLAG_LOCALFS|location.FLAG_FILE)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("http://example.com")
+		require.Equal(t, "http", proto)
+		require.Equal(t, "example.com", locationValue)
+		require.Equal(t, "http-value", item)
+		require.Equal(t, location.FLAG_LOCALFS|location.FLAG_FILE, flags)
+		require.True(t, found)
+	})
+
+	t.Run("Register->Unregister->Lookup", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("http", "http-value", location.FLAG_LOCALFS)
+		require.True(t, ok)
+
+		ok = loc.Unregister("http")
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("http://example.com")
+		require.Equal(t, "http", proto)
+		require.Equal(t, "example.com", locationValue)
+		require.Empty(t, item)
+		require.Zero(t, flags)
+		require.False(t, found)
+	})
+
+	t.Run("FullLifecycle", func(t *testing.T) {
+		loc := location.New[string]("default")
+		require.True(t, loc.Register("fs", "first-value", location.FLAG_LOCALFS))
+		require.True(t, loc.Register("s3", "s3-value", location.FLAG_STREAM))
+
+		names := loc.Names()
+		require.Equal(t, []string{"fs", "s3"}, names)
+
+		proto, locationValue, item, flags, found := loc.Lookup("fs:///tmp/file")
+		require.Equal(t, "fs", proto)
+		require.Equal(t, "/tmp/file", locationValue)
+		require.Equal(t, "first-value", item)
+		require.Equal(t, location.FLAG_LOCALFS, flags)
+		require.True(t, found)
+
+		require.True(t, loc.Unregister("fs"))
+
+		proto, locationValue, item, flags, found = loc.Lookup("fs:///tmp/file")
+		require.Equal(t, "fs", proto)
+		require.Equal(t, "/tmp/file", locationValue)
+		require.Empty(t, item)
+		require.Zero(t, flags)
+		require.False(t, found)
+
+		require.True(t, loc.Register("fs", "second-value", location.FLAG_FILE))
+
+		proto, locationValue, item, flags, found = loc.Lookup("fs:///tmp/file")
+		require.Equal(t, "fs", proto)
+		require.Equal(t, "/tmp/file", locationValue)
+		require.Equal(t, "second-value", item)
+		require.Equal(t, location.FLAG_FILE, flags)
+		require.True(t, found)
+
+		names = loc.Names()
+		require.Equal(t, []string{"fs", "s3"}, names)
+	})
+}
