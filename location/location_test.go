@@ -82,6 +82,38 @@ func TestRegister(t *testing.T) {
 	})
 }
 
+func TestUnregister(t *testing.T) {
+	t.Run("ExistingItem", func(t *testing.T) {
+		loc := location.New[string]("default")
+
+		ok := loc.Register("test", "value", 0)
+		require.True(t, ok)
+
+		ok = loc.Unregister("test")
+		require.True(t, ok)
+	})
+
+	t.Run("FailsIfItemDoesNotExist", func(t *testing.T) {
+		loc := location.New[string]("default")
+
+		ok := loc.Unregister("missing")
+		require.False(t, ok)
+	})
+
+	t.Run("Register ->Unregister->Register", func(t *testing.T) {
+		loc := location.New[string]("default")
+
+		ok := loc.Register("test", "value", 0)
+		require.True(t, ok)
+
+		ok = loc.Unregister("test")
+		require.True(t, ok)
+
+		ok = loc.Register("test", "other-value", 0)
+		require.True(t, ok)
+	})
+}
+
 func TestNames(t *testing.T) {
 	loc := location.New[string]("default")
 	expected := []string{"a", "b", "c"}
