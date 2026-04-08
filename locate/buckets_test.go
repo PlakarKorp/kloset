@@ -5,6 +5,7 @@ import (
 	"time"
 
 	loc "github.com/PlakarKorp/kloset/locate"
+	"github.com/stretchr/testify/require"
 )
 
 var dateRef = time.Date(2023, time.March, 15, 13, 45, 59, 0, time.UTC)
@@ -21,6 +22,33 @@ func mustParse(t *testing.T, s string) time.Time {
 }
 
 // --- standard periods ---
+
+func TestDays(t *testing.T) {
+	t.Run("Key", func(t *testing.T) {
+		got := loc.Days.Key(dateRef)
+		require.Equal(t, "2023-03-15", got)
+	})
+
+	t.Run("Start", func(t *testing.T) {
+		got := loc.Days.Start(dateRef)
+		want := time.Date(2023, 3, 15, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Prev", func(t *testing.T) {
+		start := loc.Days.Start(dateRef)
+		got := loc.Days.Prev(start)
+		want := time.Date(2023, 3, 14, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("normalizes input from another timezone", func(t *testing.T) {
+		input := time.Date(2023, 7, 4, 23, 59, 59, 0, time.FixedZone("UTC-4", -4*60*60))
+		got := loc.Days.Start(input)
+		want := time.Date(2023, 7, 5, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+}
 
 func TestMinutes(t *testing.T) {
 	if got, want := loc.Minutes.Key(dateRef), "2023-03-15-13:45"; got != want {
@@ -43,18 +71,6 @@ func TestHours(t *testing.T) {
 	}
 	if got, want := loc.Hours.Prev(loc.Hours.Start(dateRef)), mustParse(t, "2023-03-15T12:00:00Z"); !got.Equal(want) {
 		t.Fatalf("Hours.Prev: got %v want %v", got, want)
-	}
-}
-
-func TestDays(t *testing.T) {
-	if got, want := loc.Days.Key(dateRef), "2023-03-15"; got != want {
-		t.Fatalf("Days.Key: got %q want %q", got, want)
-	}
-	if got, want := loc.Days.Start(dateRef), mustParse(t, "2023-03-15T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Days.Start: got %v want %v", got, want)
-	}
-	if got, want := loc.Days.Prev(loc.Days.Start(dateRef)), mustParse(t, "2023-03-14T00:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Days.Prev: got %v want %v", got, want)
 	}
 }
 
