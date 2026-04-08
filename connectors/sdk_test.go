@@ -237,3 +237,92 @@ func TestNewRecord(t *testing.T) {
 		})
 	})
 }
+
+func TestNewXattr(t *testing.T) {
+	t.Run("InitializeWithMetadata", func(t *testing.T) {
+		var kind objects.Attribute
+		openCalls := 0
+
+		record := con.NewXattr(
+			"file.txt",
+			"user.mime_type",
+			kind,
+			func() (io.ReadCloser, error) {
+				openCalls++
+				return &sdkReadCloser{reader: strings.NewReader("payload")}, nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.Equal(t, "file.txt", record.Pathname)
+		require.True(t, record.IsXattr)
+		require.Equal(t, "user.mime_type", record.XattrName)
+		require.Equal(t, kind, record.XattrType)
+		require.NotNil(t, record.Reader)
+		require.Equal(t, 0, openCalls)
+
+		buf := make([]byte, 7)
+		n, err := record.Reader.Read(buf)
+		require.NoError(t, err)
+		require.Equal(t, 7, n)
+		require.Equal(t, "payload", string(buf))
+		require.Equal(t, 1, openCalls)
+	})
+
+	t.Run("DefaultUnsetFieldsToZeroValues", func(t *testing.T) {
+		var kind objects.Attribute
+		record := con.NewXattr(
+			"file.txt",
+			"user.mime_type",
+			kind,
+			func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("payload")), nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.NoError(t, record.Err)
+		require.Empty(t, record.Target)
+		require.Nil(t, record.ExtendedAttributes)
+		require.Zero(t, record.FileAttributes)
+		require.Empty(t, record.FileInfo)
+	})
+
+	t.Run("AcceptEmptyStringFields", func(t *testing.T) {
+		var kind objects.Attribute
+		record := con.NewXattr(
+			"",
+			"",
+			kind,
+			func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("payload")), nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.Empty(t, record.Pathname)
+		require.True(t, record.IsXattr)
+		require.Empty(t, record.XattrName)
+		require.Equal(t, kind, record.XattrType)
+		require.Empty(t, record.FileInfo)
+	})
+
+	t.Run("PanicWhenReadFuncIsNil", func(t *testing.T) {
+		var readFn func() (io.ReadCloser, error)
+		var kind objects.Attribute
+
+		record := con.NewXattr(
+			"file.txt",
+			"user.mime_type",
+			kind,
+			readFn,
+		)
+
+		require.NotNil(t, record)
+		require.NotNil(t, record.Reader)
+
+		require.Panics(t, func() {
+			_, _ = record.Reader.Read(make([]byte, 1))
+		})
+	})
+}
