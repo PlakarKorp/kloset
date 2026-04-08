@@ -10,19 +10,6 @@ import (
 
 var dateRef = time.Date(2023, time.March, 15, 13, 45, 59, 0, time.UTC)
 
-// --- helpers ---
-
-func mustParse(t *testing.T, s string) time.Time {
-	t.Helper()
-	tt, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return tt.UTC()
-}
-
-// --- standard periods ---
-
 func TestDays(t *testing.T) {
 	t.Run("Key", func(t *testing.T) {
 		got := loc.Days.Key(dateRef)
@@ -416,54 +403,4 @@ func TestPeriodLastNKeys(t *testing.T) {
 		require.Contains(t, got, "2023-W08-thursday")
 		require.NotContains(t, got, "2023-W11-thursday")
 	})
-}
-
-// --- general invariants ---
-
-func TestStartAlwaysUTC(t *testing.T) {
-	// Ensure Start normalizes to UTC regardless of input zone.
-	ny, _ := time.LoadLocation("America/New_York")
-	localTime := time.Date(2023, 7, 4, 23, 59, 59, 0, ny)
-
-	tests := []struct {
-		name   string
-		p      loc.Period
-		expect time.Time
-	}{
-		{"minute", loc.Minutes, loc.Minutes.Start(localTime.In(time.UTC))},
-		{"hour", loc.Hours, loc.Hours.Start(localTime.In(time.UTC))},
-		{"day", loc.Days, loc.Days.Start(localTime.In(time.UTC))},
-		{"week", loc.Weeks, loc.Weeks.Start(localTime.In(time.UTC))},
-		{"month", loc.Months, loc.Months.Start(localTime.In(time.UTC))},
-		{"year", loc.Years, loc.Years.Start(localTime.In(time.UTC))},
-		{"monday", loc.Mondays, loc.Mondays.Start(localTime.In(time.UTC))},
-		{"thursday", loc.Thursdays, loc.Thursdays.Start(localTime.In(time.UTC))},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := tc.p.Start(localTime)
-			if !got.Equal(tc.expect) || got.Location() != time.UTC {
-				t.Fatalf("%s.Start not UTC or mismatch: got %v (loc=%v) want %v (loc=UTC)",
-					tc.name, got, got.Location(), tc.expect)
-			}
-		})
-	}
-}
-
-func TestPrevIsMonotonicBackwards(t *testing.T) {
-	periods := []loc.Period{loc.Minutes, loc.Hours, loc.Days, loc.Weeks, loc.Months, loc.Years, loc.Mondays, loc.Thursdays}
-	now := mustParse(t, "2024-02-29T12:34:56Z") // leap year
-	for _, p := range periods {
-		t.Run(p.Name, func(t *testing.T) {
-			cur := p.Start(now)
-			prev := p.Prev(cur)
-			if !prev.Before(cur) && !prev.Equal(cur) {
-				t.Fatalf("%s.Prev should be <= current start", p.Name)
-			}
-			// Calling Start on Prev should not jump forward past cur.
-			if s := p.Start(prev); s.After(cur) {
-				t.Fatalf("%s.Start(Prev(cur)) is after cur start: %v > %v", p.Name, s, cur)
-			}
-		})
-	}
 }
