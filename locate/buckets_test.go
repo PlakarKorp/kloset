@@ -404,3 +404,42 @@ func TestPeriodLastNKeys(t *testing.T) {
 		require.NotContains(t, got, "2023-W11-thursday")
 	})
 }
+
+func TestPrevMonotonicBackwards(t *testing.T) {
+	references := []struct {
+		name string
+		ref  time.Time
+	}{
+		{name: "regular date", ref: dateRef},
+		{name: "leap day", ref: time.Date(2024, 2, 29, 12, 34, 56, 0, time.UTC)},
+	}
+
+	periods := []struct {
+		name   string
+		period loc.Period
+	}{
+		{name: "Days", period: loc.Days},
+		{name: "Minutes", period: loc.Minutes},
+		{name: "Hours", period: loc.Hours},
+		{name: "Months", period: loc.Months},
+		{name: "Years", period: loc.Years},
+		{name: "Weeks", period: loc.Weeks},
+		{name: "Mondays", period: loc.Mondays},
+		{name: "Thursdays", period: loc.Thursdays},
+	}
+
+	for _, ref := range references {
+		t.Run(ref.name, func(t *testing.T) {
+			for _, tt := range periods {
+				t.Run(tt.name, func(t *testing.T) {
+					start := tt.period.Start(ref.ref)
+					prev := tt.period.Prev(start)
+					prevStart := tt.period.Start(prev)
+
+					require.True(t, prev.Before(start), "Prev(%v) should be before %v", prev, start)
+					require.False(t, prevStart.After(start), "Start(Prev(start)) = %v should not be after %v", prevStart, start)
+				})
+			}
+		})
+	}
+}
