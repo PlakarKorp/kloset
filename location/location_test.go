@@ -15,6 +15,54 @@ func TestNew(t *testing.T) {
 	})
 }
 
+func TestParseFlag(t *testing.T) {
+	tests := []struct {
+		input    string
+		wantFlag location.Flags
+		wantErr  error
+	}{
+		{
+			input:    "localfs",
+			wantFlag: location.FLAG_LOCALFS,
+		},
+		{
+			input:    "file",
+			wantFlag: location.FLAG_FILE,
+		},
+		{
+			input:    "stream",
+			wantFlag: location.FLAG_STREAM,
+		},
+		{
+			input:    "needack",
+			wantFlag: location.FLAG_NEEDACK,
+		},
+		{
+			input:    "nomerge",
+			wantFlag: location.FLAG_NOMERGE,
+		},
+		{
+			input:    "unknown",
+			wantFlag: 0,
+			wantErr:  location.ErrUnknownFlag,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run("_"+tt.input, func(t *testing.T) {
+			flag, err := location.ParseFlag(tt.input)
+
+			if tt.input == "unknown" {
+				require.ErrorIs(t, err, tt.wantErr)
+				require.Zero(t, flag)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantFlag, flag)
+		})
+	}
+}
+
 func TestRegister(t *testing.T) {
 	loc := location.New[string]("default")
 
