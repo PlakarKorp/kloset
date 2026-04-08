@@ -326,3 +326,38 @@ func TestNewXattr(t *testing.T) {
 		})
 	})
 }
+
+func TestNewError(t *testing.T) {
+	t.Run("Initialize", func(t *testing.T) {
+		expectedErr := errors.New("record failure")
+		record := con.NewError("file.txt", expectedErr)
+
+		require.NotNil(t, record)
+		require.Equal(t, "file.txt", record.Pathname)
+		require.ErrorIs(t, record.Err, expectedErr)
+		require.Nil(t, record.Reader)
+		require.Empty(t, record.Target)
+		require.False(t, record.IsXattr)
+		require.Empty(t, record.XattrName)
+		require.Zero(t, record.XattrType)
+		require.Empty(t, record.FileInfo)
+		require.Nil(t, record.ExtendedAttributes)
+		require.Zero(t, record.FileAttributes)
+	})
+
+	t.Run("AcceptEmptyPathnameAndNilError", func(t *testing.T) {
+		record := con.NewError("", nil)
+
+		require.NotNil(t, record)
+		require.Empty(t, record.Pathname)
+		require.NoError(t, record.Err)
+		require.Nil(t, record.Reader)
+		require.Empty(t, record.Target)
+		require.False(t, record.IsXattr)
+		require.Empty(t, record.XattrName)
+		require.Zero(t, record.XattrType)
+		require.Empty(t, record.FileInfo)
+		require.Nil(t, record.ExtendedAttributes)
+		require.Zero(t, record.FileAttributes)
+	})
+}
