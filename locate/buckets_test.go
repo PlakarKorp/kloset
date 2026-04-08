@@ -378,24 +378,44 @@ func TestWeekdayAliases(t *testing.T) {
 	}
 }
 
-func TestLastNKeys_Weekday_Monday(t *testing.T) {
-	// Anchor on a Wednesday; the aligned Monday is 2025-08-25
-	now := mustParse(t, "2025-08-27T12:00:00Z")
-	keys := loc.Mondays.LastNKeys(now, 3)
+func TestPeriodLastNKeys(t *testing.T) {
+	t.Run("returns empty map when n is zero", func(t *testing.T) {
+		got := loc.Days.LastNKeys(dateRef, 0)
+		require.Empty(t, got)
+	})
 
-	want := map[string]struct{}{
-		"2025-W35-monday": {},
-		"2025-W34-monday": {},
-		"2025-W33-monday": {},
-	}
-	if len(keys) != len(want) {
-		t.Fatalf("LastNKeys Monday len: got %d want %d", len(keys), len(want))
-	}
-	for k := range want {
-		if _, ok := keys[k]; !ok {
-			t.Fatalf("LastNKeys Monday missing key %q", k)
-		}
-	}
+	t.Run("returns last N day keys including current day bucket", func(t *testing.T) {
+		got := loc.Days.LastNKeys(dateRef, 3)
+		require.Len(t, got, 3)
+		require.Contains(t, got, "2023-03-15")
+		require.Contains(t, got, "2023-03-14")
+		require.Contains(t, got, "2023-03-13")
+	})
+
+	t.Run("returns last N minute keys including current minute bucket", func(t *testing.T) {
+		got := loc.Minutes.LastNKeys(dateRef, 3)
+		require.Len(t, got, 3)
+		require.Contains(t, got, "2023-03-15-13:45")
+		require.Contains(t, got, "2023-03-15-13:44")
+		require.Contains(t, got, "2023-03-15-13:43")
+	})
+
+	t.Run("returns last N weekday alias keys from aligned buckets", func(t *testing.T) {
+		got := loc.Mondays.LastNKeys(dateRef, 3)
+		require.Len(t, got, 3)
+		require.Contains(t, got, "2023-W11-monday")
+		require.Contains(t, got, "2023-W10-monday")
+		require.Contains(t, got, "2023-W09-monday")
+	})
+
+	t.Run("uses previous bucket when aligned weekday start is after now", func(t *testing.T) {
+		got := loc.Thursdays.LastNKeys(dateRef, 3)
+		require.Len(t, got, 3)
+		require.Contains(t, got, "2023-W10-thursday")
+		require.Contains(t, got, "2023-W09-thursday")
+		require.Contains(t, got, "2023-W08-thursday")
+		require.NotContains(t, got, "2023-W11-thursday")
+	})
 }
 
 // --- general invariants ---
@@ -445,12 +465,5 @@ func TestPrevIsMonotonicBackwards(t *testing.T) {
 				t.Fatalf("%s.Start(Prev(cur)) is after cur start: %v > %v", p.Name, s, cur)
 			}
 		})
-	}
-}
-
-func TestLastNKeys_NIsZero_ReturnsEmpty(t *testing.T) {
-	got := loc.Days.LastNKeys(time.Now().UTC(), 0)
-	if len(got) != 0 {
-		t.Fatalf("LastNKeys with n=0: got %d keys, want 0", len(got))
 	}
 }
