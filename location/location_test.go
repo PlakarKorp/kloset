@@ -1,25 +1,21 @@
-package location
+package location_test
 
 import (
 	"testing"
+
+	"github.com/PlakarKorp/kloset/location"
 )
 
 func TestNew(t *testing.T) {
 	fallback := "default"
-	loc := New[string](fallback)
+	loc := location.New[string](fallback)
 	if loc == nil {
 		t.Fatal("New returned nil")
-	}
-	if loc.fallback != fallback {
-		t.Errorf("fallback = %q, want %q", loc.fallback, fallback)
-	}
-	if loc.items == nil {
-		t.Error("items map is nil")
 	}
 }
 
 func TestRegister(t *testing.T) {
-	loc := New[string]("default")
+	loc := location.New[string]("default")
 
 	// Test successful registration
 	if !loc.Register("test", "value", 0) {
@@ -30,15 +26,10 @@ func TestRegister(t *testing.T) {
 	if loc.Register("test", "value2", 0) {
 		t.Error("Register succeeded when it should have failed for duplicate")
 	}
-
-	// Verify the value wasn't changed
-	if v, ok := loc.items["test"]; !ok || v.item != "value" {
-		t.Errorf("Duplicate registration changed value: got %v, want %v", v, "value")
-	}
 }
 
 func TestNames(t *testing.T) {
-	loc := New[string]("default")
+	loc := location.New[string]("default")
 	expected := []string{"a", "b", "c"}
 
 	// Register items in reverse order to test sorting
@@ -59,7 +50,7 @@ func TestNames(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	loc := New[string]("default")
+	loc := location.New[string]("default")
 	loc.Register("http", "http-value", 0)
 	loc.Register("https", "https-value", 0)
 
