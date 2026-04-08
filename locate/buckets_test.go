@@ -78,15 +78,30 @@ func TestMinutes(t *testing.T) {
 }
 
 func TestHours(t *testing.T) {
-	if got, want := loc.Hours.Key(dateRef), "2023-03-15-13"; got != want {
-		t.Fatalf("Hours.Key: got %q want %q", got, want)
-	}
-	if got, want := loc.Hours.Start(dateRef), mustParse(t, "2023-03-15T13:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Hours.Start: got %v want %v", got, want)
-	}
-	if got, want := loc.Hours.Prev(loc.Hours.Start(dateRef)), mustParse(t, "2023-03-15T12:00:00Z"); !got.Equal(want) {
-		t.Fatalf("Hours.Prev: got %v want %v", got, want)
-	}
+	t.Run("Key", func(t *testing.T) {
+		got := loc.Hours.Key(dateRef)
+		require.Equal(t, "2023-03-15-13", got)
+	})
+
+	t.Run("Start", func(t *testing.T) {
+		got := loc.Hours.Start(dateRef)
+		want := time.Date(2023, 3, 15, 13, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Prev", func(t *testing.T) {
+		start := loc.Hours.Start(dateRef)
+		got := loc.Hours.Prev(start)
+		want := time.Date(2023, 3, 15, 12, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("normalizes input from another timezone", func(t *testing.T) {
+		input := time.Date(2023, 7, 4, 23, 59, 59, 0, time.FixedZone("UTC-4", -4*60*60))
+		got := loc.Hours.Start(input)
+		want := time.Date(2023, 7, 5, 3, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
 }
 
 func TestWeeks_Key_And_Start(t *testing.T) {
