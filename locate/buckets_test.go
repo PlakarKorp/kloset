@@ -268,6 +268,116 @@ func TestWeekdayPeriod(t *testing.T) {
 	})
 }
 
+func TestWeekdayAliases(t *testing.T) {
+	tests := []struct {
+		name      string
+		period    loc.Period
+		target    time.Weekday
+		wantName  string
+		wantStart time.Time
+		wantPrev  time.Time
+		wantKey   string
+	}{
+		{
+			name:      "Mondays",
+			period:    loc.Mondays,
+			target:    time.Monday,
+			wantName:  "monday",
+			wantStart: time.Date(2023, 3, 13, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 6, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-monday",
+		},
+		{
+			name:      "Tuesdays",
+			period:    loc.Tuesdays,
+			target:    time.Tuesday,
+			wantName:  "tuesday",
+			wantStart: time.Date(2023, 3, 14, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 7, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-tuesday",
+		},
+		{
+			name:      "Wednesdays",
+			period:    loc.Wednesdays,
+			target:    time.Wednesday,
+			wantName:  "wednesday",
+			wantStart: time.Date(2023, 3, 15, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 8, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-wednesday",
+		},
+		{
+			name:      "Thursdays",
+			period:    loc.Thursdays,
+			target:    time.Thursday,
+			wantName:  "thursday",
+			wantStart: time.Date(2023, 3, 16, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 9, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-thursday",
+		},
+		{
+			name:      "Fridays",
+			period:    loc.Fridays,
+			target:    time.Friday,
+			wantName:  "friday",
+			wantStart: time.Date(2023, 3, 17, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 10, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-friday",
+		},
+		{
+			name:      "Saturdays",
+			period:    loc.Saturdays,
+			target:    time.Saturday,
+			wantName:  "saturday",
+			wantStart: time.Date(2023, 3, 18, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 11, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-saturday",
+		},
+		{
+			name:      "Sundays",
+			period:    loc.Sundays,
+			target:    time.Sunday,
+			wantName:  "sunday",
+			wantStart: time.Date(2023, 3, 19, 0, 0, 0, 0, time.UTC),
+			wantPrev:  time.Date(2023, 3, 12, 0, 0, 0, 0, time.UTC),
+			wantKey:   "2023-W11-sunday",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Run("Name", func(t *testing.T) {
+				require.Equal(t, tt.wantName, tt.period.Name)
+			})
+
+			t.Run("Start", func(t *testing.T) {
+				got := tt.period.Start(dateRef)
+				require.Equal(t, tt.wantStart, got)
+			})
+
+			t.Run("Prev", func(t *testing.T) {
+				start := tt.period.Start(dateRef)
+				got := tt.period.Prev(start)
+				require.Equal(t, tt.wantPrev, got)
+			})
+
+			t.Run("Key", func(t *testing.T) {
+				start := tt.period.Start(dateRef)
+				got := tt.period.Key(start)
+				require.Equal(t, tt.wantKey, got)
+			})
+
+			t.Run("matches factory output", func(t *testing.T) {
+				factory := loc.WeekdayPeriod(tt.target)
+				start := tt.period.Start(dateRef)
+				require.Equal(t, factory.Name, tt.period.Name)
+				require.Equal(t, factory.Start(dateRef), tt.period.Start(dateRef))
+				require.Equal(t, factory.Prev(start), tt.period.Prev(start))
+				require.Equal(t, factory.Key(start), tt.period.Key(start))
+			})
+		})
+	}
+}
+
 func TestLastNKeys_Weekday_Monday(t *testing.T) {
 	// Anchor on a Wednesday; the aligned Monday is 2025-08-25
 	now := mustParse(t, "2025-08-27T12:00:00Z")
