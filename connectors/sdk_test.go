@@ -89,3 +89,39 @@ func TestRecordOk(t *testing.T) {
 		require.Equal(t, 1, reader.closeCalls)
 	})
 }
+
+func TestRecordError(t *testing.T) {
+	t.Run("ReturnFailedResultAndCloseReader", func(t *testing.T) {
+		expectedErr := errors.New("record failure")
+		reader := sdkReadCloser{reader: strings.NewReader("hello")}
+		record := con.Record{
+			Reader:   &reader,
+			Pathname: "file.txt",
+			Target:   "target",
+		}
+
+		result := record.Error(expectedErr)
+		require.NotNil(t, result)
+		require.ErrorIs(t, result.Err, expectedErr)
+		require.Equal(t, record, result.Record)
+		require.Equal(t, 1, reader.closeCalls)
+	})
+
+	t.Run("IgnoreCloseError", func(t *testing.T) {
+		expectedErr := errors.New("record failure")
+		reader := sdkReadCloser{
+			reader:   strings.NewReader("hello"),
+			closeErr: errors.New("close failure"),
+		}
+		record := con.Record{
+			Reader:   &reader,
+			Pathname: "file.txt",
+		}
+
+		result := record.Error(expectedErr)
+		require.NotNil(t, result)
+		require.ErrorIs(t, result.Err, expectedErr)
+		require.Equal(t, record, result.Record)
+		require.Equal(t, 1, reader.closeCalls)
+	})
+}
