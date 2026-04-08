@@ -443,3 +443,85 @@ func TestPrevMonotonicBackwards(t *testing.T) {
 		})
 	}
 }
+
+func TestWeeksCalendarBoundaries(t *testing.T) {
+	t.Run("Key handles ISO year boundary", func(t *testing.T) {
+		input := time.Date(2021, 1, 1, 10, 0, 0, 0, time.UTC)
+		got := loc.Weeks.Key(input)
+		require.Equal(t, "2020-W53", got)
+	})
+
+	t.Run("Start aligns sunday to previous ISO monday across year boundary", func(t *testing.T) {
+		input := time.Date(2021, 1, 3, 23, 59, 59, 0, time.UTC)
+		got := loc.Weeks.Start(input)
+		want := time.Date(2020, 12, 28, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Prev crosses ISO year boundary", func(t *testing.T) {
+		start := loc.Weeks.Start(time.Date(2021, 1, 4, 12, 0, 0, 0, time.UTC))
+		got := loc.Weeks.Prev(start)
+		want := time.Date(2020, 12, 28, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+}
+
+func TestMonthsCalendarBoundaries(t *testing.T) {
+	t.Run("Start truncates to first day of month at end of month", func(t *testing.T) {
+		input := time.Date(2023, 3, 31, 22, 10, 0, 0, time.UTC)
+		got := loc.Months.Start(input)
+		want := time.Date(2023, 3, 1, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Prev crosses from march to february in a regular year", func(t *testing.T) {
+		start := loc.Months.Start(time.Date(2023, 3, 15, 13, 45, 59, 0, time.UTC))
+		got := loc.Months.Prev(start)
+		want := time.Date(2023, 2, 1, 0, 0, 0, 0, time.UTC)
+
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Prev crosses from march to february in a leap year", func(t *testing.T) {
+		start := loc.Months.Start(time.Date(2024, 3, 15, 13, 45, 59, 0, time.UTC))
+		got := loc.Months.Prev(start)
+		want := time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC)
+
+		require.Equal(t, want, got)
+	})
+
+	t.Run("normalizes timezone at month boundary", func(t *testing.T) {
+		input := time.Date(2023, 3, 31, 23, 30, 0, 0, time.FixedZone("UTC-4", -4*60*60))
+		got := loc.Months.Start(input)
+		want := time.Date(2023, 4, 1, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+}
+
+func TestLeapYearBoundaries(t *testing.T) {
+	t.Run("Days Key handles leap day", func(t *testing.T) {
+		input := time.Date(2024, 2, 29, 12, 34, 56, 0, time.UTC)
+		got := loc.Days.Key(input)
+		require.Equal(t, "2024-02-29", got)
+	})
+
+	t.Run("Days Prev crosses from leap day to previous day", func(t *testing.T) {
+		start := loc.Days.Start(time.Date(2024, 2, 29, 12, 34, 56, 0, time.UTC))
+		got := loc.Days.Prev(start)
+		want := time.Date(2024, 2, 28, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Weeks Start keeps leap day inside its ISO week", func(t *testing.T) {
+		input := time.Date(2024, 2, 29, 12, 34, 56, 0, time.UTC)
+		got := loc.Weeks.Start(input)
+		want := time.Date(2024, 2, 26, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Weeks Key handles leap day", func(t *testing.T) {
+		input := time.Date(2024, 2, 29, 12, 34, 56, 0, time.UTC)
+		got := loc.Weeks.Key(input)
+		require.Equal(t, "2024-W09", got)
+	})
+}
