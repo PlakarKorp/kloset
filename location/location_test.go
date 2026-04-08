@@ -4,14 +4,15 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/kloset/location"
+	"github.com/stretchr/testify/require"
 )
 
 func TestNew(t *testing.T) {
-	fallback := "default"
-	loc := location.New[string](fallback)
-	if loc == nil {
-		t.Fatal("New returned nil")
-	}
+	t.Run("InitializeEmptyLocation", func(t *testing.T) {
+		loc := location.New[string]("default")
+		require.NotNil(t, loc)
+		require.Empty(t, loc.Names())
+	})
 }
 
 func TestRegister(t *testing.T) {
