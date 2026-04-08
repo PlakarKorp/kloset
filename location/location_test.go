@@ -146,83 +146,105 @@ func TestNames(t *testing.T) {
 }
 
 func TestLookup(t *testing.T) {
-	loc := location.New[string]("default")
-	loc.Register("http", "http-value", 0)
-	loc.Register("https", "https-value", 0)
+	t.Run("LookupRegisteredProtocolWithDoubleSlash", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("http", "http-value", location.FLAG_LOCALFS)
+		require.True(t, ok)
 
-	tests := []struct {
-		name         string
-		uri          string
-		wantProto    string
-		wantLocation string
-		wantValue    string
-		wantFound    bool
-	}{
-		{
-			name:         "simple http",
-			uri:          "http://example.com",
-			wantProto:    "http",
-			wantLocation: "example.com",
-			wantValue:    "http-value",
-			wantFound:    true,
-		},
-		{
-			name:         "simple https",
-			uri:          "https://example.com",
-			wantProto:    "https",
-			wantLocation: "example.com",
-			wantValue:    "https-value",
-			wantFound:    true,
-		},
-		{
-			name:         "unknown protocol",
-			uri:          "ftp://example.com",
-			wantProto:    "ftp",
-			wantLocation: "example.com",
-			wantValue:    "",
-			wantFound:    false,
-		},
-		{
-			name:         "no protocol",
-			uri:          "example.com",
-			wantProto:    "default",
-			wantLocation: "example.com",
-			wantValue:    "",
-			wantFound:    false,
-		},
-		{
-			name:         "windows absolute path",
-			uri:          "C:\\Users\\Plakup",
-			wantProto:    "default",
-			wantLocation: "C:\\Users\\Plakup",
-			wantValue:    "",
-			wantFound:    false,
-		},
-		{
-			name:         "empty string",
-			uri:          "",
-			wantProto:    "default",
-			wantLocation: "",
-			wantValue:    "",
-			wantFound:    false,
-		},
-	}
+		proto, locationValue, item, flags, found := loc.Lookup("http://example.com")
+		require.Equal(t, "http", proto)
+		require.Equal(t, "example.com", locationValue)
+		require.Equal(t, "http-value", item)
+		require.Equal(t, location.FLAG_LOCALFS, flags)
+		require.True(t, found)
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			proto, location, value, _, found := loc.Lookup(tt.uri)
-			if proto != tt.wantProto {
-				t.Errorf("Lookup() proto = %v, want %v", proto, tt.wantProto)
-			}
-			if location != tt.wantLocation {
-				t.Errorf("Lookup() location = %v, want %v", location, tt.wantLocation)
-			}
-			if value != tt.wantValue {
-				t.Errorf("Lookup() value = %v, want %v", value, tt.wantValue)
-			}
-			if found != tt.wantFound {
-				t.Errorf("Lookup() found = %v, want %v", found, tt.wantFound)
-			}
-		})
-	}
+	t.Run("ReturnUnknownProtocolWhenProtocolIsNotRegistered", func(t *testing.T) {
+		loc := location.New[string]("default")
+
+		proto, locationValue, item, flags, found := loc.Lookup("ftp://example.com")
+		require.Equal(t, "ftp", proto)
+		require.Equal(t, "example.com", locationValue)
+		require.Empty(t, item)
+		require.Zero(t, flags)
+		require.False(t, found)
+	})
+
+	t.Run("UseFallbackWhenProtocolIsMissing", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("default", "default-value", location.FLAG_FILE)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("example.com")
+		require.Equal(t, "default", proto)
+		require.Equal(t, "example.com", locationValue)
+		require.Equal(t, "default-value", item)
+		require.Equal(t, location.FLAG_FILE, flags)
+		require.True(t, found)
+	})
+
+	t.Run("UseFallbackForWindowsAbsolutePath", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("default", "default-value", location.FLAG_LOCALFS)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("C:\\Users\\Plakup")
+		require.Equal(t, "default", proto)
+		require.Equal(t, "C:\\Users\\Plakup", locationValue)
+		require.Equal(t, "default-value", item)
+		require.Equal(t, location.FLAG_LOCALFS, flags)
+		require.True(t, found)
+	})
+
+	t.Run("LookupRegisteredProtocolWithoutDoubleSlash", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("http", "http-value", location.FLAG_STREAM)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("http:example.com")
+		require.Equal(t, "http", proto)
+		require.Equal(t, "example.com", locationValue)
+		require.Equal(t, "http-value", item)
+		require.Equal(t, location.FLAG_STREAM, flags)
+		require.True(t, found)
+	})
+
+	t.Run("UseFallbackForEmptyString", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("default", "default-value", location.FLAG_FILE)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("")
+		require.Equal(t, "default", proto)
+		require.Equal(t, "", locationValue)
+		require.Equal(t, "default-value", item)
+		require.Equal(t, location.FLAG_FILE, flags)
+		require.True(t, found)
+	})
+
+	t.Run("DoNotTreatOneCharacterPrefixAsProtocol", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("default", "default-value", location.FLAG_LOCALFS)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("a:/tmp/file")
+		require.Equal(t, "default", proto)
+		require.Equal(t, "a:/tmp/file", locationValue)
+		require.Equal(t, "default-value", item)
+		require.Equal(t, location.FLAG_LOCALFS, flags)
+		require.True(t, found)
+	})
+
+	t.Run("TrimLeadingDoubleSlashFromLocation", func(t *testing.T) {
+		loc := location.New[string]("default")
+		ok := loc.Register("fs", "fs-value", location.FLAG_LOCALFS)
+		require.True(t, ok)
+
+		proto, locationValue, item, flags, found := loc.Lookup("fs:///tmp/file")
+		require.Equal(t, "fs", proto)
+		require.Equal(t, "/tmp/file", locationValue)
+		require.Equal(t, "fs-value", item)
+		require.Equal(t, location.FLAG_LOCALFS, flags)
+		require.True(t, found)
+	})
 }
