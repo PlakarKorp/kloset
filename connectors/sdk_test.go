@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	con "github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/stretchr/testify/require"
 )
 
@@ -123,5 +124,116 @@ func TestRecordError(t *testing.T) {
 		require.ErrorIs(t, result.Err, expectedErr)
 		require.Equal(t, record, result.Record)
 		require.Equal(t, 1, reader.closeCalls)
+	})
+}
+
+func TestNewRecord(t *testing.T) {
+	t.Run("InitializeWithMetadata", func(t *testing.T) {
+		var fileInfo objects.FileInfo
+		xattrs := []string{"user.mime_type", "user.owner"}
+		openCalls := 0
+
+		record := con.NewRecord(
+			"file.txt",
+			"target",
+			fileInfo,
+			xattrs,
+			func() (io.ReadCloser, error) {
+				openCalls++
+				return &sdkReadCloser{reader: strings.NewReader("payload")}, nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.Equal(t, "file.txt", record.Pathname)
+		require.Equal(t, "target", record.Target)
+		require.Equal(t, fileInfo, record.FileInfo)
+		require.Equal(t, xattrs, record.ExtendedAttributes)
+		require.NotNil(t, record.Reader)
+		require.False(t, record.IsXattr)
+		require.Equal(t, 0, openCalls)
+
+		n, err := record.Reader.Read(make([]byte, 2))
+		require.NoError(t, err)
+		require.Equal(t, 2, n)
+		require.Equal(t, 1, openCalls)
+	})
+
+	t.Run("DefaultUnsetFieldsToZeroValues", func(t *testing.T) {
+		var fileInfo objects.FileInfo
+		record := con.NewRecord(
+			"file.txt",
+			"target",
+			fileInfo,
+			[]string{"user.mime_type"},
+			func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("payload")), nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.NoError(t, record.Err)
+		require.Equal(t, fileInfo, record.FileInfo)
+		require.False(t, record.IsXattr)
+		require.Empty(t, record.XattrName)
+		require.Zero(t, record.XattrType)
+		require.Zero(t, record.FileAttributes)
+	})
+
+	t.Run("AcceptNilExtendedAttributes", func(t *testing.T) {
+		var fileInfo objects.FileInfo
+		record := con.NewRecord(
+			"file.txt",
+			"target",
+			fileInfo,
+			nil,
+			func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("payload")), nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.Equal(t, fileInfo, record.FileInfo)
+		require.Nil(t, record.ExtendedAttributes)
+		require.NotNil(t, record.Reader)
+	})
+
+	t.Run("AcceptEmptyStringFields", func(t *testing.T) {
+		var fileInfo objects.FileInfo
+		record := con.NewRecord(
+			"",
+			"",
+			fileInfo,
+			nil,
+			func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("payload")), nil
+			},
+		)
+
+		require.NotNil(t, record)
+		require.Empty(t, record.Pathname)
+		require.Empty(t, record.Target)
+		require.NoError(t, record.Err)
+		require.False(t, record.IsXattr)
+		require.Empty(t, record.XattrName)
+	})
+
+	t.Run("PanicWhenReadFuncIsNil", func(t *testing.T) {
+		var readFn func() (io.ReadCloser, error)
+		var fileInfo objects.FileInfo
+		record := con.NewRecord(
+			"file.txt",
+			"target",
+			fileInfo,
+			nil,
+			readFn,
+		)
+
+		require.NotNil(t, record)
+		require.NotNil(t, record.Reader)
+
+		require.Panics(t, func() {
+			_, _ = record.Reader.Read(make([]byte, 1))
+		})
 	})
 }
