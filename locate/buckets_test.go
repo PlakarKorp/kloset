@@ -202,46 +202,70 @@ func TestWeeks(t *testing.T) {
 	})
 }
 
-// --- weekday-aligned periods (with date+name key) ---
-func TestWeekdayPeriod_MondayAlignAndPrev(t *testing.T) {
-	// Wed, Aug 27, 2025 → Monday of that ISO week is Aug 25, 2025
-	wed := mustParse(t, "2025-08-27T13:37:00Z")
-	start := loc.Mondays.Start(wed)
-	wantStart := mustParse(t, "2025-08-25T00:00:00Z")
-	if !start.Equal(wantStart) {
-		t.Fatalf("Mondays.Start: got %v want %v", start, wantStart)
-	}
-	// Prev Monday is Aug 18, 2025
-	prev := loc.Mondays.Prev(start)
-	wantPrev := mustParse(t, "2025-08-18T00:00:00Z")
-	if !prev.Equal(wantPrev) {
-		t.Fatalf("Mondays.Prev: got %v want %v", prev, wantPrev)
-	}
+func TestWeekdayPeriod(t *testing.T) {
+	t.Run("Name", func(t *testing.T) {
+		got := loc.WeekdayPeriod(time.Monday)
+		require.Equal(t, "monday", got.Name)
+	})
 
-	// Use the aligned start when checking the key
-	if got, want := loc.Mondays.Key(start), "2025-W35-monday"; got != want {
-		t.Fatalf("Mondays.Key: got %q want %q", got, want)
-	}
-}
+	t.Run("Start", func(t *testing.T) {
+		t.Run("aligns to monday of the same ISO week", func(t *testing.T) {
+			monday := loc.WeekdayPeriod(time.Monday)
+			got := monday.Start(dateRef)
+			want := time.Date(2023, 3, 13, 0, 0, 0, 0, time.UTC)
+			require.Equal(t, want, got)
+		})
 
-func TestWeekdayPeriod_ThursdayWeekBoundary(t *testing.T) {
-	// Thu, Jan 1, 2026 — Thursday-aligned Start is 2026-01-01 00:00Z
-	thu := mustParse(t, "2026-01-01T12:00:00Z")
-	start := loc.Thursdays.Start(thu)
-	wantStart := mustParse(t, "2026-01-01T00:00:00Z")
-	if !start.Equal(wantStart) {
-		t.Fatalf("Thursdays.Start boundary: got %v want %v", start, wantStart)
-	}
-	// Prev should jump to the previous Thursday (−7 days).
-	prev := loc.Thursdays.Prev(start)
-	wantPrev := mustParse(t, "2025-12-25T00:00:00Z")
-	if !prev.Equal(wantPrev) {
-		t.Fatalf("Thursdays.Prev boundary: got %v want %v", prev, wantPrev)
-	}
-	// Use the aligned start when checking the key
-	if got, want := loc.Thursdays.Key(start), "2026-W01-thursday"; got != want {
-		t.Fatalf("Thursdays.Key: got %q want %q", got, want)
-	}
+		t.Run("aligns to thursday of the same ISO week", func(t *testing.T) {
+			thursday := loc.WeekdayPeriod(time.Thursday)
+			got := thursday.Start(dateRef)
+			want := time.Date(2023, 3, 16, 0, 0, 0, 0, time.UTC)
+			require.Equal(t, want, got)
+		})
+
+		t.Run("normalizes input from another timezone", func(t *testing.T) {
+			monday := loc.WeekdayPeriod(time.Monday)
+			input := time.Date(2023, 7, 9, 23, 59, 59, 0, time.FixedZone("UTC-4", -4*60*60))
+			got := monday.Start(input)
+			want := time.Date(2023, 7, 10, 0, 0, 0, 0, time.UTC)
+			require.Equal(t, want, got)
+		})
+
+		t.Run("handles sunday input when aligning to monday", func(t *testing.T) {
+			monday := loc.WeekdayPeriod(time.Monday)
+			input := time.Date(2023, 3, 19, 23, 59, 59, 0, time.UTC) // sunday
+
+			got := monday.Start(input)
+			want := time.Date(2023, 3, 13, 0, 0, 0, 0, time.UTC)
+
+			require.Equal(t, want, got)
+		})
+	})
+
+	t.Run("Prev", func(t *testing.T) {
+		monday := loc.WeekdayPeriod(time.Monday)
+		start := monday.Start(dateRef)
+		got := monday.Prev(start)
+		want := time.Date(2023, 3, 6, 0, 0, 0, 0, time.UTC)
+		require.Equal(t, want, got)
+	})
+
+	t.Run("Key", func(t *testing.T) {
+		t.Run("returns ISO week key for aligned monday", func(t *testing.T) {
+			monday := loc.WeekdayPeriod(time.Monday)
+			start := monday.Start(dateRef)
+			got := monday.Key(start)
+			require.Equal(t, "2023-W11-monday", got)
+		})
+
+		t.Run("handles ISO year boundary for aligned thursday", func(t *testing.T) {
+			thursday := loc.WeekdayPeriod(time.Thursday)
+			input := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+			start := thursday.Start(input)
+			got := thursday.Key(start)
+			require.Equal(t, "2026-W01-thursday", got)
+		})
+	})
 }
 
 func TestLastNKeys_Weekday_Monday(t *testing.T) {
