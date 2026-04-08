@@ -115,24 +115,34 @@ func TestUnregister(t *testing.T) {
 }
 
 func TestNames(t *testing.T) {
-	loc := location.New[string]("default")
-	expected := []string{"a", "b", "c"}
+	t.Run("EmptySliceWhenNoItemsAreRegistered", func(t *testing.T) {
+		loc := location.New[string]("default")
 
-	// Register items in reverse order to test sorting
-	loc.Register("c", "value3", 0)
-	loc.Register("b", "value2", 0)
-	loc.Register("a", "value1", 0)
+		names := loc.Names()
+		require.Empty(t, names)
+	})
 
-	names := loc.Names()
-	if len(names) != len(expected) {
-		t.Errorf("Names() returned %d items, want %d", len(names), len(expected))
-	}
+	t.Run("ReturnSortedRegisteredNames", func(t *testing.T) {
+		loc := location.New[string]("default")
 
-	for i, name := range names {
-		if name != expected[i] {
-			t.Errorf("Names()[%d] = %q, want %q", i, name, expected[i])
-		}
-	}
+		require.True(t, loc.Register("c", "value-c", 0))
+		require.True(t, loc.Register("a", "value-a", 0))
+		require.True(t, loc.Register("b", "value-b", 0))
+
+		names := loc.Names()
+		require.Equal(t, []string{"a", "b", "c"}, names)
+	})
+
+	t.Run("DoNotReturnUnregisteredNames", func(t *testing.T) {
+		loc := location.New[string]("default")
+
+		require.True(t, loc.Register("a", "value-a", 0))
+		require.True(t, loc.Register("b", "value-b", 0))
+		require.True(t, loc.Unregister("a"))
+
+		names := loc.Names()
+		require.Equal(t, []string{"b"}, names)
+	})
 }
 
 func TestLookup(t *testing.T) {
