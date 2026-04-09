@@ -34,6 +34,61 @@ func TestLocatePeriodEmpty(t *testing.T) {
 	})
 }
 
+// NewDefaultLocateOptions is tested first with anonymous Option functions
+// instead of the public With... helpers.
+// This keeps the testing consistency:
+// - NewDefaultLocateOptions is validated on its own contract first
+// - the public With... helpers are tested afterwards as a separate API block
+func TestNewDefaultLocateOptions(t *testing.T) {
+	t.Run("WithoutOptionsReturnsNonNilEmptyLocateOptions", func(t *testing.T) {
+		got := loc.NewDefaultLocateOptions()
+		require.NotNil(t, got)
+		require.Equal(t, &loc.LocateOptions{}, got)
+	})
+
+	t.Run("AppliesSingleOption", func(t *testing.T) {
+		got := loc.NewDefaultLocateOptions(func(lo *loc.LocateOptions) {
+			lo.Filters.Name = "daily-backup"
+		})
+		require.Equal(t, "daily-backup", got.Filters.Name)
+	})
+
+	t.Run("AppliesMultipleOptions", func(t *testing.T) {
+		before := time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)
+
+		got := loc.NewDefaultLocateOptions(
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Name = "daily-backup"
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Before = before
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Periods.Day.Keep = 7
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Periods.Day.Cap = 2
+			},
+		)
+		require.Equal(t, "daily-backup", got.Filters.Name)
+		require.Equal(t, before, got.Filters.Before)
+		require.Equal(t, 7, got.Periods.Day.Keep)
+		require.Equal(t, 2, got.Periods.Day.Cap)
+	})
+
+	t.Run("AppliesOptionsInOrder", func(t *testing.T) {
+		got := loc.NewDefaultLocateOptions(
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Name = "first"
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Name = "second"
+			},
+		)
+		require.Equal(t, "second", got.Filters.Name)
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
