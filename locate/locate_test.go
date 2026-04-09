@@ -423,6 +423,149 @@ func TestLocateOptionsEmpty(t *testing.T) {
 	})
 }
 
+func TestItemFiltersHasTag(t *testing.T) {
+	t.Run("EmptyTagReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Tags: []string{"daily", "important"},
+		}
+		require.True(t, filters.HasTag(""))
+	})
+
+	t.Run("ReturnsTrueWhenTagExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Tags: []string{"daily", "important"},
+		}
+		require.True(t, filters.HasTag("important"))
+	})
+
+	t.Run("ReturnsFalseWhenTagDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Tags: []string{"daily", "important"},
+		}
+		require.False(t, filters.HasTag("weekly"))
+	})
+}
+
+func TestItemFiltersHasType(t *testing.T) {
+	t.Run("EmptyTypeReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+
+		require.True(t, filters.HasType(""))
+	})
+
+	t.Run("ReturnsTrueWhenTypeExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.True(t, filters.HasType("s3"))
+	})
+
+	t.Run("ReturnsFalseWhenTypeDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.False(t, filters.HasType("swift"))
+	})
+}
+
+func TestItemFiltersHasOrigin(t *testing.T) {
+	t.Run("EmptyOriginReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.True(t, filters.HasOrigin(""))
+	})
+
+	t.Run("ReturnsTrueWhenOriginExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+
+		require.True(t, filters.HasOrigin("s3://bucket-b"))
+	})
+
+	t.Run("ReturnsFalseWhenOriginDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.False(t, filters.HasOrigin("s3://bucket-c"))
+	})
+}
+
+func TestItemFiltersHasOrigins(t *testing.T) {
+	t.Run("EmptyOriginsReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.True(t, filters.HasOrigins(nil))
+		require.True(t, filters.HasOrigins([]string{}))
+	})
+
+	t.Run("ReturnsTrueWhenAnyOriginMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+
+		require.True(t, filters.HasOrigins([]string{"s3://bucket-x", "s3://bucket-b"}))
+	})
+
+	t.Run("ReturnsFalseWhenNoOriginMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.False(t, filters.HasOrigins([]string{"s3://bucket-x", "s3://bucket-y"}))
+	})
+}
+
+func TestItemFiltersHasTypes(t *testing.T) {
+	t.Run("EmptyTypesReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.True(t, filters.HasTypes(nil))
+		require.True(t, filters.HasTypes([]string{}))
+	})
+
+	t.Run("ReturnsTrueWhenAnyTypeMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.True(t, filters.HasTypes([]string{"swift", "s3"}))
+	})
+
+	t.Run("ReturnsFalseWhenNoTypeMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.False(t, filters.HasTypes([]string{"swift", "b2"}))
+	})
+}
+
+func TestItemFiltersHasRoot(t *testing.T) {
+	t.Run("EmptyRootReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Roots: []string{"/var/backups", "/srv/data"},
+		}
+		require.True(t, filters.HasRoot(""))
+	})
+
+	t.Run("ReturnsTrueWhenRootExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Roots: []string{"/var/backups", "/srv/data"},
+		}
+		require.True(t, filters.HasRoot("/srv/data"))
+	})
+
+	t.Run("ReturnsFalseWhenRootDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Roots: []string{"/var/backups", "/srv/data"},
+		}
+		require.False(t, filters.HasRoot("/tmp"))
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
