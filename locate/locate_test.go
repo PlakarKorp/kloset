@@ -2,7 +2,6 @@ package locate_test
 
 import (
 	"fmt"
-	"sort"
 	"testing"
 	"time"
 
@@ -953,246 +952,516 @@ func TestLocateOptionsFilterAndSort(t *testing.T) {
 	})
 }
 
-// ========== Utilities ==========
+func TestLocateOptionsMatch(t *testing.T) {
+	now := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
 
-func mustRFC3339(t *testing.T, s string) time.Time {
-	t.Helper()
-	tt, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		t.Fatalf("parse time: %v", err)
-	}
-	return tt.UTC()
-}
-
-// mac(n) returns a unique, deterministic objects.MAC for tests by setting
-// the first byte (works when MAC is a named byte array, which is typical).
-// If MAC is not a byte array, this is a no-op and tests still compile,
-// but uniqueness may not hold (adjust if needed).
-func mac(n byte) objects.MAC {
-	var m objects.MAC
-	m[0] = n
-	return m
-}
-
-// makeItem creates a test Item.
-func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, env string, perim string, job string, tags []string, roots []string, origins []string, types []string) loc.Item {
-	t.Helper()
-	return loc.Item{
-		ItemID:    id,
-		Timestamp: mustRFC3339(t, ts),
-		Filters: loc.ItemFilters{
-			Name:        name,
-			Category:    cat,
-			Environment: env,
-			Perimeter:   perim,
-			Job:         job,
-			Tags:        tags,
-			Roots:       roots,
-			Origins:     origins,
-			Types:       types,
-		},
-	}
-}
-
-// ========== Match / retention logic ==========
-
-func TestMatch_KeepOnly_LastNDays_AllInWindowKept(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	// Items over the last 3 days (in-window) and one older (out-of-window)
-	items := []loc.Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}, // day 2025-08-20
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-19T10:00:00Z")}, // day 2025-08-19
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-18T09:00:00Z")}, // day 2025-08-18
-		{ItemID: mac(4), Timestamp: mustRFC3339(t, "2025-08-17T09:00:00Z")}, // outside (if Keep=3)
-	}
-	lo := loc.LocateOptions{Periods: loc.LocatePeriods{Day: loc.LocatePeriod{Keep: 3}}}
-	kept, reasons := lo.Match(items, now)
-
-	if len(kept) != 3 {
-		t.Fatalf("kept len: got %d want 3", len(kept))
-	}
-	// The oldest one should be outside window.
-	oldID := items[3].ItemID
-	if r, ok := reasons[oldID]; !ok || r.Action != "delete" || r.Note != "outside retention windows" {
-		t.Fatalf("expect outside-window delete for oldest, got %#v", r)
-	}
-	// Others kept with rule "day"
-	for i := 0; i < 3; i++ {
-		id := items[i].ItemID
-		r, ok := reasons[id]
-		if !ok || r.Action != "keep" || r.Rule != "day" || r.Bucket == "" {
-			t.Fatalf("expect keep with day rule for %d, got %#v", i, r)
+	t.Run("ReturnsEmptyMapsWhenNothingMatches", func(t *testing.T) {
+		id := objects.MAC{1}
+		items := []loc.Item{
+			{
+				ItemID:    id,
+				Timestamp: now,
+				Filters: loc.ItemFilters{
+					Name: "daily-backup",
+				},
+			},
 		}
-	}
-}
 
-func TestMatch_CapOnly_PerMinute_NewestFirstWithinBucket(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:30Z")
-	// 3 items in the same minute bucket "2025-08-20-12:00"
-	bucket := "2025-08-20-12:00"
-	items := []loc.Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T12:00:20Z")}, // newest within bucket
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T12:00:10Z")},
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")}, // oldest within bucket
-	}
-	// Ensure FilterAndSort will order desc by ts (newest first)
-	lo := loc.LocateOptions{Periods: loc.LocatePeriods{Minute: loc.LocatePeriod{Cap: 2}}}
-	kept, reasons := lo.Match(items, now)
-
-	if len(kept) != 2 {
-		t.Fatalf("kept len: got %d want 2", len(kept))
-	}
-
-	// Collect ranks
-	ranks := make([]int, 0, 3)
-	caps := make([]int, 0, 3)
-	actions := make([]string, 0, 3)
-	for _, it := range items {
-		r := reasons[it.ItemID]
-		if r.Bucket != bucket || r.Rule != "minute" {
-			t.Fatalf("wrong bucket/rule: %#v", r)
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "missing-backup",
+			},
 		}
-		ranks = append(ranks, r.Rank)
-		caps = append(caps, r.Cap)
-		actions = append(actions, r.Action)
-	}
-	// Newest ranks should be 1 and 2 → keep, oldest rank 3 → delete (exceeds cap)
-	if actions[0] != "keep" || actions[1] != "keep" || actions[2] != "delete" {
-		t.Fatalf("actions by rank wrong: %v", actions)
-	}
-	if ranks[0] != 1 || ranks[1] != 2 || ranks[2] != 3 {
-		t.Fatalf("ranks wrong: %v", ranks)
-	}
-	if caps[0] != 2 || caps[1] != 2 || caps[2] != 2 {
-		t.Fatalf("cap recorded wrong: %v", caps)
-	}
-}
-func TestMatch_KeepAndCap_PerHour(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T17:05:00Z") // IMPORTANT: inside hour 17 so window is 17 & 16
 
-	// Two hours: 17 and 16; multiple items in each hour
-	items := []loc.Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T17:59:59Z")}, // hour 17
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T17:30:00Z")}, // hour 17
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T17:00:01Z")}, // hour 17
-		{ItemID: mac(4), Timestamp: mustRFC3339(t, "2025-08-20T16:59:59Z")}, // hour 16
-		{ItemID: mac(5), Timestamp: mustRFC3339(t, "2025-08-20T16:30:00Z")}, // hour 16
-	}
+		kept, reasons := lo.Match(items, now)
+		require.Empty(t, kept)
+		require.Empty(t, reasons)
+	})
 
-	// Keep last 2 hours (current hour 17 and previous hour 16), capped at 2 per hour.
-	lo := loc.LocateOptions{
-		Periods: loc.LocatePeriods{
-			Hour: loc.LocatePeriod{Keep: 2, Cap: 2},
-		},
-	}
-	kept, reasons := lo.Match(items, now)
+	t.Run("KeepsAllFilteredItemsWhenNoPeriodsAreConfigured", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
 
-	if len(kept) != 4 {
-		t.Fatalf("kept len: got %d want 4 (2 per hour)", len(kept))
-	}
-
-	// Count keeps per bucket
-	perBucket := map[string]int{}
-	for _, it := range items {
-		r := reasons[it.ItemID]
-		if r.Rule != "hour" {
-			t.Fatalf("expected hour rule, got %#v", r)
+		items := []loc.Item{
+			{
+				ItemID:    id1,
+				Timestamp: time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name: "daily-backup",
+				},
+			},
+			{
+				ItemID:    id2,
+				Timestamp: time.Date(2025, time.August, 27, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name: "daily-backup",
+				},
+			},
+			{
+				ItemID:    id3,
+				Timestamp: time.Date(2025, time.August, 26, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name: "weekly-backup",
+				},
+			},
 		}
-		perBucket[r.Bucket] += boolToInt(r.Action == "keep")
-	}
 
-	// Expect exactly 2 kept in hour-17 and 2 in hour-16.
-	hours := []string{}
-	for b := range perBucket {
-		hours = append(hours, b)
-	}
-	sort.Strings(hours)
-	if len(hours) != 2 {
-		t.Fatalf("expected 2 hour buckets, got %v", hours)
-	}
-	for _, b := range hours {
-		if perBucket[b] != 2 {
-			t.Fatalf("bucket %s: kept=%d want 2", b, perBucket[b])
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "daily-backup",
+			},
 		}
-	}
-}
 
-func TestMatch_MultipleRules_KeepBeatsDelete(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	// Two items same day & week. Cap day at 1 so the second is "delete" by day,
-	// but allow week to keep more (cap=2). The item should be kept overall.
-	item1 := loc.Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T08:00:00Z")}
-	item2 := loc.Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T07:00:00Z")}
-	items := []loc.Item{item1, item2}
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id2)
+		require.NotContains(t, kept, id3)
+		require.Len(t, reasons, 2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id2])
+	})
 
-	lo := loc.LocateOptions{
-		Periods: loc.LocatePeriods{
-			Day:  loc.LocatePeriod{Keep: 1, Cap: 1}, // keep only the newest within the day
-			Week: loc.LocatePeriod{Keep: 1, Cap: 2}, // same week key, allow both
-		},
-	}
+	t.Run("KeepsOnlyItemsWithinConfiguredWindows", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
 
-	kept, reasons := lo.Match(items, now)
-	if len(kept) != 2 {
-		t.Fatalf("expected both items kept because week rule keeps 2, got %d", len(kept))
-	}
-	r2 := reasons[item2.ItemID]
-	if r2.Action != "keep" {
-		t.Fatalf("expected keep due to week rule overriding day delete; got %#v", r2)
-	}
-}
+		ts1 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 27, 11, 0, 0, 0, time.UTC)
+		ts3 := time.Date(2025, time.August, 26, 11, 0, 0, 0, time.UTC)
 
-func TestMatch_OutsideWindows_NoRulesKeeping(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	// Items far in the past; Keep last 1 day only.
-	items := []loc.Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-10T00:00:00Z")},
-	}
-	lo := loc.LocateOptions{
-		Periods: loc.LocatePeriods{
-			Day: loc.LocatePeriod{Keep: 1},
-		},
-	}
-	_, reasons := lo.Match(items, now)
-	r := reasons[items[0].ItemID]
-	if r.Action != "delete" || r.Note != "outside retention windows" {
-		t.Fatalf("expected outside retention windows delete, got %#v", r)
-	}
-}
-
-// Sanity: with no periods, Match should keep all matched-filter items and mark as "matched filters".
-func TestMatch_NoPeriods_KeepsAllMatches(t *testing.T) {
-	items := []loc.Item{
-		makeItem(t, mac(1), "2025-08-20T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
-		makeItem(t, mac(2), "2025-08-18T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
-	}
-	lo := loc.LocateOptions{}
-	// Add restrictive filters that both items satisfy
-	lo.Filters.Name = "n"
-	lo.Filters.Category = "c"
-	lo.Filters.Environment = "prod"
-	lo.Filters.Perimeter = "eu"
-	lo.Filters.Job = "job"
-	lo.Filters.Tags = []string{"t1"}
-	lo.Filters.Roots = []string{"r1"} // NOTE: Matches() requires all specified roots to be present; both have r1.
-
-	kept, reasons := lo.Match(items, mustRFC3339(t, "2025-08-20T12:00:00Z"))
-	if len(kept) != 2 {
-		t.Fatalf("expected all matched items kept when HasPeriods=false, got %d", len(kept))
-	}
-	for _, it := range items {
-		r := reasons[it.ItemID]
-		if r.Action != "keep" || r.Note != "matched filters" {
-			t.Fatalf("expected keep/matched filters, got %#v", r)
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
 		}
-	}
-}
 
-// ========== helpers ==========
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 2,
+				},
+			},
+		}
 
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id2)
+		require.NotContains(t, kept, id3)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts1),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts2),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id2])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Note:   "outside retention windows",
+		}, reasons[id3])
+	})
+
+	t.Run("AppliesPerBucketCapWhenKeepIsZero", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		ts1 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC)
+		ts3 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Cap: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id3)
+		require.NotContains(t, kept, id2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts1),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts2),
+			Rank:   2,
+			Cap:    1,
+			Note:   "exceeds per-bucket cap",
+		}, reasons[id2])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts3),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[id3])
+	})
+
+	t.Run("PrefersKeepOverDeleteAcrossRules", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		ts1 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC)
+		ts3 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 2,
+					Cap:  1,
+				},
+				Week: loc.LocatePeriod{
+					Keep: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Contains(t, kept, id2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "week",
+			Bucket: loc.Weeks.Key(ts2),
+			Rank:   2,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id2])
+	})
+
+	t.Run("ChoosesKeepReasonWithLowestRankAcrossRules", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+
+		ts1 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 2,
+				},
+				Week: loc.LocatePeriod{
+					Keep: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Contains(t, kept, id2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts2),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id2])
+	})
+
+	t.Run("ChoosesDeleteReasonWithLowestRankAcrossRules", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+		id4 := objects.MAC{4}
+
+		ts1 := time.Date(2025, time.August, 29, 9, 0, 0, 0, time.UTC)  // week rank 1
+		ts2 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC) // day rank 1, week rank 2
+		ts3 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC) // day rank 2, week rank 3
+		ts4 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC) // week rank 4
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+			{ItemID: id4, Timestamp: ts4},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Cap: 1,
+				},
+				Week: loc.LocatePeriod{
+					Cap: 2,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.NotContains(t, kept, id3)
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts3),
+			Rank:   2,
+			Cap:    1,
+			Note:   "exceeds per-bucket cap",
+		}, reasons[id3])
+	})
+	t.Run("KeepsFirstRuleWhenKeepRanksAreEqual", func(t *testing.T) {
+		id := objects.MAC{9}
+		ts := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id, Timestamp: ts},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 1,
+				},
+				Week: loc.LocatePeriod{
+					Keep: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Contains(t, kept, id)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id])
+	})
+
+	t.Run("KeepsAllMatchedItemsWhenNoPeriodsAndMultipleFiltersAreConfigured", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		items := []loc.Item{
+			{
+				ItemID:    id1,
+				Timestamp: time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name:        "daily-backup",
+					Category:    "database",
+					Environment: "prod",
+					Perimeter:   "eu-west",
+					Job:         "nightly",
+					Tags:        []string{"daily", "important"},
+					Roots:       []string{"/var/backups"},
+				},
+			},
+			{
+				ItemID:    id2,
+				Timestamp: time.Date(2025, time.August, 27, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name:        "daily-backup",
+					Category:    "database",
+					Environment: "prod",
+					Perimeter:   "eu-west",
+					Job:         "nightly",
+					Tags:        []string{"daily", "important"},
+					Roots:       []string{"/var/backups"},
+				},
+			},
+			{
+				ItemID:    id3,
+				Timestamp: time.Date(2025, time.August, 26, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name:        "daily-backup",
+					Category:    "database",
+					Environment: "prod",
+					Perimeter:   "eu-west",
+					Job:         "nightly",
+					Tags:        []string{"daily"},
+					Roots:       []string{"/var/backups"},
+				},
+			},
+		}
+
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name:        "daily-backup",
+				Category:    "database",
+				Environment: "prod",
+				Perimeter:   "eu-west",
+				Job:         "nightly",
+				Tags:        []string{"daily", "important"},
+				Roots:       []string{"/var/backups"},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id2)
+		require.NotContains(t, kept, id3)
+		require.Len(t, reasons, 2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id2])
+	})
+	t.Run("MondayKeepUsesMondayBucketsOnly", func(t *testing.T) {
+		currentMondayID := objects.MAC{1}
+		previousMondayID := objects.MAC{2}
+		olderMondayID := objects.MAC{3}
+		tuesdaySameWeekID := objects.MAC{4}
+
+		currentMonday := time.Date(2025, time.August, 25, 10, 0, 0, 0, time.UTC)  // 2025-W35-monday
+		previousMonday := time.Date(2025, time.August, 18, 9, 0, 0, 0, time.UTC)  // 2025-W34-monday
+		olderMonday := time.Date(2025, time.August, 11, 8, 0, 0, 0, time.UTC)     // 2025-W33-monday
+		tuesdaySameWeek := time.Date(2025, time.August, 26, 7, 0, 0, 0, time.UTC) // 2025-W35-tuesday
+
+		items := []loc.Item{
+			{ItemID: currentMondayID, Timestamp: currentMonday},
+			{ItemID: previousMondayID, Timestamp: previousMonday},
+			{ItemID: olderMondayID, Timestamp: olderMonday},
+			{ItemID: tuesdaySameWeekID, Timestamp: tuesdaySameWeek},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Monday: loc.LocatePeriod{
+					Keep: 2,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, currentMondayID)
+		require.Contains(t, kept, previousMondayID)
+		require.NotContains(t, kept, olderMondayID)
+		require.NotContains(t, kept, tuesdaySameWeekID)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(currentMonday),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[currentMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(previousMonday),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[previousMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Note:   "outside retention windows",
+		}, reasons[olderMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Note:   "outside retention windows",
+		}, reasons[tuesdaySameWeekID])
+	})
+
+	t.Run("MondayCapAppliesWithinAMondayBucket", func(t *testing.T) {
+		newestMondayID := objects.MAC{5}
+		olderSameMondayID := objects.MAC{6}
+		previousMondayID := objects.MAC{7}
+
+		newestMonday := time.Date(2025, time.August, 25, 18, 0, 0, 0, time.UTC)   // 2025-W35-monday
+		olderSameMonday := time.Date(2025, time.August, 25, 9, 0, 0, 0, time.UTC) // same monday bucket
+		previousMonday := time.Date(2025, time.August, 18, 12, 0, 0, 0, time.UTC) // 2025-W34-monday
+
+		items := []loc.Item{
+			{ItemID: newestMondayID, Timestamp: newestMonday},
+			{ItemID: olderSameMondayID, Timestamp: olderSameMonday},
+			{ItemID: previousMondayID, Timestamp: previousMonday},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Monday: loc.LocatePeriod{
+					Keep: 2,
+					Cap:  1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, newestMondayID)
+		require.Contains(t, kept, previousMondayID)
+		require.NotContains(t, kept, olderSameMondayID)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(newestMonday),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[newestMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(olderSameMonday),
+			Rank:   2,
+			Cap:    1,
+			Note:   "exceeds per-bucket cap",
+		}, reasons[olderSameMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(previousMonday),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[previousMondayID])
+	})
 }
