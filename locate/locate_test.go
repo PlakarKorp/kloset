@@ -885,6 +885,74 @@ func TestLocateOptionsMatches(t *testing.T) {
 	})
 }
 
+func TestLocateOptionsFilterAndSort(t *testing.T) {
+	paris := time.FixedZone("CEST", 2*60*60)
+
+	items := []loc.Item{
+		{
+			Timestamp: time.Date(2025, time.August, 28, 14, 34, 56, 0, paris), // 12:34:56 UTC
+			Filters: loc.ItemFilters{
+				Name: "daily-backup",
+			},
+		},
+		{
+			Timestamp: time.Date(2025, time.August, 28, 12, 50, 0, 0, time.UTC),
+			Filters: loc.ItemFilters{
+				Name: "weekly-backup",
+			},
+		},
+		{
+			Timestamp: time.Date(2025, time.August, 28, 13, 0, 0, 0, time.UTC),
+			Filters: loc.ItemFilters{
+				Name: "daily-backup",
+			},
+		},
+	}
+
+	t.Run("FiltersMatchingItemsAndSortsThemByDescendingTimestamp", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "daily-backup",
+			},
+		}
+
+		got := lo.FilterAndSort(items)
+		require.Len(t, got, 2)
+		require.Equal(t, "daily-backup", got[0].Filters.Name)
+		require.Equal(t, "daily-backup", got[1].Filters.Name)
+		require.True(t, got[0].Timestamp.After(got[1].Timestamp))
+		require.Equal(t, time.Date(2025, time.August, 28, 13, 0, 0, 0, time.UTC), got[0].Timestamp)
+		require.Equal(t, time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC), got[1].Timestamp)
+		require.Equal(t, time.UTC, got[0].Timestamp.Location())
+		require.Equal(t, time.UTC, got[1].Timestamp.Location())
+	})
+
+	t.Run("ReturnsOnlyLatestMatchingItemWhenLatestIsEnabled", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name:   "daily-backup",
+				Latest: true,
+			},
+		}
+
+		got := lo.FilterAndSort(items)
+		require.Len(t, got, 1)
+		require.Equal(t, "daily-backup", got[0].Filters.Name)
+		require.Equal(t, time.Date(2025, time.August, 28, 13, 0, 0, 0, time.UTC), got[0].Timestamp)
+	})
+
+	t.Run("ReturnsEmptySliceWhenNothingMatches", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "missing-backup",
+			},
+		}
+
+		got := lo.FilterAndSort(items)
+		require.Empty(t, got)
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
@@ -923,29 +991,6 @@ func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, 
 			Origins:     origins,
 			Types:       types,
 		},
-	}
-}
-
-// ========== FilterAndSort (ordering + Latest) ==========
-
-func TestFilterAndSort_OrderingAndLatest(t *testing.T) {
-	items := []loc.Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")},
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")},
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-19T23:59:59Z")},
-	}
-	var lo loc.LocateOptions
-	sorted := lo.FilterAndSort(items)
-	if len(sorted) != 3 {
-		t.Fatalf("expected 3 items")
-	}
-	if !sorted[0].Timestamp.After(sorted[1].Timestamp) || !sorted[1].Timestamp.After(sorted[2].Timestamp) {
-		t.Fatalf("not sorted desc by Timestamp")
-	}
-	lo.Filters.Latest = true
-	one := lo.FilterAndSort(items)
-	if len(one) != 1 || !one[0].Timestamp.Equal(mustRFC3339(t, "2025-08-20T13:00:00Z")) {
-		t.Fatalf("Latest should return single newest item, got %#v", one)
 	}
 }
 
