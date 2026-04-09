@@ -277,6 +277,152 @@ func TestLocateOptionsHasPeriods(t *testing.T) {
 	})
 }
 
+func TestLocateOptionsEmpty(t *testing.T) {
+	t.Run("True_WhenNoPeriodsOrSupportedFiltersAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("False_WhenAnyPeriodIsConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		loc.WithKeepDays(1)(lo)
+		require.False(t, lo.Empty())
+	})
+
+	t.Run("False_WhenScalarFilterIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{
+				name:  "Name",
+				apply: loc.WithName("daily-backup"),
+			},
+			{
+				name:  "Category",
+				apply: loc.WithCategory("database"),
+			},
+			{
+				name:  "Environment",
+				apply: loc.WithEnvironment("prod"),
+			},
+			{
+				name:  "Perimeter",
+				apply: loc.WithPerimeter("eu-west"),
+			},
+			{
+				name:  "Job",
+				apply: loc.WithJob("nightly"),
+			},
+			{
+				name:  "Before",
+				apply: loc.WithBefore(time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)),
+			},
+			{
+				name:  "Since",
+				apply: loc.WithSince(time.Date(2025, time.August, 20, 8, 0, 0, 0, time.UTC)),
+			},
+			{
+				name:  "Latest",
+				apply: loc.WithLatest(true),
+			},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.False(t, lo.Empty())
+			})
+		}
+	})
+
+	t.Run("False_WhenSliceFilterIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{
+				name:  "Tags",
+				apply: loc.WithTag("important"),
+			},
+			{
+				name:  "IDs",
+				apply: loc.WithID("abc123"),
+			},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.False(t, lo.Empty())
+			})
+		}
+	})
+
+	t.Run("False_WhenRootsFilterIsConfiguredDirectly", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Roots: []string{"/var/backups"},
+			},
+		}
+		require.False(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyOriginsAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Origins: []string{"s3://bucket-a"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyTypesAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Types: []string{"s3"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyIgnoreTagsAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				IgnoreTags: []string{"temporary"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyIgnoredFiltersAreCombined", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Origins:    []string{"s3://bucket-a"},
+				Types:      []string{"s3"},
+				IgnoreTags: []string{"temporary"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsFalseWhenIgnoredAndSupportedFiltersAreCombined", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Origins:    []string{"s3://bucket-a"},
+				Types:      []string{"s3"},
+				IgnoreTags: []string{"temporary"},
+				Name:       "daily-backup",
+			},
+		}
+		require.False(t, lo.Empty())
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
@@ -315,24 +461,6 @@ func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, 
 			Origins:     origins,
 			Types:       types,
 		},
-	}
-}
-
-// ========== Options wiring / HasPeriods / Empty ==========
-
-func TestLocateOptions_Empty(t *testing.T) {
-	var lo loc.LocateOptions
-	if !lo.Empty() {
-		t.Fatalf("Empty() should be true on zero-value")
-	}
-	lo.Filters.Name = "x"
-	if lo.Empty() {
-		t.Fatalf("Empty() should be false when a filter is set")
-	}
-	lo = loc.LocateOptions{}
-	lo.Periods.Minute.Keep = 1
-	if lo.Empty() {
-		t.Fatalf("Empty() should be false when a period keep is set")
 	}
 }
 
