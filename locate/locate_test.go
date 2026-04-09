@@ -89,6 +89,127 @@ func TestNewDefaultLocateOptions(t *testing.T) {
 	})
 }
 
+func TestWithKeepOptions(t *testing.T) {
+	t.Run("SetsStandardPeriodKeepFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithKeepMinutes(1)(lo)
+		loc.WithKeepHours(2)(lo)
+		loc.WithKeepDays(3)(lo)
+		loc.WithKeepWeeks(4)(lo)
+		loc.WithKeepMonths(5)(lo)
+		loc.WithKeepYears(6)(lo)
+
+		require.Equal(t, 1, lo.Periods.Minute.Keep)
+		require.Equal(t, 2, lo.Periods.Hour.Keep)
+		require.Equal(t, 3, lo.Periods.Day.Keep)
+		require.Equal(t, 4, lo.Periods.Week.Keep)
+		require.Equal(t, 5, lo.Periods.Month.Keep)
+		require.Equal(t, 6, lo.Periods.Year.Keep)
+	})
+
+	t.Run("SetsWeekdayPeriodKeepFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithKeepMondays(1)(lo)
+		loc.WithKeepTuesdays(2)(lo)
+		loc.WithKeepWednesdays(3)(lo)
+		loc.WithKeepThursdays(4)(lo)
+		loc.WithKeepFridays(5)(lo)
+		loc.WithKeepSaturdays(6)(lo)
+		loc.WithKeepSundays(7)(lo)
+
+		require.Equal(t, 1, lo.Periods.Monday.Keep)
+		require.Equal(t, 2, lo.Periods.Tuesday.Keep)
+		require.Equal(t, 3, lo.Periods.Wednesday.Keep)
+		require.Equal(t, 4, lo.Periods.Thursday.Keep)
+		require.Equal(t, 5, lo.Periods.Friday.Keep)
+		require.Equal(t, 6, lo.Periods.Saturday.Keep)
+		require.Equal(t, 7, lo.Periods.Sunday.Keep)
+	})
+}
+
+func TestWithCapOptions(t *testing.T) {
+	t.Run("SetsStandardPeriodCapFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithPerMinuteCap(1)(lo)
+		loc.WithPerHourCap(2)(lo)
+		loc.WithPerDayCap(3)(lo)
+		loc.WithPerWeekCap(4)(lo)
+		loc.WithPerMonthCap(5)(lo)
+		loc.WithPerYearCap(6)(lo)
+
+		require.Equal(t, 1, lo.Periods.Minute.Cap)
+		require.Equal(t, 2, lo.Periods.Hour.Cap)
+		require.Equal(t, 3, lo.Periods.Day.Cap)
+		require.Equal(t, 4, lo.Periods.Week.Cap)
+		require.Equal(t, 5, lo.Periods.Month.Cap)
+		require.Equal(t, 6, lo.Periods.Year.Cap)
+	})
+
+	t.Run("SetsWeekdayPeriodCapFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithPerMondayCap(1)(lo)
+		loc.WithPerTuesdayCap(2)(lo)
+		loc.WithPerWednsdayCap(3)(lo)
+		loc.WithPerThursdayCap(4)(lo)
+		loc.WithPerFridayCap(5)(lo)
+		loc.WithPerSaturdayCap(6)(lo)
+		loc.WithPerSundaysCap(7)(lo)
+
+		require.Equal(t, 1, lo.Periods.Monday.Cap)
+		require.Equal(t, 2, lo.Periods.Tuesday.Cap)
+		require.Equal(t, 3, lo.Periods.Wednesday.Cap)
+		require.Equal(t, 4, lo.Periods.Thursday.Cap)
+		require.Equal(t, 5, lo.Periods.Friday.Cap)
+		require.Equal(t, 6, lo.Periods.Saturday.Cap)
+		require.Equal(t, 7, lo.Periods.Sunday.Cap)
+	})
+}
+
+func TestWithFilterOptions(t *testing.T) {
+	t.Run("SetsScalarFilterFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		before := time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)
+		since := time.Date(2025, time.August, 20, 8, 0, 0, 0, time.UTC)
+
+		loc.WithBefore(before)(lo)
+		loc.WithSince(since)(lo)
+		loc.WithName("daily-backup")(lo)
+		loc.WithCategory("database")(lo)
+		loc.WithEnvironment("prod")(lo)
+		loc.WithPerimeter("eu-west")(lo)
+		loc.WithJob("nightly")(lo)
+		loc.WithLatest(true)(lo)
+
+		require.Equal(t, before, lo.Filters.Before)
+		require.Equal(t, since, lo.Filters.Since)
+		require.Equal(t, "daily-backup", lo.Filters.Name)
+		require.Equal(t, "database", lo.Filters.Category)
+		require.Equal(t, "prod", lo.Filters.Environment)
+		require.Equal(t, "eu-west", lo.Filters.Perimeter)
+		require.Equal(t, "nightly", lo.Filters.Job)
+		require.True(t, lo.Filters.Latest)
+	})
+
+	t.Run("AppendsSliceBasedFilterFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithTag("important")(lo)
+		loc.WithTag("daily")(lo)
+		loc.WithOrigin("s3://bucket-a")(lo)
+		loc.WithOrigin("s3://bucket-b")(lo)
+		loc.WithID("abc123")(lo)
+		loc.WithID("def456")(lo)
+
+		require.Equal(t, []string{"important", "daily"}, lo.Filters.Tags)
+		require.Equal(t, []string{"s3://bucket-a", "s3://bucket-b"}, lo.Filters.Origins)
+		require.Equal(t, []string{"abc123", "def456"}, lo.Filters.IDs)
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
@@ -131,47 +252,6 @@ func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, 
 }
 
 // ========== Options wiring / HasPeriods / Empty ==========
-
-func TestNewDefaultLocateOptions_And_WithOptions(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-28T12:00:00Z")
-	lo := loc.NewDefaultLocateOptions(
-		loc.WithKeepMinutes(3),
-		loc.WithPerHourCap(5),
-		loc.WithBefore(now),
-		loc.WithSince(now.Add(-24*time.Hour)),
-		loc.WithName("n"),
-		loc.WithCategory("c"),
-		loc.WithEnvironment("prod"),
-		loc.WithPerimeter("eu"),
-		loc.WithJob("backup"),
-		loc.WithTag("t1"),
-		loc.WithOrigin("hosta"),
-		loc.WithID("abc"),
-		loc.WithLatest(true),
-	)
-	if !lo.HasPeriods() {
-		t.Fatalf("HasPeriods should be true when any keep/cap is set")
-	}
-	if lo.Periods.Minute.Keep != 3 || lo.Periods.Hour.Cap != 5 {
-		t.Fatalf("options not applied: minute.keep=%d hour.cap=%d", lo.Periods.Minute.Keep, lo.Periods.Hour.Cap)
-	}
-	if lo.Filters.Before.IsZero() || lo.Filters.Since.IsZero() {
-		t.Fatalf("before/since not set")
-	}
-	if lo.Filters.Name != "n" || lo.Filters.Category != "c" || lo.Filters.Environment != "prod" ||
-		lo.Filters.Perimeter != "eu" || lo.Filters.Job != "backup" || !lo.Filters.Latest {
-		t.Fatalf("filters not set correctly: %+v", lo.Filters)
-	}
-	if got := len(lo.Filters.Tags); got != 1 {
-		t.Fatalf("tags len: got %d want 1", got)
-	}
-	if got := len(lo.Filters.Origins); got != 1 {
-		t.Fatalf("origin len: got %d want 1", got)
-	}
-	if got := len(lo.Filters.IDs); got != 1 {
-		t.Fatalf("IDs len: got %d want 1", got)
-	}
-}
 
 func TestLocateOptions_Empty(t *testing.T) {
 	var lo loc.LocateOptions
