@@ -1,13 +1,38 @@
 package locate_test
 
 import (
+	"fmt"
 	"sort"
 	"testing"
 	"time"
 
 	loc "github.com/PlakarKorp/kloset/locate"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/stretchr/testify/require"
 )
+
+func TestLocatePeriodEmpty(t *testing.T) {
+	t.Run("EmptyArgumentsReturnsTrue", func(t *testing.T) {
+		lp := loc.LocatePeriod{}
+		require.True(t, lp.Empty())
+	})
+
+	t.Run("ReturnsFalseIfAnyArgumentIsSet", func(t *testing.T) {
+		testCases := []loc.LocatePeriod{
+			{Keep: 1, Cap: 0},
+			{Keep: 0, Cap: 1},
+			{Keep: 1, Cap: 1},
+			{Keep: 2, Cap: 3},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(fmt.Sprintf("Keep%dCap%d", tc.Keep, tc.Cap), func(t *testing.T) {
+				require.False(t, tc.Empty())
+			})
+		}
+	})
+}
 
 // ========== Utilities ==========
 
