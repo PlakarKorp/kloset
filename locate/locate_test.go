@@ -566,6 +566,325 @@ func TestItemFiltersHasRoot(t *testing.T) {
 	})
 }
 
+func TestLocateOptionsMatches(t *testing.T) {
+	baseTime := time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)
+
+	var zeroID objects.MAC
+	baseItem := loc.Item{
+		ItemID:    zeroID,
+		Timestamp: baseTime,
+		Filters: loc.ItemFilters{
+			Name:        "daily-backup",
+			Category:    "database",
+			Environment: "prod",
+			Perimeter:   "eu-west",
+			Job:         "nightly",
+			Tags:        []string{"daily", "important"},
+			Types:       []string{"fs", "s3"},
+			Origins:     []string{"s3://bucket-a", "s3://bucket-b"},
+			Roots:       []string{"/var/backups", "/srv/data"},
+		},
+	}
+
+	t.Run("ReturnsTrueWhenNoFilterIsConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		require.True(t, lo.Matches(baseItem))
+	})
+
+	t.Run("MatchesIDsByPrefix", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAnyPrefixMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					IDs: []string{"f", "0"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenNoPrefixMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					IDs: []string{"a", "b"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("AppliesBeforeInclusively", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenTimestampIsBeforeBefore", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Before: baseTime,
+				},
+			}
+			item := baseItem
+			item.Timestamp = baseTime.Add(-time.Second)
+			require.True(t, lo.Matches(item))
+		})
+
+		t.Run("ReturnsTrueWhenTimestampEqualsBefore", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Before: baseTime,
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenTimestampIsAfterBefore", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Before: baseTime.Add(-time.Second),
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("AppliesSinceInclusively", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenTimestampIsAfterSince", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Since: baseTime,
+				},
+			}
+
+			item := baseItem
+			item.Timestamp = baseTime.Add(time.Second)
+			require.True(t, lo.Matches(item))
+		})
+
+		t.Run("ReturnsTrueWhenTimestampEqualsSince", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Since: baseTime,
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenTimestampIsBeforeSince", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Since: baseTime.Add(time.Second),
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("MatchesScalarHeaderFieldsByExactEquality", func(t *testing.T) {
+		testCases := []struct {
+			name               string
+			withMatchingFilter func() *loc.LocateOptions
+			withOtherFilter    func() *loc.LocateOptions
+		}{
+			{
+				name: "Name",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Name: "daily-backup"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Name: "weekly-backup"},
+					}
+				},
+			},
+			{
+				name: "Category",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Category: "database"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Category: "filesystem"},
+					}
+				},
+			},
+			{
+				name: "Environment",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Environment: "prod"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Environment: "staging"},
+					}
+				},
+			},
+			{
+				name: "Perimeter",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Perimeter: "eu-west"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Perimeter: "us-east"},
+					}
+				},
+			},
+			{
+				name: "Job",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Job: "nightly"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Job: "hourly"},
+					}
+				},
+			},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				require.True(t, tc.withMatchingFilter().Matches(baseItem))
+				require.False(t, tc.withOtherFilter().Matches(baseItem))
+			})
+		}
+	})
+
+	t.Run("RejectsItemWhenAnyIgnoredTagIsPresent", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				IgnoreTags: []string{"important"},
+			},
+		}
+		require.False(t, lo.Matches(baseItem))
+	})
+
+	t.Run("RequiresAllRequestedTags", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAllTagsArePresent", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Tags: []string{"daily", "important"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenOneTagIsMissing", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Tags: []string{"daily", "missing"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("MatchesTypesWithAnyOfSemantics", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAnyRequestedTypeMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{"swift", "s3"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenNoRequestedTypeMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{"swift", "b2"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedTypesContainsEmptyString", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{""},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedTypesContainsEmptyStringAmongOtherValues", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{"swift", ""},
+				},
+			}
+
+			require.True(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("MatchesOriginsWithAnyOfSemantics", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAnyRequestedOriginMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{"s3://bucket-x", "s3://bucket-b"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenNoRequestedOriginMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{"s3://bucket-x", "s3://bucket-y"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedOriginsContainsEmptyStringAmongOtherValues", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{"s3://missing-bucket", ""},
+				},
+			}
+
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedOriginsContainsEmptyString", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{""},
+				},
+			}
+
+			require.True(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("RequiresAllRequestedRoots", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAllRequestedRootsArePresent", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Roots: []string{"/var/backups", "/srv/data"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenOneRequestedRootIsMissing", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Roots: []string{"/var/backups", "/tmp"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
@@ -604,138 +923,6 @@ func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, 
 			Origins:     origins,
 			Types:       types,
 		},
-	}
-}
-
-// ========== Matches (IDs / time windows / headers / tags / roots) ==========
-
-func TestMatches_IDPrefix(t *testing.T) {
-	var lo loc.LocateOptions
-	idZero := objects.NilMac
-	it := loc.Item{ItemID: idZero, Timestamp: mustRFC3339(t, "2025-08-20T10:00:00Z")}
-	// fmt.Sprintf("%x" , zero) will be all zeros → should match prefix "0"
-	lo.Filters.IDs = []string{"0"}
-	if !lo.Matches(it) {
-		t.Fatalf("expected match for ID prefix '0'")
-	}
-	lo.Filters.IDs = []string{"f"} // zero MAC does not start with 'f'
-	if lo.Matches(it) {
-		t.Fatalf("expected no match for ID prefix 'f'")
-	}
-}
-
-func TestMatches_TimeWindow(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	itemBefore := loc.Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}
-	itemAfter := loc.Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")}
-
-	// Before: reject items strictly AFTER the 'before' instant; equal allowed.
-	var lo loc.LocateOptions
-	lo.Filters.Before = now
-	if !lo.Matches(itemBefore) {
-		t.Fatalf("itemBefore should match with Before=now")
-	}
-	if !lo.Matches(loc.Item{ItemID: mac(3), Timestamp: now}) {
-		t.Fatalf("item at exact Before should match (not After)")
-	}
-	if lo.Matches(itemAfter) {
-		t.Fatalf("itemAfter should not match (is After Before)")
-	}
-
-	// Since: reject items strictly BEFORE the 'since' instant; equal allowed.
-	lo = loc.LocateOptions{}
-	lo.Filters.Since = now
-	if lo.Matches(itemBefore) {
-		t.Fatalf("itemBefore should not match (Before Since)")
-	}
-	if !lo.Matches(loc.Item{ItemID: mac(4), Timestamp: now}) {
-		t.Fatalf("item at exact Since should match")
-	}
-	if !lo.Matches(itemAfter) {
-		t.Fatalf("itemAfter should match (After Since)")
-	}
-}
-
-func TestMatches_Headers_Tags_Roots(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{}, []string{})
-
-	tests := []struct {
-		name string
-		cfg  func(*loc.LocateOptions)
-		want bool
-	}{
-		{"name ok", func(lo *loc.LocateOptions) { lo.Filters.Name = "n1" }, true},
-		{"name mismatch", func(lo *loc.LocateOptions) { lo.Filters.Name = "n2" }, false},
-		{"category ok", func(lo *loc.LocateOptions) { lo.Filters.Category = "cat" }, true},
-		{"env mismatch", func(lo *loc.LocateOptions) { lo.Filters.Environment = "stage" }, false},
-		{"perimeter ok", func(lo *loc.LocateOptions) { lo.Filters.Perimeter = "eu" }, true},
-		{"job mismatch", func(lo *loc.LocateOptions) { lo.Filters.Job = "restore" }, false},
-		{"tags all-present", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{"t1", "t2"} }, true},
-		{"tags missing-one", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{"t1", "t3"} }, false},
-		{"ignore tags", func(lo *loc.LocateOptions) { lo.Filters.IgnoreTags = []string{"t2"} }, false},
-		{"roots all-present", func(lo *loc.LocateOptions) { lo.Filters.Roots = []string{"r1", "r2"} }, true},
-		{"roots missing-one", func(lo *loc.LocateOptions) { lo.Filters.Roots = []string{"r1", "r3"} }, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var lo loc.LocateOptions
-			tc.cfg(&lo)
-			if got := lo.Matches(it); got != tc.want {
-				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
-			}
-		})
-	}
-}
-
-func TestMatches_Origins(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{"hosta"}, []string{})
-
-	tests := []struct {
-		name string
-		cfg  func(*loc.LocateOptions)
-		want bool
-	}{
-		{"origin match", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hosta"} }, true},
-		{"origin multi match 1", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hosta", "hostb"} }, true},
-		{"origin multi match 2", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hostb", "hosta", "hostc"} }, true},
-		{"origin empty", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{""} }, true},
-		{"origin not specified", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{""} }, true},
-		{"origin not match", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hostb"} }, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var lo loc.LocateOptions
-			tc.cfg(&lo)
-			if got := lo.Matches(it); got != tc.want {
-				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
-			}
-		})
-	}
-}
-
-func TestMatches_Types(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{}, []string{"fs"})
-
-	tests := []struct {
-		name string
-		cfg  func(*loc.LocateOptions)
-		want bool
-	}{
-		{"type match", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"fs"} }, true},
-		{"type multi match 1", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"fs", "s3"} }, true},
-		{"type multi match 2", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"s3", "fs", "onedrive"} }, true},
-		{"type empty", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{""} }, true},
-		{"type not specified", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{""} }, true},
-		{"type not match", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"s3"} }, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var lo loc.LocateOptions
-			tc.cfg(&lo)
-			if got := lo.Matches(it); got != tc.want {
-				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
-			}
-		})
 	}
 }
 
