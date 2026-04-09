@@ -210,6 +210,73 @@ func TestWithFilterOptions(t *testing.T) {
 	})
 }
 
+func TestLocateOptionsHasPeriods(t *testing.T) {
+	t.Run("False_WhenAllPeriodsAreEmpty", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		require.False(t, lo.HasPeriods())
+	})
+
+	t.Run("ReturnsTrueWhenAnyKeepPeriodIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{name: "Minute", apply: loc.WithKeepMinutes(1)},
+			{name: "Hour", apply: loc.WithKeepHours(1)},
+			{name: "Day", apply: loc.WithKeepDays(1)},
+			{name: "Week", apply: loc.WithKeepWeeks(1)},
+			{name: "Month", apply: loc.WithKeepMonths(1)},
+			{name: "Year", apply: loc.WithKeepYears(1)},
+			{name: "Monday", apply: loc.WithKeepMondays(1)},
+			{name: "Tuesday", apply: loc.WithKeepTuesdays(1)},
+			{name: "Wednesday", apply: loc.WithKeepWednesdays(1)},
+			{name: "Thursday", apply: loc.WithKeepThursdays(1)},
+			{name: "Friday", apply: loc.WithKeepFridays(1)},
+			{name: "Saturday", apply: loc.WithKeepSaturdays(1)},
+			{name: "Sunday", apply: loc.WithKeepSundays(1)},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.True(t, lo.HasPeriods())
+			})
+		}
+	})
+
+	t.Run("ReturnsTrueWhenAnyCapPeriodIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{name: "Minute", apply: loc.WithPerMinuteCap(1)},
+			{name: "Hour", apply: loc.WithPerHourCap(1)},
+			{name: "Day", apply: loc.WithPerDayCap(1)},
+			{name: "Week", apply: loc.WithPerWeekCap(1)},
+			{name: "Month", apply: loc.WithPerMonthCap(1)},
+			{name: "Year", apply: loc.WithPerYearCap(1)},
+			{name: "Monday", apply: loc.WithPerMondayCap(1)},
+			{name: "Tuesday", apply: loc.WithPerTuesdayCap(1)},
+			{name: "Wednesday", apply: loc.WithPerWednsdayCap(1)},
+			{name: "Thursday", apply: loc.WithPerThursdayCap(1)},
+			{name: "Friday", apply: loc.WithPerFridayCap(1)},
+			{name: "Saturday", apply: loc.WithPerSaturdayCap(1)},
+			{name: "Sunday", apply: loc.WithPerSundaysCap(1)},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.True(t, lo.HasPeriods())
+			})
+		}
+	})
+}
+
 // ========== Utilities ==========
 
 func mustRFC3339(t *testing.T, s string) time.Time {
@@ -266,17 +333,6 @@ func TestLocateOptions_Empty(t *testing.T) {
 	lo.Periods.Minute.Keep = 1
 	if lo.Empty() {
 		t.Fatalf("Empty() should be false when a period keep is set")
-	}
-}
-
-func TestHasPeriods(t *testing.T) {
-	var lo loc.LocateOptions
-	if lo.HasPeriods() {
-		t.Fatalf("HasPeriods false on zero-value")
-	}
-	lo.Periods.Minute.Cap = 1
-	if !lo.HasPeriods() {
-		t.Fatalf("HasPeriods true when any cap/keep is set")
 	}
 }
 
