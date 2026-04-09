@@ -1,10 +1,11 @@
-package locate
+package locate_test
 
 import (
 	"sort"
 	"testing"
 	"time"
 
+	loc "github.com/PlakarKorp/kloset/locate"
 	"github.com/PlakarKorp/kloset/objects"
 )
 
@@ -30,12 +31,12 @@ func mac(n byte) objects.MAC {
 }
 
 // makeItem creates a test Item.
-func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, env string, perim string, job string, tags []string, roots []string, origins []string, types []string) Item {
+func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, env string, perim string, job string, tags []string, roots []string, origins []string, types []string) loc.Item {
 	t.Helper()
-	return Item{
+	return loc.Item{
 		ItemID:    id,
 		Timestamp: mustRFC3339(t, ts),
-		Filters: ItemFilters{
+		Filters: loc.ItemFilters{
 			Name:        name,
 			Category:    cat,
 			Environment: env,
@@ -53,20 +54,20 @@ func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, 
 
 func TestNewDefaultLocateOptions_And_WithOptions(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-28T12:00:00Z")
-	lo := NewDefaultLocateOptions(
-		WithKeepMinutes(3),
-		WithPerHourCap(5),
-		WithBefore(now),
-		WithSince(now.Add(-24*time.Hour)),
-		WithName("n"),
-		WithCategory("c"),
-		WithEnvironment("prod"),
-		WithPerimeter("eu"),
-		WithJob("backup"),
-		WithTag("t1"),
-		WithOrigin("hosta"),
-		WithID("abc"),
-		WithLatest(true),
+	lo := loc.NewDefaultLocateOptions(
+		loc.WithKeepMinutes(3),
+		loc.WithPerHourCap(5),
+		loc.WithBefore(now),
+		loc.WithSince(now.Add(-24*time.Hour)),
+		loc.WithName("n"),
+		loc.WithCategory("c"),
+		loc.WithEnvironment("prod"),
+		loc.WithPerimeter("eu"),
+		loc.WithJob("backup"),
+		loc.WithTag("t1"),
+		loc.WithOrigin("hosta"),
+		loc.WithID("abc"),
+		loc.WithLatest(true),
 	)
 	if !lo.HasPeriods() {
 		t.Fatalf("HasPeriods should be true when any keep/cap is set")
@@ -93,7 +94,7 @@ func TestNewDefaultLocateOptions_And_WithOptions(t *testing.T) {
 }
 
 func TestLocateOptions_Empty(t *testing.T) {
-	var lo LocateOptions
+	var lo loc.LocateOptions
 	if !lo.Empty() {
 		t.Fatalf("Empty() should be true on zero-value")
 	}
@@ -101,7 +102,7 @@ func TestLocateOptions_Empty(t *testing.T) {
 	if lo.Empty() {
 		t.Fatalf("Empty() should be false when a filter is set")
 	}
-	lo = LocateOptions{}
+	lo = loc.LocateOptions{}
 	lo.Periods.Minute.Keep = 1
 	if lo.Empty() {
 		t.Fatalf("Empty() should be false when a period keep is set")
@@ -109,7 +110,7 @@ func TestLocateOptions_Empty(t *testing.T) {
 }
 
 func TestHasPeriods(t *testing.T) {
-	var lo LocateOptions
+	var lo loc.LocateOptions
 	if lo.HasPeriods() {
 		t.Fatalf("HasPeriods false on zero-value")
 	}
@@ -122,9 +123,9 @@ func TestHasPeriods(t *testing.T) {
 // ========== Matches (IDs / time windows / headers / tags / roots) ==========
 
 func TestMatches_IDPrefix(t *testing.T) {
-	var lo LocateOptions
+	var lo loc.LocateOptions
 	idZero := objects.NilMac
-	it := Item{ItemID: idZero, Timestamp: mustRFC3339(t, "2025-08-20T10:00:00Z")}
+	it := loc.Item{ItemID: idZero, Timestamp: mustRFC3339(t, "2025-08-20T10:00:00Z")}
 	// fmt.Sprintf("%x" , zero) will be all zeros → should match prefix "0"
 	lo.Filters.IDs = []string{"0"}
 	if !lo.Matches(it) {
@@ -138,16 +139,16 @@ func TestMatches_IDPrefix(t *testing.T) {
 
 func TestMatches_TimeWindow(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	itemBefore := Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}
-	itemAfter := Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")}
+	itemBefore := loc.Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}
+	itemAfter := loc.Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")}
 
 	// Before: reject items strictly AFTER the 'before' instant; equal allowed.
-	var lo LocateOptions
+	var lo loc.LocateOptions
 	lo.Filters.Before = now
 	if !lo.Matches(itemBefore) {
 		t.Fatalf("itemBefore should match with Before=now")
 	}
-	if !lo.Matches(Item{ItemID: mac(3), Timestamp: now}) {
+	if !lo.Matches(loc.Item{ItemID: mac(3), Timestamp: now}) {
 		t.Fatalf("item at exact Before should match (not After)")
 	}
 	if lo.Matches(itemAfter) {
@@ -155,12 +156,12 @@ func TestMatches_TimeWindow(t *testing.T) {
 	}
 
 	// Since: reject items strictly BEFORE the 'since' instant; equal allowed.
-	lo = LocateOptions{}
+	lo = loc.LocateOptions{}
 	lo.Filters.Since = now
 	if lo.Matches(itemBefore) {
 		t.Fatalf("itemBefore should not match (Before Since)")
 	}
-	if !lo.Matches(Item{ItemID: mac(4), Timestamp: now}) {
+	if !lo.Matches(loc.Item{ItemID: mac(4), Timestamp: now}) {
 		t.Fatalf("item at exact Since should match")
 	}
 	if !lo.Matches(itemAfter) {
@@ -173,24 +174,24 @@ func TestMatches_Headers_Tags_Roots(t *testing.T) {
 
 	tests := []struct {
 		name string
-		cfg  func(*LocateOptions)
+		cfg  func(*loc.LocateOptions)
 		want bool
 	}{
-		{"name ok", func(lo *LocateOptions) { lo.Filters.Name = "n1" }, true},
-		{"name mismatch", func(lo *LocateOptions) { lo.Filters.Name = "n2" }, false},
-		{"category ok", func(lo *LocateOptions) { lo.Filters.Category = "cat" }, true},
-		{"env mismatch", func(lo *LocateOptions) { lo.Filters.Environment = "stage" }, false},
-		{"perimeter ok", func(lo *LocateOptions) { lo.Filters.Perimeter = "eu" }, true},
-		{"job mismatch", func(lo *LocateOptions) { lo.Filters.Job = "restore" }, false},
-		{"tags all-present", func(lo *LocateOptions) { lo.Filters.Tags = []string{"t1", "t2"} }, true},
-		{"tags missing-one", func(lo *LocateOptions) { lo.Filters.Tags = []string{"t1", "t3"} }, false},
-		{"ignore tags", func(lo *LocateOptions) { lo.Filters.IgnoreTags = []string{"t2"} }, false},
-		{"roots all-present", func(lo *LocateOptions) { lo.Filters.Roots = []string{"r1", "r2"} }, true},
-		{"roots missing-one", func(lo *LocateOptions) { lo.Filters.Roots = []string{"r1", "r3"} }, false},
+		{"name ok", func(lo *loc.LocateOptions) { lo.Filters.Name = "n1" }, true},
+		{"name mismatch", func(lo *loc.LocateOptions) { lo.Filters.Name = "n2" }, false},
+		{"category ok", func(lo *loc.LocateOptions) { lo.Filters.Category = "cat" }, true},
+		{"env mismatch", func(lo *loc.LocateOptions) { lo.Filters.Environment = "stage" }, false},
+		{"perimeter ok", func(lo *loc.LocateOptions) { lo.Filters.Perimeter = "eu" }, true},
+		{"job mismatch", func(lo *loc.LocateOptions) { lo.Filters.Job = "restore" }, false},
+		{"tags all-present", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{"t1", "t2"} }, true},
+		{"tags missing-one", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{"t1", "t3"} }, false},
+		{"ignore tags", func(lo *loc.LocateOptions) { lo.Filters.IgnoreTags = []string{"t2"} }, false},
+		{"roots all-present", func(lo *loc.LocateOptions) { lo.Filters.Roots = []string{"r1", "r2"} }, true},
+		{"roots missing-one", func(lo *loc.LocateOptions) { lo.Filters.Roots = []string{"r1", "r3"} }, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var lo LocateOptions
+			var lo loc.LocateOptions
 			tc.cfg(&lo)
 			if got := lo.Matches(it); got != tc.want {
 				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
@@ -204,19 +205,19 @@ func TestMatches_Origins(t *testing.T) {
 
 	tests := []struct {
 		name string
-		cfg  func(*LocateOptions)
+		cfg  func(*loc.LocateOptions)
 		want bool
 	}{
-		{"origin match", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hosta"} }, true},
-		{"origin multi match 1", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hosta", "hostb"} }, true},
-		{"origin multi match 2", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hostb", "hosta", "hostc"} }, true},
-		{"origin empty", func(lo *LocateOptions) { lo.Filters.Origins = []string{""} }, true},
-		{"origin not specified", func(lo *LocateOptions) { lo.Filters.Tags = []string{""} }, true},
-		{"origin not match", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hostb"} }, false},
+		{"origin match", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hosta"} }, true},
+		{"origin multi match 1", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hosta", "hostb"} }, true},
+		{"origin multi match 2", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hostb", "hosta", "hostc"} }, true},
+		{"origin empty", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{""} }, true},
+		{"origin not specified", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{""} }, true},
+		{"origin not match", func(lo *loc.LocateOptions) { lo.Filters.Origins = []string{"hostb"} }, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var lo LocateOptions
+			var lo loc.LocateOptions
 			tc.cfg(&lo)
 			if got := lo.Matches(it); got != tc.want {
 				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
@@ -230,19 +231,19 @@ func TestMatches_Types(t *testing.T) {
 
 	tests := []struct {
 		name string
-		cfg  func(*LocateOptions)
+		cfg  func(*loc.LocateOptions)
 		want bool
 	}{
-		{"type match", func(lo *LocateOptions) { lo.Filters.Types = []string{"fs"} }, true},
-		{"type multi match 1", func(lo *LocateOptions) { lo.Filters.Types = []string{"fs", "s3"} }, true},
-		{"type multi match 2", func(lo *LocateOptions) { lo.Filters.Types = []string{"s3", "fs", "onedrive"} }, true},
-		{"type empty", func(lo *LocateOptions) { lo.Filters.Types = []string{""} }, true},
-		{"type not specified", func(lo *LocateOptions) { lo.Filters.Tags = []string{""} }, true},
-		{"type not match", func(lo *LocateOptions) { lo.Filters.Types = []string{"s3"} }, false},
+		{"type match", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"fs"} }, true},
+		{"type multi match 1", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"fs", "s3"} }, true},
+		{"type multi match 2", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"s3", "fs", "onedrive"} }, true},
+		{"type empty", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{""} }, true},
+		{"type not specified", func(lo *loc.LocateOptions) { lo.Filters.Tags = []string{""} }, true},
+		{"type not match", func(lo *loc.LocateOptions) { lo.Filters.Types = []string{"s3"} }, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			var lo LocateOptions
+			var lo loc.LocateOptions
 			tc.cfg(&lo)
 			if got := lo.Matches(it); got != tc.want {
 				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
@@ -254,12 +255,12 @@ func TestMatches_Types(t *testing.T) {
 // ========== FilterAndSort (ordering + Latest) ==========
 
 func TestFilterAndSort_OrderingAndLatest(t *testing.T) {
-	items := []Item{
+	items := []loc.Item{
 		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")},
 		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")},
 		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-19T23:59:59Z")},
 	}
-	var lo LocateOptions
+	var lo loc.LocateOptions
 	sorted := lo.FilterAndSort(items)
 	if len(sorted) != 3 {
 		t.Fatalf("expected 3 items")
@@ -279,13 +280,13 @@ func TestFilterAndSort_OrderingAndLatest(t *testing.T) {
 func TestMatch_KeepOnly_LastNDays_AllInWindowKept(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
 	// Items over the last 3 days (in-window) and one older (out-of-window)
-	items := []Item{
+	items := []loc.Item{
 		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}, // day 2025-08-20
 		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-19T10:00:00Z")}, // day 2025-08-19
 		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-18T09:00:00Z")}, // day 2025-08-18
 		{ItemID: mac(4), Timestamp: mustRFC3339(t, "2025-08-17T09:00:00Z")}, // outside (if Keep=3)
 	}
-	lo := LocateOptions{Periods: LocatePeriods{Day: LocatePeriod{Keep: 3}}}
+	lo := loc.LocateOptions{Periods: loc.LocatePeriods{Day: loc.LocatePeriod{Keep: 3}}}
 	kept, reasons := lo.Match(items, now)
 
 	if len(kept) != 3 {
@@ -310,13 +311,13 @@ func TestMatch_CapOnly_PerMinute_NewestFirstWithinBucket(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-20T12:00:30Z")
 	// 3 items in the same minute bucket "2025-08-20-12:00"
 	bucket := "2025-08-20-12:00"
-	items := []Item{
+	items := []loc.Item{
 		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T12:00:20Z")}, // newest within bucket
 		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T12:00:10Z")},
 		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")}, // oldest within bucket
 	}
 	// Ensure FilterAndSort will order desc by ts (newest first)
-	lo := LocateOptions{Periods: LocatePeriods{Minute: LocatePeriod{Cap: 2}}}
+	lo := loc.LocateOptions{Periods: loc.LocatePeriods{Minute: loc.LocatePeriod{Cap: 2}}}
 	kept, reasons := lo.Match(items, now)
 
 	if len(kept) != 2 {
@@ -351,7 +352,7 @@ func TestMatch_KeepAndCap_PerHour(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-20T17:05:00Z") // IMPORTANT: inside hour 17 so window is 17 & 16
 
 	// Two hours: 17 and 16; multiple items in each hour
-	items := []Item{
+	items := []loc.Item{
 		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T17:59:59Z")}, // hour 17
 		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T17:30:00Z")}, // hour 17
 		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T17:00:01Z")}, // hour 17
@@ -360,9 +361,9 @@ func TestMatch_KeepAndCap_PerHour(t *testing.T) {
 	}
 
 	// Keep last 2 hours (current hour 17 and previous hour 16), capped at 2 per hour.
-	lo := LocateOptions{
-		Periods: LocatePeriods{
-			Hour: LocatePeriod{Keep: 2, Cap: 2},
+	lo := loc.LocateOptions{
+		Periods: loc.LocatePeriods{
+			Hour: loc.LocatePeriod{Keep: 2, Cap: 2},
 		},
 	}
 	kept, reasons := lo.Match(items, now)
@@ -401,14 +402,14 @@ func TestMatch_MultipleRules_KeepBeatsDelete(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
 	// Two items same day & week. Cap day at 1 so the second is "delete" by day,
 	// but allow week to keep more (cap=2). The item should be kept overall.
-	item1 := Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T08:00:00Z")}
-	item2 := Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T07:00:00Z")}
-	items := []Item{item1, item2}
+	item1 := loc.Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T08:00:00Z")}
+	item2 := loc.Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T07:00:00Z")}
+	items := []loc.Item{item1, item2}
 
-	lo := LocateOptions{
-		Periods: LocatePeriods{
-			Day:  LocatePeriod{Keep: 1, Cap: 1}, // keep only the newest within the day
-			Week: LocatePeriod{Keep: 1, Cap: 2}, // same week key, allow both
+	lo := loc.LocateOptions{
+		Periods: loc.LocatePeriods{
+			Day:  loc.LocatePeriod{Keep: 1, Cap: 1}, // keep only the newest within the day
+			Week: loc.LocatePeriod{Keep: 1, Cap: 2}, // same week key, allow both
 		},
 	}
 
@@ -425,12 +426,12 @@ func TestMatch_MultipleRules_KeepBeatsDelete(t *testing.T) {
 func TestMatch_OutsideWindows_NoRulesKeeping(t *testing.T) {
 	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
 	// Items far in the past; Keep last 1 day only.
-	items := []Item{
+	items := []loc.Item{
 		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-10T00:00:00Z")},
 	}
-	lo := LocateOptions{
-		Periods: LocatePeriods{
-			Day: LocatePeriod{Keep: 1},
+	lo := loc.LocateOptions{
+		Periods: loc.LocatePeriods{
+			Day: loc.LocatePeriod{Keep: 1},
 		},
 	}
 	_, reasons := lo.Match(items, now)
@@ -442,11 +443,11 @@ func TestMatch_OutsideWindows_NoRulesKeeping(t *testing.T) {
 
 // Sanity: with no periods, Match should keep all matched-filter items and mark as "matched filters".
 func TestMatch_NoPeriods_KeepsAllMatches(t *testing.T) {
-	items := []Item{
+	items := []loc.Item{
 		makeItem(t, mac(1), "2025-08-20T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
 		makeItem(t, mac(2), "2025-08-18T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
 	}
-	lo := LocateOptions{}
+	lo := loc.LocateOptions{}
 	// Add restrictive filters that both items satisfy
 	lo.Filters.Name = "n"
 	lo.Filters.Category = "c"
