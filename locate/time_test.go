@@ -1,9 +1,11 @@
-package locate
+package locate_test
 
 import (
 	"strings"
 	"testing"
 	"time"
+
+	loc "github.com/PlakarKorp/kloset/locate"
 )
 
 // helper: compare times exactly (in UTC) for absolute parses
@@ -13,7 +15,7 @@ func mustUTC(t *testing.T, y int, m time.Month, d, hh, mm, ss int) time.Time {
 }
 
 func TestParseTimeFlag_Empty(t *testing.T) {
-	got, err := ParseTimeFlag("")
+	got, err := loc.ParseTimeFlag("")
 	if err != nil {
 		t.Fatalf("expected nil error, got %v", err)
 	}
@@ -44,7 +46,7 @@ func TestParseTimeFlag_AbsoluteFormats(t *testing.T) {
 	}
 
 	for _, tc := range tcs {
-		got, err := ParseTimeFlag(tc.in)
+		got, err := loc.ParseTimeFlag(tc.in)
 		if err != nil {
 			t.Fatalf("ParseTimeFlag(%q) error: %v", tc.in, err)
 		}
@@ -74,7 +76,7 @@ func TestParseTimeFlag_DurationRelativeNow(t *testing.T) {
 
 	for _, tc := range tcs {
 		before := time.Now()
-		got, err := ParseTimeFlag(tc.in)
+		got, err := loc.ParseTimeFlag(tc.in)
 		after := time.Now()
 		if err != nil {
 			t.Fatalf("ParseTimeFlag(%q) error: %v", tc.in, err)
@@ -98,7 +100,7 @@ func TestParseTimeFlag_Invalid(t *testing.T) {
 		"2025/99/01 25:61", // broken format & values
 	}
 	for _, in := range bad {
-		_, err := ParseTimeFlag(in)
+		_, err := loc.ParseTimeFlag(in)
 		if err == nil {
 			t.Fatalf("expected error for %q, got nil", in)
 		}
@@ -110,7 +112,7 @@ func TestParseTimeFlag_Invalid(t *testing.T) {
 
 func TestTimeFlag_SetAndString(t *testing.T) {
 	var dest time.Time
-	tf := NewTimeFlag(&dest)
+	tf := loc.NewTimeFlag(&dest)
 
 	// Zero value should stringify to empty
 	if s := tf.String(); s != "" {
@@ -135,7 +137,7 @@ func TestTimeFlag_SetAndString(t *testing.T) {
 
 func TestTimeFlag_Set_Duration(t *testing.T) {
 	var dest time.Time
-	tf := NewTimeFlag(&dest)
+	tf := loc.NewTimeFlag(&dest)
 
 	before := time.Now()
 	if err := tf.Set("30min"); err != nil { // IMPORTANT: use "min", not "m"
@@ -152,7 +154,7 @@ func TestTimeFlag_Set_Duration(t *testing.T) {
 
 func TestParseTimeFlag_MMeansMonths(t *testing.T) {
 	before := time.Now()
-	got, err := ParseTimeFlag("1m") // in this lib, "m" == month
+	got, err := loc.ParseTimeFlag("1m") // in this lib, "m" == month
 	if err != nil {
 		t.Fatalf("ParseTimeFlag(1m) error: %v", err)
 	}
