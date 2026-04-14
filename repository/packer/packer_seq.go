@@ -61,7 +61,7 @@ func NewSeqPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.C
 	}
 
 	for i := range nChan {
-		ret.packerChan[i] = make(chan PackerMsg)
+		ret.packerChan[i] = make(chan PackerMsg, 100)
 	}
 
 	return ret
@@ -156,6 +156,7 @@ func (mgr *seqPackerManager) Run() error {
 	// Wait for workers to finish.
 	if err := workerGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Worker group error: %s", err)
+		mgr.appCtx.Cancel(err)
 	}
 
 	// Close the result channel and wait for the flusher to finish.
