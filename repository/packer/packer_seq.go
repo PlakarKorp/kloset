@@ -78,8 +78,6 @@ func (mgr *seqPackerManager) Run() error {
 					continue
 				}
 
-				mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
-
 				if err := mgr.flush(pfile); err != nil {
 					err = fmt.Errorf("failed to flush packer: %w", err)
 
@@ -121,6 +119,10 @@ func (mgr *seqPackerManager) Run() error {
 				case pm, ok := <-mgr.packerChan[i]:
 					if !ok {
 						if pfile != nil && pfile.Size() > 0 {
+							if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+								return err
+							}
+
 							packerResultChan <- pfile
 						}
 						return nil
@@ -133,10 +135,14 @@ func (mgr *seqPackerManager) Run() error {
 							return err
 						}
 
-						mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
+						if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+							return err
+						}
 					}
 
-					pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags)
+					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+						return err
+					}
 
 					if pfile.Size() > mgr.storageConf.Packfile.MaxSize {
 						packerResultChan <- pfile
@@ -239,6 +245,5 @@ func (mgr *seqPackerManager) AddPadding(packfile packfile.Packfile, maxSize int)
 		return fmt.Errorf("failed to generate random padding MAC: %w", err)
 	}
 
-	packfile.AddBlob(resources.RT_RANDOM, versioning.GetCurrentVersion(resources.RT_RANDOM), mac, buffer, 0)
-	return nil
+	return packfile.AddBlob(resources.RT_RANDOM, versioning.GetCurrentVersion(resources.RT_RANDOM), mac, buffer, 0)
 }
