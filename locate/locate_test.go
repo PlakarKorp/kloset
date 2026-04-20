@@ -1,478 +1,1467 @@
-package locate
+package locate_test
 
 import (
-	"sort"
+	"fmt"
 	"testing"
 	"time"
 
+	loc "github.com/PlakarKorp/kloset/locate"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/stretchr/testify/require"
 )
 
-// ========== Utilities ==========
+func TestLocatePeriodEmpty(t *testing.T) {
+	t.Run("EmptyArgumentsReturnsTrue", func(t *testing.T) {
+		lp := loc.LocatePeriod{}
+		require.True(t, lp.Empty())
+	})
 
-func mustRFC3339(t *testing.T, s string) time.Time {
-	t.Helper()
-	tt, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		t.Fatalf("parse time: %v", err)
-	}
-	return tt.UTC()
+	t.Run("ReturnsFalseIfAnyArgumentIsSet", func(t *testing.T) {
+		testCases := []loc.LocatePeriod{
+			{Keep: 1, Cap: 0},
+			{Keep: 0, Cap: 1},
+			{Keep: 1, Cap: 1},
+			{Keep: 2, Cap: 3},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(fmt.Sprintf("Keep%dCap%d", tc.Keep, tc.Cap), func(t *testing.T) {
+				require.False(t, tc.Empty())
+			})
+		}
+	})
 }
 
-// mac(n) returns a unique, deterministic objects.MAC for tests by setting
-// the first byte (works when MAC is a named byte array, which is typical).
-// If MAC is not a byte array, this is a no-op and tests still compile,
-// but uniqueness may not hold (adjust if needed).
-func mac(n byte) objects.MAC {
-	var m objects.MAC
-	m[0] = n
-	return m
-}
+// NewDefaultLocateOptions is tested first with anonymous Option functions
+// instead of the public With... helpers.
+// This keeps the testing consistency:
+// - NewDefaultLocateOptions is validated on its own contract first
+// - the public With... helpers are tested afterwards as a separate API block
+func TestNewDefaultLocateOptions(t *testing.T) {
+	t.Run("WithoutOptionsReturnsNonNilEmptyLocateOptions", func(t *testing.T) {
+		got := loc.NewDefaultLocateOptions()
+		require.NotNil(t, got)
+		require.Equal(t, &loc.LocateOptions{}, got)
+	})
 
-// makeItem creates a test Item.
-func makeItem(t *testing.T, id objects.MAC, ts string, name string, cat string, env string, perim string, job string, tags []string, roots []string, origins []string, types []string) Item {
-	t.Helper()
-	return Item{
-		ItemID:    id,
-		Timestamp: mustRFC3339(t, ts),
-		Filters: ItemFilters{
-			Name:        name,
-			Category:    cat,
-			Environment: env,
-			Perimeter:   perim,
-			Job:         job,
-			Tags:        tags,
-			Roots:       roots,
-			Origins:     origins,
-			Types:       types,
-		},
-	}
-}
-
-// ========== Options wiring / HasPeriods / Empty ==========
-
-func TestNewDefaultLocateOptions_And_WithOptions(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-28T12:00:00Z")
-	lo := NewDefaultLocateOptions(
-		WithKeepMinutes(3),
-		WithPerHourCap(5),
-		WithBefore(now),
-		WithSince(now.Add(-24*time.Hour)),
-		WithName("n"),
-		WithCategory("c"),
-		WithEnvironment("prod"),
-		WithPerimeter("eu"),
-		WithJob("backup"),
-		WithTag("t1"),
-		WithOrigin("hosta"),
-		WithID("abc"),
-		WithLatest(true),
-	)
-	if !lo.HasPeriods() {
-		t.Fatalf("HasPeriods should be true when any keep/cap is set")
-	}
-	if lo.Periods.Minute.Keep != 3 || lo.Periods.Hour.Cap != 5 {
-		t.Fatalf("options not applied: minute.keep=%d hour.cap=%d", lo.Periods.Minute.Keep, lo.Periods.Hour.Cap)
-	}
-	if lo.Filters.Before.IsZero() || lo.Filters.Since.IsZero() {
-		t.Fatalf("before/since not set")
-	}
-	if lo.Filters.Name != "n" || lo.Filters.Category != "c" || lo.Filters.Environment != "prod" ||
-		lo.Filters.Perimeter != "eu" || lo.Filters.Job != "backup" || !lo.Filters.Latest {
-		t.Fatalf("filters not set correctly: %+v", lo.Filters)
-	}
-	if got := len(lo.Filters.Tags); got != 1 {
-		t.Fatalf("tags len: got %d want 1", got)
-	}
-	if got := len(lo.Filters.Origins); got != 1 {
-		t.Fatalf("origin len: got %d want 1", got)
-	}
-	if got := len(lo.Filters.IDs); got != 1 {
-		t.Fatalf("IDs len: got %d want 1", got)
-	}
-}
-
-func TestLocateOptions_Empty(t *testing.T) {
-	var lo LocateOptions
-	if !lo.Empty() {
-		t.Fatalf("Empty() should be true on zero-value")
-	}
-	lo.Filters.Name = "x"
-	if lo.Empty() {
-		t.Fatalf("Empty() should be false when a filter is set")
-	}
-	lo = LocateOptions{}
-	lo.Periods.Minute.Keep = 1
-	if lo.Empty() {
-		t.Fatalf("Empty() should be false when a period keep is set")
-	}
-}
-
-func TestHasPeriods(t *testing.T) {
-	var lo LocateOptions
-	if lo.HasPeriods() {
-		t.Fatalf("HasPeriods false on zero-value")
-	}
-	lo.Periods.Minute.Cap = 1
-	if !lo.HasPeriods() {
-		t.Fatalf("HasPeriods true when any cap/keep is set")
-	}
-}
-
-// ========== Matches (IDs / time windows / headers / tags / roots) ==========
-
-func TestMatches_IDPrefix(t *testing.T) {
-	var lo LocateOptions
-	idZero := objects.NilMac
-	it := Item{ItemID: idZero, Timestamp: mustRFC3339(t, "2025-08-20T10:00:00Z")}
-	// fmt.Sprintf("%x" , zero) will be all zeros → should match prefix "0"
-	lo.Filters.IDs = []string{"0"}
-	if !lo.Matches(it) {
-		t.Fatalf("expected match for ID prefix '0'")
-	}
-	lo.Filters.IDs = []string{"f"} // zero MAC does not start with 'f'
-	if lo.Matches(it) {
-		t.Fatalf("expected no match for ID prefix 'f'")
-	}
-}
-
-func TestMatches_TimeWindow(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	itemBefore := Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}
-	itemAfter := Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")}
-
-	// Before: reject items strictly AFTER the 'before' instant; equal allowed.
-	var lo LocateOptions
-	lo.Filters.Before = now
-	if !lo.Matches(itemBefore) {
-		t.Fatalf("itemBefore should match with Before=now")
-	}
-	if !lo.Matches(Item{ItemID: mac(3), Timestamp: now}) {
-		t.Fatalf("item at exact Before should match (not After)")
-	}
-	if lo.Matches(itemAfter) {
-		t.Fatalf("itemAfter should not match (is After Before)")
-	}
-
-	// Since: reject items strictly BEFORE the 'since' instant; equal allowed.
-	lo = LocateOptions{}
-	lo.Filters.Since = now
-	if lo.Matches(itemBefore) {
-		t.Fatalf("itemBefore should not match (Before Since)")
-	}
-	if !lo.Matches(Item{ItemID: mac(4), Timestamp: now}) {
-		t.Fatalf("item at exact Since should match")
-	}
-	if !lo.Matches(itemAfter) {
-		t.Fatalf("itemAfter should match (After Since)")
-	}
-}
-
-func TestMatches_Headers_Tags_Roots(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{}, []string{})
-
-	tests := []struct {
-		name string
-		cfg  func(*LocateOptions)
-		want bool
-	}{
-		{"name ok", func(lo *LocateOptions) { lo.Filters.Name = "n1" }, true},
-		{"name mismatch", func(lo *LocateOptions) { lo.Filters.Name = "n2" }, false},
-		{"category ok", func(lo *LocateOptions) { lo.Filters.Category = "cat" }, true},
-		{"env mismatch", func(lo *LocateOptions) { lo.Filters.Environment = "stage" }, false},
-		{"perimeter ok", func(lo *LocateOptions) { lo.Filters.Perimeter = "eu" }, true},
-		{"job mismatch", func(lo *LocateOptions) { lo.Filters.Job = "restore" }, false},
-		{"tags all-present", func(lo *LocateOptions) { lo.Filters.Tags = []string{"t1", "t2"} }, true},
-		{"tags missing-one", func(lo *LocateOptions) { lo.Filters.Tags = []string{"t1", "t3"} }, false},
-		{"ignore tags", func(lo *LocateOptions) { lo.Filters.IgnoreTags = []string{"t2"} }, false},
-		{"roots all-present", func(lo *LocateOptions) { lo.Filters.Roots = []string{"r1", "r2"} }, true},
-		{"roots missing-one", func(lo *LocateOptions) { lo.Filters.Roots = []string{"r1", "r3"} }, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var lo LocateOptions
-			tc.cfg(&lo)
-			if got := lo.Matches(it); got != tc.want {
-				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
-			}
+	t.Run("AppliesSingleOption", func(t *testing.T) {
+		got := loc.NewDefaultLocateOptions(func(lo *loc.LocateOptions) {
+			lo.Filters.Name = "daily-backup"
 		})
-	}
+		require.Equal(t, "daily-backup", got.Filters.Name)
+	})
+
+	t.Run("AppliesMultipleOptions", func(t *testing.T) {
+		before := time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)
+
+		got := loc.NewDefaultLocateOptions(
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Name = "daily-backup"
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Before = before
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Periods.Day.Keep = 7
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Periods.Day.Cap = 2
+			},
+		)
+		require.Equal(t, "daily-backup", got.Filters.Name)
+		require.Equal(t, before, got.Filters.Before)
+		require.Equal(t, 7, got.Periods.Day.Keep)
+		require.Equal(t, 2, got.Periods.Day.Cap)
+	})
+
+	t.Run("AppliesOptionsInOrder", func(t *testing.T) {
+		got := loc.NewDefaultLocateOptions(
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Name = "first"
+			},
+			func(lo *loc.LocateOptions) {
+				lo.Filters.Name = "second"
+			},
+		)
+		require.Equal(t, "second", got.Filters.Name)
+	})
 }
 
-func TestMatches_Origins(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{"hosta"}, []string{})
+func TestWithKeepOptions(t *testing.T) {
+	t.Run("SetsStandardPeriodKeepFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
 
-	tests := []struct {
-		name string
-		cfg  func(*LocateOptions)
-		want bool
-	}{
-		{"origin match", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hosta"} }, true},
-		{"origin multi match 1", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hosta", "hostb"} }, true},
-		{"origin multi match 2", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hostb", "hosta", "hostc"} }, true},
-		{"origin empty", func(lo *LocateOptions) { lo.Filters.Origins = []string{""} }, true},
-		{"origin not specified", func(lo *LocateOptions) { lo.Filters.Tags = []string{""} }, true},
-		{"origin not match", func(lo *LocateOptions) { lo.Filters.Origins = []string{"hostb"} }, false},
+		loc.WithKeepMinutes(1)(lo)
+		loc.WithKeepHours(2)(lo)
+		loc.WithKeepDays(3)(lo)
+		loc.WithKeepWeeks(4)(lo)
+		loc.WithKeepMonths(5)(lo)
+		loc.WithKeepYears(6)(lo)
+
+		require.Equal(t, 1, lo.Periods.Minute.Keep)
+		require.Equal(t, 2, lo.Periods.Hour.Keep)
+		require.Equal(t, 3, lo.Periods.Day.Keep)
+		require.Equal(t, 4, lo.Periods.Week.Keep)
+		require.Equal(t, 5, lo.Periods.Month.Keep)
+		require.Equal(t, 6, lo.Periods.Year.Keep)
+	})
+
+	t.Run("SetsWeekdayPeriodKeepFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithKeepMondays(1)(lo)
+		loc.WithKeepTuesdays(2)(lo)
+		loc.WithKeepWednesdays(3)(lo)
+		loc.WithKeepThursdays(4)(lo)
+		loc.WithKeepFridays(5)(lo)
+		loc.WithKeepSaturdays(6)(lo)
+		loc.WithKeepSundays(7)(lo)
+
+		require.Equal(t, 1, lo.Periods.Monday.Keep)
+		require.Equal(t, 2, lo.Periods.Tuesday.Keep)
+		require.Equal(t, 3, lo.Periods.Wednesday.Keep)
+		require.Equal(t, 4, lo.Periods.Thursday.Keep)
+		require.Equal(t, 5, lo.Periods.Friday.Keep)
+		require.Equal(t, 6, lo.Periods.Saturday.Keep)
+		require.Equal(t, 7, lo.Periods.Sunday.Keep)
+	})
+}
+
+func TestWithCapOptions(t *testing.T) {
+	t.Run("SetsStandardPeriodCapFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithPerMinuteCap(1)(lo)
+		loc.WithPerHourCap(2)(lo)
+		loc.WithPerDayCap(3)(lo)
+		loc.WithPerWeekCap(4)(lo)
+		loc.WithPerMonthCap(5)(lo)
+		loc.WithPerYearCap(6)(lo)
+
+		require.Equal(t, 1, lo.Periods.Minute.Cap)
+		require.Equal(t, 2, lo.Periods.Hour.Cap)
+		require.Equal(t, 3, lo.Periods.Day.Cap)
+		require.Equal(t, 4, lo.Periods.Week.Cap)
+		require.Equal(t, 5, lo.Periods.Month.Cap)
+		require.Equal(t, 6, lo.Periods.Year.Cap)
+	})
+
+	t.Run("SetsWeekdayPeriodCapFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithPerMondayCap(1)(lo)
+		loc.WithPerTuesdayCap(2)(lo)
+		loc.WithPerWednsdayCap(3)(lo)
+		loc.WithPerThursdayCap(4)(lo)
+		loc.WithPerFridayCap(5)(lo)
+		loc.WithPerSaturdayCap(6)(lo)
+		loc.WithPerSundaysCap(7)(lo)
+
+		require.Equal(t, 1, lo.Periods.Monday.Cap)
+		require.Equal(t, 2, lo.Periods.Tuesday.Cap)
+		require.Equal(t, 3, lo.Periods.Wednesday.Cap)
+		require.Equal(t, 4, lo.Periods.Thursday.Cap)
+		require.Equal(t, 5, lo.Periods.Friday.Cap)
+		require.Equal(t, 6, lo.Periods.Saturday.Cap)
+		require.Equal(t, 7, lo.Periods.Sunday.Cap)
+	})
+}
+
+func TestWithFilterOptions(t *testing.T) {
+	t.Run("SetsScalarFilterFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		before := time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)
+		since := time.Date(2025, time.August, 20, 8, 0, 0, 0, time.UTC)
+
+		loc.WithBefore(before)(lo)
+		loc.WithSince(since)(lo)
+		loc.WithName("daily-backup")(lo)
+		loc.WithCategory("database")(lo)
+		loc.WithEnvironment("prod")(lo)
+		loc.WithPerimeter("eu-west")(lo)
+		loc.WithJob("nightly")(lo)
+		loc.WithLatest(true)(lo)
+
+		require.Equal(t, before, lo.Filters.Before)
+		require.Equal(t, since, lo.Filters.Since)
+		require.Equal(t, "daily-backup", lo.Filters.Name)
+		require.Equal(t, "database", lo.Filters.Category)
+		require.Equal(t, "prod", lo.Filters.Environment)
+		require.Equal(t, "eu-west", lo.Filters.Perimeter)
+		require.Equal(t, "nightly", lo.Filters.Job)
+		require.True(t, lo.Filters.Latest)
+	})
+
+	t.Run("AppendsSliceBasedFilterFields", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+
+		loc.WithTag("important")(lo)
+		loc.WithTag("daily")(lo)
+		loc.WithOrigin("s3://bucket-a")(lo)
+		loc.WithOrigin("s3://bucket-b")(lo)
+		loc.WithID("abc123")(lo)
+		loc.WithID("def456")(lo)
+
+		require.Equal(t, []string{"important", "daily"}, lo.Filters.Tags)
+		require.Equal(t, []string{"s3://bucket-a", "s3://bucket-b"}, lo.Filters.Origins)
+		require.Equal(t, []string{"abc123", "def456"}, lo.Filters.IDs)
+	})
+}
+
+func TestLocateOptionsHasPeriods(t *testing.T) {
+	t.Run("False_WhenAllPeriodsAreEmpty", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		require.False(t, lo.HasPeriods())
+	})
+
+	t.Run("ReturnsTrueWhenAnyKeepPeriodIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{name: "Minute", apply: loc.WithKeepMinutes(1)},
+			{name: "Hour", apply: loc.WithKeepHours(1)},
+			{name: "Day", apply: loc.WithKeepDays(1)},
+			{name: "Week", apply: loc.WithKeepWeeks(1)},
+			{name: "Month", apply: loc.WithKeepMonths(1)},
+			{name: "Year", apply: loc.WithKeepYears(1)},
+			{name: "Monday", apply: loc.WithKeepMondays(1)},
+			{name: "Tuesday", apply: loc.WithKeepTuesdays(1)},
+			{name: "Wednesday", apply: loc.WithKeepWednesdays(1)},
+			{name: "Thursday", apply: loc.WithKeepThursdays(1)},
+			{name: "Friday", apply: loc.WithKeepFridays(1)},
+			{name: "Saturday", apply: loc.WithKeepSaturdays(1)},
+			{name: "Sunday", apply: loc.WithKeepSundays(1)},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.True(t, lo.HasPeriods())
+			})
+		}
+	})
+
+	t.Run("ReturnsTrueWhenAnyCapPeriodIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{name: "Minute", apply: loc.WithPerMinuteCap(1)},
+			{name: "Hour", apply: loc.WithPerHourCap(1)},
+			{name: "Day", apply: loc.WithPerDayCap(1)},
+			{name: "Week", apply: loc.WithPerWeekCap(1)},
+			{name: "Month", apply: loc.WithPerMonthCap(1)},
+			{name: "Year", apply: loc.WithPerYearCap(1)},
+			{name: "Monday", apply: loc.WithPerMondayCap(1)},
+			{name: "Tuesday", apply: loc.WithPerTuesdayCap(1)},
+			{name: "Wednesday", apply: loc.WithPerWednsdayCap(1)},
+			{name: "Thursday", apply: loc.WithPerThursdayCap(1)},
+			{name: "Friday", apply: loc.WithPerFridayCap(1)},
+			{name: "Saturday", apply: loc.WithPerSaturdayCap(1)},
+			{name: "Sunday", apply: loc.WithPerSundaysCap(1)},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.True(t, lo.HasPeriods())
+			})
+		}
+	})
+}
+
+func TestLocateOptionsEmpty(t *testing.T) {
+	t.Run("True_WhenNoPeriodsOrSupportedFiltersAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("False_WhenAnyPeriodIsConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		loc.WithKeepDays(1)(lo)
+		require.False(t, lo.Empty())
+	})
+
+	t.Run("False_WhenScalarFilterIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{
+				name:  "Name",
+				apply: loc.WithName("daily-backup"),
+			},
+			{
+				name:  "Category",
+				apply: loc.WithCategory("database"),
+			},
+			{
+				name:  "Environment",
+				apply: loc.WithEnvironment("prod"),
+			},
+			{
+				name:  "Perimeter",
+				apply: loc.WithPerimeter("eu-west"),
+			},
+			{
+				name:  "Job",
+				apply: loc.WithJob("nightly"),
+			},
+			{
+				name:  "Before",
+				apply: loc.WithBefore(time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)),
+			},
+			{
+				name:  "Since",
+				apply: loc.WithSince(time.Date(2025, time.August, 20, 8, 0, 0, 0, time.UTC)),
+			},
+			{
+				name:  "Latest",
+				apply: loc.WithLatest(true),
+			},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.False(t, lo.Empty())
+			})
+		}
+	})
+
+	t.Run("False_WhenSliceFilterIsConfigured", func(t *testing.T) {
+		testCases := []struct {
+			name  string
+			apply loc.Option
+		}{
+			{
+				name:  "Tags",
+				apply: loc.WithTag("important"),
+			},
+			{
+				name:  "IDs",
+				apply: loc.WithID("abc123"),
+			},
+		}
+
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				lo := &loc.LocateOptions{}
+				tc.apply(lo)
+				require.False(t, lo.Empty())
+			})
+		}
+	})
+
+	t.Run("False_WhenRootsFilterIsConfiguredDirectly", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Roots: []string{"/var/backups"},
+			},
+		}
+		require.False(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyOriginsAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Origins: []string{"s3://bucket-a"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyTypesAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Types: []string{"s3"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyIgnoreTagsAreConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				IgnoreTags: []string{"temporary"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsTrueWhenOnlyIgnoredFiltersAreCombined", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Origins:    []string{"s3://bucket-a"},
+				Types:      []string{"s3"},
+				IgnoreTags: []string{"temporary"},
+			},
+		}
+		require.True(t, lo.Empty())
+	})
+
+	t.Run("ReturnsFalseWhenIgnoredAndSupportedFiltersAreCombined", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Origins:    []string{"s3://bucket-a"},
+				Types:      []string{"s3"},
+				IgnoreTags: []string{"temporary"},
+				Name:       "daily-backup",
+			},
+		}
+		require.False(t, lo.Empty())
+	})
+}
+
+func TestItemFiltersHasTag(t *testing.T) {
+	t.Run("EmptyTagReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Tags: []string{"daily", "important"},
+		}
+		require.True(t, filters.HasTag(""))
+	})
+
+	t.Run("ReturnsTrueWhenTagExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Tags: []string{"daily", "important"},
+		}
+		require.True(t, filters.HasTag("important"))
+	})
+
+	t.Run("ReturnsFalseWhenTagDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Tags: []string{"daily", "important"},
+		}
+		require.False(t, filters.HasTag("weekly"))
+	})
+}
+
+func TestItemFiltersHasType(t *testing.T) {
+	t.Run("EmptyTypeReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+
+		require.True(t, filters.HasType(""))
+	})
+
+	t.Run("ReturnsTrueWhenTypeExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.True(t, filters.HasType("s3"))
+	})
+
+	t.Run("ReturnsFalseWhenTypeDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.False(t, filters.HasType("swift"))
+	})
+}
+
+func TestItemFiltersHasOrigin(t *testing.T) {
+	t.Run("EmptyOriginReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.True(t, filters.HasOrigin(""))
+	})
+
+	t.Run("ReturnsTrueWhenOriginExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+
+		require.True(t, filters.HasOrigin("s3://bucket-b"))
+	})
+
+	t.Run("ReturnsFalseWhenOriginDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.False(t, filters.HasOrigin("s3://bucket-c"))
+	})
+}
+
+func TestItemFiltersHasOrigins(t *testing.T) {
+	t.Run("EmptyOriginsReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.True(t, filters.HasOrigins(nil))
+		require.True(t, filters.HasOrigins([]string{}))
+	})
+
+	t.Run("ReturnsTrueWhenAnyOriginMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+
+		require.True(t, filters.HasOrigins([]string{"s3://bucket-x", "s3://bucket-b"}))
+	})
+
+	t.Run("ReturnsFalseWhenNoOriginMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Origins: []string{"s3://bucket-a", "s3://bucket-b"},
+		}
+		require.False(t, filters.HasOrigins([]string{"s3://bucket-x", "s3://bucket-y"}))
+	})
+}
+
+func TestItemFiltersHasTypes(t *testing.T) {
+	t.Run("EmptyTypesReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.True(t, filters.HasTypes(nil))
+		require.True(t, filters.HasTypes([]string{}))
+	})
+
+	t.Run("ReturnsTrueWhenAnyTypeMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.True(t, filters.HasTypes([]string{"swift", "s3"}))
+	})
+
+	t.Run("ReturnsFalseWhenNoTypeMatches", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Types: []string{"fs", "s3"},
+		}
+		require.False(t, filters.HasTypes([]string{"swift", "b2"}))
+	})
+}
+
+func TestItemFiltersHasRoot(t *testing.T) {
+	t.Run("EmptyRootReturnsTrue", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Roots: []string{"/var/backups", "/srv/data"},
+		}
+		require.True(t, filters.HasRoot(""))
+	})
+
+	t.Run("ReturnsTrueWhenRootExists", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Roots: []string{"/var/backups", "/srv/data"},
+		}
+		require.True(t, filters.HasRoot("/srv/data"))
+	})
+
+	t.Run("ReturnsFalseWhenRootDoesNotExist", func(t *testing.T) {
+		filters := loc.ItemFilters{
+			Roots: []string{"/var/backups", "/srv/data"},
+		}
+		require.False(t, filters.HasRoot("/tmp"))
+	})
+}
+
+func TestLocateOptionsMatches(t *testing.T) {
+	baseTime := time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC)
+
+	var zeroID objects.MAC
+	baseItem := loc.Item{
+		ItemID:    zeroID,
+		Timestamp: baseTime,
+		Filters: loc.ItemFilters{
+			Name:        "daily-backup",
+			Category:    "database",
+			Environment: "prod",
+			Perimeter:   "eu-west",
+			Job:         "nightly",
+			Tags:        []string{"daily", "important"},
+			Types:       []string{"fs", "s3"},
+			Origins:     []string{"s3://bucket-a", "s3://bucket-b"},
+			Roots:       []string{"/var/backups", "/srv/data"},
+		},
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var lo LocateOptions
-			tc.cfg(&lo)
-			if got := lo.Matches(it); got != tc.want {
-				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
+
+	t.Run("ReturnsTrueWhenNoFilterIsConfigured", func(t *testing.T) {
+		lo := &loc.LocateOptions{}
+		require.True(t, lo.Matches(baseItem))
+	})
+
+	t.Run("MatchesIDsByPrefix", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAnyPrefixMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					IDs: []string{"f", "0"},
+				},
 			}
+			require.True(t, lo.Matches(baseItem))
 		})
-	}
-}
 
-func TestMatches_Types(t *testing.T) {
-	it := makeItem(t, mac(1), "2025-08-20T10:00:00Z", "n1", "cat", "prod", "eu", "backup", []string{"t1", "t2"}, []string{"r1", "r2"}, []string{}, []string{"fs"})
-
-	tests := []struct {
-		name string
-		cfg  func(*LocateOptions)
-		want bool
-	}{
-		{"type match", func(lo *LocateOptions) { lo.Filters.Types = []string{"fs"} }, true},
-		{"type multi match 1", func(lo *LocateOptions) { lo.Filters.Types = []string{"fs", "s3"} }, true},
-		{"type multi match 2", func(lo *LocateOptions) { lo.Filters.Types = []string{"s3", "fs", "onedrive"} }, true},
-		{"type empty", func(lo *LocateOptions) { lo.Filters.Types = []string{""} }, true},
-		{"type not specified", func(lo *LocateOptions) { lo.Filters.Tags = []string{""} }, true},
-		{"type not match", func(lo *LocateOptions) { lo.Filters.Types = []string{"s3"} }, false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			var lo LocateOptions
-			tc.cfg(&lo)
-			if got := lo.Matches(it); got != tc.want {
-				t.Fatalf("got %v want %v for %s", got, tc.want, tc.name)
+		t.Run("ReturnsFalseWhenNoPrefixMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					IDs: []string{"a", "b"},
+				},
 			}
+			require.False(t, lo.Matches(baseItem))
 		})
-	}
-}
+	})
 
-// ========== FilterAndSort (ordering + Latest) ==========
+	t.Run("AppliesBeforeInclusively", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenTimestampIsBeforeBefore", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Before: baseTime,
+				},
+			}
+			item := baseItem
+			item.Timestamp = baseTime.Add(-time.Second)
+			require.True(t, lo.Matches(item))
+		})
 
-func TestFilterAndSort_OrderingAndLatest(t *testing.T) {
-	items := []Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")},
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T13:00:00Z")},
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-19T23:59:59Z")},
-	}
-	var lo LocateOptions
-	sorted := lo.FilterAndSort(items)
-	if len(sorted) != 3 {
-		t.Fatalf("expected 3 items")
-	}
-	if !sorted[0].Timestamp.After(sorted[1].Timestamp) || !sorted[1].Timestamp.After(sorted[2].Timestamp) {
-		t.Fatalf("not sorted desc by Timestamp")
-	}
-	lo.Filters.Latest = true
-	one := lo.FilterAndSort(items)
-	if len(one) != 1 || !one[0].Timestamp.Equal(mustRFC3339(t, "2025-08-20T13:00:00Z")) {
-		t.Fatalf("Latest should return single newest item, got %#v", one)
-	}
-}
+		t.Run("ReturnsTrueWhenTimestampEqualsBefore", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Before: baseTime,
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
 
-// ========== Match / retention logic ==========
+		t.Run("ReturnsFalseWhenTimestampIsAfterBefore", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Before: baseTime.Add(-time.Second),
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
 
-func TestMatch_KeepOnly_LastNDays_AllInWindowKept(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	// Items over the last 3 days (in-window) and one older (out-of-window)
-	items := []Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T11:00:00Z")}, // day 2025-08-20
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-19T10:00:00Z")}, // day 2025-08-19
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-18T09:00:00Z")}, // day 2025-08-18
-		{ItemID: mac(4), Timestamp: mustRFC3339(t, "2025-08-17T09:00:00Z")}, // outside (if Keep=3)
-	}
-	lo := LocateOptions{Periods: LocatePeriods{Day: LocatePeriod{Keep: 3}}}
-	kept, reasons := lo.Match(items, now)
+	t.Run("AppliesSinceInclusively", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenTimestampIsAfterSince", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Since: baseTime,
+				},
+			}
 
-	if len(kept) != 3 {
-		t.Fatalf("kept len: got %d want 3", len(kept))
-	}
-	// The oldest one should be outside window.
-	oldID := items[3].ItemID
-	if r, ok := reasons[oldID]; !ok || r.Action != "delete" || r.Note != "outside retention windows" {
-		t.Fatalf("expect outside-window delete for oldest, got %#v", r)
-	}
-	// Others kept with rule "day"
-	for i := 0; i < 3; i++ {
-		id := items[i].ItemID
-		r, ok := reasons[id]
-		if !ok || r.Action != "keep" || r.Rule != "day" || r.Bucket == "" {
-			t.Fatalf("expect keep with day rule for %d, got %#v", i, r)
+			item := baseItem
+			item.Timestamp = baseTime.Add(time.Second)
+			require.True(t, lo.Matches(item))
+		})
+
+		t.Run("ReturnsTrueWhenTimestampEqualsSince", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Since: baseTime,
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenTimestampIsBeforeSince", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Since: baseTime.Add(time.Second),
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("MatchesScalarHeaderFieldsByExactEquality", func(t *testing.T) {
+		testCases := []struct {
+			name               string
+			withMatchingFilter func() *loc.LocateOptions
+			withOtherFilter    func() *loc.LocateOptions
+		}{
+			{
+				name: "Name",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Name: "daily-backup"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Name: "weekly-backup"},
+					}
+				},
+			},
+			{
+				name: "Category",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Category: "database"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Category: "filesystem"},
+					}
+				},
+			},
+			{
+				name: "Environment",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Environment: "prod"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Environment: "staging"},
+					}
+				},
+			},
+			{
+				name: "Perimeter",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Perimeter: "eu-west"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Perimeter: "us-east"},
+					}
+				},
+			},
+			{
+				name: "Job",
+				withMatchingFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Job: "nightly"},
+					}
+				},
+				withOtherFilter: func() *loc.LocateOptions {
+					return &loc.LocateOptions{
+						Filters: loc.LocateFilters{Job: "hourly"},
+					}
+				},
+			},
 		}
-	}
-}
 
-func TestMatch_CapOnly_PerMinute_NewestFirstWithinBucket(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:30Z")
-	// 3 items in the same minute bucket "2025-08-20-12:00"
-	bucket := "2025-08-20-12:00"
-	items := []Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T12:00:20Z")}, // newest within bucket
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T12:00:10Z")},
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T12:00:00Z")}, // oldest within bucket
-	}
-	// Ensure FilterAndSort will order desc by ts (newest first)
-	lo := LocateOptions{Periods: LocatePeriods{Minute: LocatePeriod{Cap: 2}}}
-	kept, reasons := lo.Match(items, now)
-
-	if len(kept) != 2 {
-		t.Fatalf("kept len: got %d want 2", len(kept))
-	}
-
-	// Collect ranks
-	ranks := make([]int, 0, 3)
-	caps := make([]int, 0, 3)
-	actions := make([]string, 0, 3)
-	for _, it := range items {
-		r := reasons[it.ItemID]
-		if r.Bucket != bucket || r.Rule != "minute" {
-			t.Fatalf("wrong bucket/rule: %#v", r)
+		for _, tc := range testCases {
+			tc := tc
+			t.Run(tc.name, func(t *testing.T) {
+				require.True(t, tc.withMatchingFilter().Matches(baseItem))
+				require.False(t, tc.withOtherFilter().Matches(baseItem))
+			})
 		}
-		ranks = append(ranks, r.Rank)
-		caps = append(caps, r.Cap)
-		actions = append(actions, r.Action)
-	}
-	// Newest ranks should be 1 and 2 → keep, oldest rank 3 → delete (exceeds cap)
-	if actions[0] != "keep" || actions[1] != "keep" || actions[2] != "delete" {
-		t.Fatalf("actions by rank wrong: %v", actions)
-	}
-	if ranks[0] != 1 || ranks[1] != 2 || ranks[2] != 3 {
-		t.Fatalf("ranks wrong: %v", ranks)
-	}
-	if caps[0] != 2 || caps[1] != 2 || caps[2] != 2 {
-		t.Fatalf("cap recorded wrong: %v", caps)
-	}
+	})
+
+	t.Run("RejectsItemWhenAnyIgnoredTagIsPresent", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				IgnoreTags: []string{"important"},
+			},
+		}
+		require.False(t, lo.Matches(baseItem))
+	})
+
+	t.Run("RequiresAllRequestedTags", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAllTagsArePresent", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Tags: []string{"daily", "important"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenOneTagIsMissing", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Tags: []string{"daily", "missing"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("MatchesTypesWithAnyOfSemantics", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAnyRequestedTypeMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{"swift", "s3"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenNoRequestedTypeMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{"swift", "b2"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedTypesContainsEmptyString", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{""},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedTypesContainsEmptyStringAmongOtherValues", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Types: []string{"swift", ""},
+				},
+			}
+
+			require.True(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("MatchesOriginsWithAnyOfSemantics", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAnyRequestedOriginMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{"s3://bucket-x", "s3://bucket-b"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenNoRequestedOriginMatches", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{"s3://bucket-x", "s3://bucket-y"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedOriginsContainsEmptyStringAmongOtherValues", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{"s3://missing-bucket", ""},
+				},
+			}
+
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsTrueWhenRequestedOriginsContainsEmptyString", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Origins: []string{""},
+				},
+			}
+
+			require.True(t, lo.Matches(baseItem))
+		})
+	})
+
+	t.Run("RequiresAllRequestedRoots", func(t *testing.T) {
+		t.Run("ReturnsTrueWhenAllRequestedRootsArePresent", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Roots: []string{"/var/backups", "/srv/data"},
+				},
+			}
+			require.True(t, lo.Matches(baseItem))
+		})
+
+		t.Run("ReturnsFalseWhenOneRequestedRootIsMissing", func(t *testing.T) {
+			lo := &loc.LocateOptions{
+				Filters: loc.LocateFilters{
+					Roots: []string{"/var/backups", "/tmp"},
+				},
+			}
+			require.False(t, lo.Matches(baseItem))
+		})
+	})
 }
-func TestMatch_KeepAndCap_PerHour(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T17:05:00Z") // IMPORTANT: inside hour 17 so window is 17 & 16
 
-	// Two hours: 17 and 16; multiple items in each hour
-	items := []Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T17:59:59Z")}, // hour 17
-		{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T17:30:00Z")}, // hour 17
-		{ItemID: mac(3), Timestamp: mustRFC3339(t, "2025-08-20T17:00:01Z")}, // hour 17
-		{ItemID: mac(4), Timestamp: mustRFC3339(t, "2025-08-20T16:59:59Z")}, // hour 16
-		{ItemID: mac(5), Timestamp: mustRFC3339(t, "2025-08-20T16:30:00Z")}, // hour 16
-	}
+func TestLocateOptionsFilterAndSort(t *testing.T) {
+	paris := time.FixedZone("CEST", 2*60*60)
 
-	// Keep last 2 hours (current hour 17 and previous hour 16), capped at 2 per hour.
-	lo := LocateOptions{
-		Periods: LocatePeriods{
-			Hour: LocatePeriod{Keep: 2, Cap: 2},
+	items := []loc.Item{
+		{
+			Timestamp: time.Date(2025, time.August, 28, 14, 34, 56, 0, paris), // 12:34:56 UTC
+			Filters: loc.ItemFilters{
+				Name: "daily-backup",
+			},
+		},
+		{
+			Timestamp: time.Date(2025, time.August, 28, 12, 50, 0, 0, time.UTC),
+			Filters: loc.ItemFilters{
+				Name: "weekly-backup",
+			},
+		},
+		{
+			Timestamp: time.Date(2025, time.August, 28, 13, 0, 0, 0, time.UTC),
+			Filters: loc.ItemFilters{
+				Name: "daily-backup",
+			},
 		},
 	}
-	kept, reasons := lo.Match(items, now)
 
-	if len(kept) != 4 {
-		t.Fatalf("kept len: got %d want 4 (2 per hour)", len(kept))
-	}
-
-	// Count keeps per bucket
-	perBucket := map[string]int{}
-	for _, it := range items {
-		r := reasons[it.ItemID]
-		if r.Rule != "hour" {
-			t.Fatalf("expected hour rule, got %#v", r)
+	t.Run("FiltersMatchingItemsAndSortsThemByDescendingTimestamp", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "daily-backup",
+			},
 		}
-		perBucket[r.Bucket] += boolToInt(r.Action == "keep")
-	}
 
-	// Expect exactly 2 kept in hour-17 and 2 in hour-16.
-	hours := []string{}
-	for b := range perBucket {
-		hours = append(hours, b)
-	}
-	sort.Strings(hours)
-	if len(hours) != 2 {
-		t.Fatalf("expected 2 hour buckets, got %v", hours)
-	}
-	for _, b := range hours {
-		if perBucket[b] != 2 {
-			t.Fatalf("bucket %s: kept=%d want 2", b, perBucket[b])
+		got := lo.FilterAndSort(items)
+		require.Len(t, got, 2)
+		require.Equal(t, "daily-backup", got[0].Filters.Name)
+		require.Equal(t, "daily-backup", got[1].Filters.Name)
+		require.True(t, got[0].Timestamp.After(got[1].Timestamp))
+		require.Equal(t, time.Date(2025, time.August, 28, 13, 0, 0, 0, time.UTC), got[0].Timestamp)
+		require.Equal(t, time.Date(2025, time.August, 28, 12, 34, 56, 0, time.UTC), got[1].Timestamp)
+		require.Equal(t, time.UTC, got[0].Timestamp.Location())
+		require.Equal(t, time.UTC, got[1].Timestamp.Location())
+	})
+
+	t.Run("ReturnsOnlyLatestMatchingItemWhenLatestIsEnabled", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name:   "daily-backup",
+				Latest: true,
+			},
 		}
-	}
-}
 
-func TestMatch_MultipleRules_KeepBeatsDelete(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	// Two items same day & week. Cap day at 1 so the second is "delete" by day,
-	// but allow week to keep more (cap=2). The item should be kept overall.
-	item1 := Item{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-20T08:00:00Z")}
-	item2 := Item{ItemID: mac(2), Timestamp: mustRFC3339(t, "2025-08-20T07:00:00Z")}
-	items := []Item{item1, item2}
+		got := lo.FilterAndSort(items)
+		require.Len(t, got, 1)
+		require.Equal(t, "daily-backup", got[0].Filters.Name)
+		require.Equal(t, time.Date(2025, time.August, 28, 13, 0, 0, 0, time.UTC), got[0].Timestamp)
+	})
 
-	lo := LocateOptions{
-		Periods: LocatePeriods{
-			Day:  LocatePeriod{Keep: 1, Cap: 1}, // keep only the newest within the day
-			Week: LocatePeriod{Keep: 1, Cap: 2}, // same week key, allow both
-		},
-	}
-
-	kept, reasons := lo.Match(items, now)
-	if len(kept) != 2 {
-		t.Fatalf("expected both items kept because week rule keeps 2, got %d", len(kept))
-	}
-	r2 := reasons[item2.ItemID]
-	if r2.Action != "keep" {
-		t.Fatalf("expected keep due to week rule overriding day delete; got %#v", r2)
-	}
-}
-
-func TestMatch_OutsideWindows_NoRulesKeeping(t *testing.T) {
-	now := mustRFC3339(t, "2025-08-20T12:00:00Z")
-	// Items far in the past; Keep last 1 day only.
-	items := []Item{
-		{ItemID: mac(1), Timestamp: mustRFC3339(t, "2025-08-10T00:00:00Z")},
-	}
-	lo := LocateOptions{
-		Periods: LocatePeriods{
-			Day: LocatePeriod{Keep: 1},
-		},
-	}
-	_, reasons := lo.Match(items, now)
-	r := reasons[items[0].ItemID]
-	if r.Action != "delete" || r.Note != "outside retention windows" {
-		t.Fatalf("expected outside retention windows delete, got %#v", r)
-	}
-}
-
-// Sanity: with no periods, Match should keep all matched-filter items and mark as "matched filters".
-func TestMatch_NoPeriods_KeepsAllMatches(t *testing.T) {
-	items := []Item{
-		makeItem(t, mac(1), "2025-08-20T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
-		makeItem(t, mac(2), "2025-08-18T11:00:00Z", "n", "c", "prod", "eu", "job", []string{"t1"}, []string{"r1"}, []string{}, []string{}),
-	}
-	lo := LocateOptions{}
-	// Add restrictive filters that both items satisfy
-	lo.Filters.Name = "n"
-	lo.Filters.Category = "c"
-	lo.Filters.Environment = "prod"
-	lo.Filters.Perimeter = "eu"
-	lo.Filters.Job = "job"
-	lo.Filters.Tags = []string{"t1"}
-	lo.Filters.Roots = []string{"r1"} // NOTE: Matches() requires all specified roots to be present; both have r1.
-
-	kept, reasons := lo.Match(items, mustRFC3339(t, "2025-08-20T12:00:00Z"))
-	if len(kept) != 2 {
-		t.Fatalf("expected all matched items kept when HasPeriods=false, got %d", len(kept))
-	}
-	for _, it := range items {
-		r := reasons[it.ItemID]
-		if r.Action != "keep" || r.Note != "matched filters" {
-			t.Fatalf("expected keep/matched filters, got %#v", r)
+	t.Run("ReturnsEmptySliceWhenNothingMatches", func(t *testing.T) {
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "missing-backup",
+			},
 		}
-	}
+
+		got := lo.FilterAndSort(items)
+		require.Empty(t, got)
+	})
 }
 
-// ========== helpers ==========
+func TestLocateOptionsMatch(t *testing.T) {
+	now := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
 
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
+	t.Run("ReturnsEmptyMapsWhenNothingMatches", func(t *testing.T) {
+		id := objects.MAC{1}
+		items := []loc.Item{
+			{
+				ItemID:    id,
+				Timestamp: now,
+				Filters: loc.ItemFilters{
+					Name: "daily-backup",
+				},
+			},
+		}
+
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "missing-backup",
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Empty(t, kept)
+		require.Empty(t, reasons)
+	})
+
+	t.Run("KeepsAllFilteredItemsWhenNoPeriodsAreConfigured", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		items := []loc.Item{
+			{
+				ItemID:    id1,
+				Timestamp: time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name: "daily-backup",
+				},
+			},
+			{
+				ItemID:    id2,
+				Timestamp: time.Date(2025, time.August, 27, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name: "daily-backup",
+				},
+			},
+			{
+				ItemID:    id3,
+				Timestamp: time.Date(2025, time.August, 26, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name: "weekly-backup",
+				},
+			},
+		}
+
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name: "daily-backup",
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id2)
+		require.NotContains(t, kept, id3)
+		require.Len(t, reasons, 2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id2])
+	})
+
+	t.Run("KeepsOnlyItemsWithinConfiguredWindows", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		ts1 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 27, 11, 0, 0, 0, time.UTC)
+		ts3 := time.Date(2025, time.August, 26, 11, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 2,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id2)
+		require.NotContains(t, kept, id3)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts1),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts2),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id2])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Note:   "outside retention windows",
+		}, reasons[id3])
+	})
+
+	t.Run("AppliesPerBucketCapWhenKeepIsZero", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		ts1 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC)
+		ts3 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Cap: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id3)
+		require.NotContains(t, kept, id2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts1),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts2),
+			Rank:   2,
+			Cap:    1,
+			Note:   "exceeds per-bucket cap",
+		}, reasons[id2])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts3),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[id3])
+	})
+
+	t.Run("PrefersKeepOverDeleteAcrossRules", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		ts1 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC)
+		ts3 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 2,
+					Cap:  1,
+				},
+				Week: loc.LocatePeriod{
+					Keep: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Contains(t, kept, id2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "week",
+			Bucket: loc.Weeks.Key(ts2),
+			Rank:   2,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id2])
+	})
+
+	t.Run("ChoosesKeepReasonWithLowestRankAcrossRules", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+
+		ts1 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+		ts2 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 2,
+				},
+				Week: loc.LocatePeriod{
+					Keep: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Contains(t, kept, id2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts2),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id2])
+	})
+
+	t.Run("ChoosesDeleteReasonWithLowestRankAcrossRules", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+		id4 := objects.MAC{4}
+
+		ts1 := time.Date(2025, time.August, 29, 9, 0, 0, 0, time.UTC)  // week rank 1
+		ts2 := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC) // day rank 1, week rank 2
+		ts3 := time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC) // day rank 2, week rank 3
+		ts4 := time.Date(2025, time.August, 27, 10, 0, 0, 0, time.UTC) // week rank 4
+
+		items := []loc.Item{
+			{ItemID: id1, Timestamp: ts1},
+			{ItemID: id2, Timestamp: ts2},
+			{ItemID: id3, Timestamp: ts3},
+			{ItemID: id4, Timestamp: ts4},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Cap: 1,
+				},
+				Week: loc.LocatePeriod{
+					Cap: 2,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.NotContains(t, kept, id3)
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts3),
+			Rank:   2,
+			Cap:    1,
+			Note:   "exceeds per-bucket cap",
+		}, reasons[id3])
+	})
+	t.Run("KeepsFirstRuleWhenKeepRanksAreEqual", func(t *testing.T) {
+		id := objects.MAC{9}
+		ts := time.Date(2025, time.August, 28, 12, 0, 0, 0, time.UTC)
+
+		items := []loc.Item{
+			{ItemID: id, Timestamp: ts},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Day: loc.LocatePeriod{
+					Keep: 1,
+				},
+				Week: loc.LocatePeriod{
+					Keep: 1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Contains(t, kept, id)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "day",
+			Bucket: loc.Days.Key(ts),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[id])
+	})
+
+	t.Run("KeepsAllMatchedItemsWhenNoPeriodsAndMultipleFiltersAreConfigured", func(t *testing.T) {
+		id1 := objects.MAC{1}
+		id2 := objects.MAC{2}
+		id3 := objects.MAC{3}
+
+		items := []loc.Item{
+			{
+				ItemID:    id1,
+				Timestamp: time.Date(2025, time.August, 28, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name:        "daily-backup",
+					Category:    "database",
+					Environment: "prod",
+					Perimeter:   "eu-west",
+					Job:         "nightly",
+					Tags:        []string{"daily", "important"},
+					Roots:       []string{"/var/backups"},
+				},
+			},
+			{
+				ItemID:    id2,
+				Timestamp: time.Date(2025, time.August, 27, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name:        "daily-backup",
+					Category:    "database",
+					Environment: "prod",
+					Perimeter:   "eu-west",
+					Job:         "nightly",
+					Tags:        []string{"daily", "important"},
+					Roots:       []string{"/var/backups"},
+				},
+			},
+			{
+				ItemID:    id3,
+				Timestamp: time.Date(2025, time.August, 26, 11, 0, 0, 0, time.UTC),
+				Filters: loc.ItemFilters{
+					Name:        "daily-backup",
+					Category:    "database",
+					Environment: "prod",
+					Perimeter:   "eu-west",
+					Job:         "nightly",
+					Tags:        []string{"daily"},
+					Roots:       []string{"/var/backups"},
+				},
+			},
+		}
+
+		lo := &loc.LocateOptions{
+			Filters: loc.LocateFilters{
+				Name:        "daily-backup",
+				Category:    "database",
+				Environment: "prod",
+				Perimeter:   "eu-west",
+				Job:         "nightly",
+				Tags:        []string{"daily", "important"},
+				Roots:       []string{"/var/backups"},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, id1)
+		require.Contains(t, kept, id2)
+		require.NotContains(t, kept, id3)
+		require.Len(t, reasons, 2)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id1])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Note:   "matched filters",
+		}, reasons[id2])
+	})
+	t.Run("MondayKeepUsesMondayBucketsOnly", func(t *testing.T) {
+		currentMondayID := objects.MAC{1}
+		previousMondayID := objects.MAC{2}
+		olderMondayID := objects.MAC{3}
+		tuesdaySameWeekID := objects.MAC{4}
+
+		currentMonday := time.Date(2025, time.August, 25, 10, 0, 0, 0, time.UTC)  // 2025-W35-monday
+		previousMonday := time.Date(2025, time.August, 18, 9, 0, 0, 0, time.UTC)  // 2025-W34-monday
+		olderMonday := time.Date(2025, time.August, 11, 8, 0, 0, 0, time.UTC)     // 2025-W33-monday
+		tuesdaySameWeek := time.Date(2025, time.August, 26, 7, 0, 0, 0, time.UTC) // 2025-W35-tuesday
+
+		items := []loc.Item{
+			{ItemID: currentMondayID, Timestamp: currentMonday},
+			{ItemID: previousMondayID, Timestamp: previousMonday},
+			{ItemID: olderMondayID, Timestamp: olderMonday},
+			{ItemID: tuesdaySameWeekID, Timestamp: tuesdaySameWeek},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Monday: loc.LocatePeriod{
+					Keep: 2,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, currentMondayID)
+		require.Contains(t, kept, previousMondayID)
+		require.NotContains(t, kept, olderMondayID)
+		require.NotContains(t, kept, tuesdaySameWeekID)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(currentMonday),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[currentMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(previousMonday),
+			Rank:   1,
+			Cap:    0,
+			Note:   "within bucket",
+		}, reasons[previousMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Note:   "outside retention windows",
+		}, reasons[olderMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Note:   "outside retention windows",
+		}, reasons[tuesdaySameWeekID])
+	})
+
+	t.Run("MondayCapAppliesWithinAMondayBucket", func(t *testing.T) {
+		newestMondayID := objects.MAC{5}
+		olderSameMondayID := objects.MAC{6}
+		previousMondayID := objects.MAC{7}
+
+		newestMonday := time.Date(2025, time.August, 25, 18, 0, 0, 0, time.UTC)   // 2025-W35-monday
+		olderSameMonday := time.Date(2025, time.August, 25, 9, 0, 0, 0, time.UTC) // same monday bucket
+		previousMonday := time.Date(2025, time.August, 18, 12, 0, 0, 0, time.UTC) // 2025-W34-monday
+
+		items := []loc.Item{
+			{ItemID: newestMondayID, Timestamp: newestMonday},
+			{ItemID: olderSameMondayID, Timestamp: olderSameMonday},
+			{ItemID: previousMondayID, Timestamp: previousMonday},
+		}
+
+		lo := &loc.LocateOptions{
+			Periods: loc.LocatePeriods{
+				Monday: loc.LocatePeriod{
+					Keep: 2,
+					Cap:  1,
+				},
+			},
+		}
+
+		kept, reasons := lo.Match(items, now)
+		require.Len(t, kept, 2)
+		require.Contains(t, kept, newestMondayID)
+		require.Contains(t, kept, previousMondayID)
+		require.NotContains(t, kept, olderSameMondayID)
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(newestMonday),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[newestMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "delete",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(olderSameMonday),
+			Rank:   2,
+			Cap:    1,
+			Note:   "exceeds per-bucket cap",
+		}, reasons[olderSameMondayID])
+		require.Equal(t, loc.Reason{
+			Action: "keep",
+			Rule:   "monday",
+			Bucket: loc.Mondays.Key(previousMonday),
+			Rank:   1,
+			Cap:    1,
+			Note:   "within bucket",
+		}, reasons[previousMondayID])
+	})
 }
