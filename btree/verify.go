@@ -88,34 +88,7 @@ func (b *BTree[K, P, V]) verifyNode(cur, parent *Node[K, P, V], ptrIdx int, stat
 
 	// Now check the order of keys.
 	for i := 1; i < len(cur.Keys); i++ {
-		if b.compare(cur.Keys[i-1], cur.Keys[1]) >= 0 {
-			return fmt.Errorf("Node: broken ordering of keys %v", cur.Keys)
-		}
-	}
-
-	// Check ordering between parent and us
-	if parent != nil {
-		if ptrIdx == 0 {
-			// left-most value we just check the upper bound. No need to check
-			// the siblings, it's done by checking the bounds in parent.
-			if b.compare(cur.Keys[len(cur.Keys)-1], parent.Keys[ptrIdx]) > 0 {
-				return fmt.Errorf("InternalNode: broken invariant: Parent/Child ordering is wrong Parent ('-inf' / '%v') -> Child('%v')", parent.Keys[ptrIdx], cur.Keys[len(cur.Keys)-1])
-			}
-		} else if ptrIdx == len(parent.Pointers)-1 {
-			// right-most value. ditto.
-			if b.compare(cur.Keys[0], parent.Keys[ptrIdx-1]) < 0 {
-				return fmt.Errorf("InternalNode: broken invariant: Parent/Child ordering is wrong Parent ('%v' / '+inf') -> Child('%v')", parent.Keys[ptrIdx-1], cur.Keys[0])
-			}
-		} else {
-			if b.compare(cur.Keys[0], parent.Keys[ptrIdx-1]) < 0 || b.compare(cur.Keys[len(cur.Keys)-1], parent.Keys[ptrIdx]) > 0 {
-				return fmt.Errorf("InternalNode: broken invariant: Parent/Child ordering is wrong Parent ('%v' / '%v') -> Child('%v')", parent.Keys[ptrIdx-1], parent.Keys[ptrIdx], cur.Keys[0])
-			}
-		}
-	}
-
-	// Now check the order of keys.
-	for i := 1; i < len(cur.Keys); i++ {
-		if b.compare(cur.Keys[i-1], cur.Keys[1]) >= 0 {
+		if b.compare(cur.Keys[i-1], cur.Keys[i]) >= 0 {
 			return fmt.Errorf("Node: broken ordering of keys %v", cur.Keys)
 		}
 	}
