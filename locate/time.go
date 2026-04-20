@@ -18,6 +18,7 @@ package locate
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/PlakarKorp/go-human2duration"
@@ -49,6 +50,10 @@ func (t *TimeFlag) Set(s string) error {
 }
 
 func ParseTimeFlag(input string) (time.Time, error) {
+	if strings.TrimSpace(input) != input {
+		return time.Time{}, fmt.Errorf("invalid time format: %q", input)
+	}
+
 	if input == "" {
 		return time.Time{}, nil
 	}
