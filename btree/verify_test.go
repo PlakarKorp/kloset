@@ -56,7 +56,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("Filled tree", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
-		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+		tree := buildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
 
 		out := stdOutCapture(t, func() { require.NoError(t, tree.Verify()) })
 		require.Contains(t, out, "Verify ended, visited")
@@ -64,7 +64,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("Fails_WhenRootCannotBeLoaded", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
-		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+		tree := buildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
 
 		// empty cache => Verify must call store.Get(root)
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
@@ -94,7 +94,7 @@ func TestVerify(t *testing.T) {
 
 	t.Run("Fails_WhenChildCannotBeLoaded_DuringTraversal", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
-		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+		tree := buildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
 
 		// empty cache => Verify must call store.Get(internal node)
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
@@ -522,7 +522,7 @@ func TestDot(t *testing.T) {
 	t.Run("ValidGraph", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 
-		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+		tree := buildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
 
 		var buf bytes.Buffer
 		err := tree.Dot(&buf, false)
@@ -537,7 +537,7 @@ func TestDot(t *testing.T) {
 	t.Run("ShowNextPtr", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 
-		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+		tree := buildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
 
 		var bufNo, bufYes bytes.Buffer
 		err := tree.Dot(&bufNo, false)
@@ -560,7 +560,7 @@ func TestDot(t *testing.T) {
 	t.Run("Fails_BecauseStoreGetFails", func(t *testing.T) {
 		st := btree.InMemoryStore_t[rune, int]{}
 
-		tree := BuildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
+		tree := buildTreeRunes(t, &st, 3, []rune("abcdefghijklmnopqrstuvwxyz"))
 
 		fresh, err := btree.FromStorage[rune, int, int](tree.Root, &st, cmp.Compare, 3)
 		require.NoError(t, err)

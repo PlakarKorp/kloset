@@ -46,7 +46,7 @@ func TestPersist(t *testing.T) {
 		dst := &countingStore[rune, string]{inner: &dstInner}
 
 		keys := []rune("abcdefghijklmnopqrstuvwxyz")
-		tree := BuildTreeRunes(t, &src, 3, keys)
+		tree := buildTreeRunes(t, &src, 3, keys)
 
 		conv := func(v int) (string, error) { return fmt.Sprintf("v=%d", v), nil }
 
@@ -77,7 +77,7 @@ func TestPersist(t *testing.T) {
 		src := btree.InMemoryStore_t[rune, int]{}
 		dst := btree.InMemoryStore_t[rune, string]{}
 
-		tree := BuildTreeRunes(t, &src, 3, []rune{'a', 'b', 'c'})
+		tree := buildTreeRunes(t, &src, 3, []rune{'a', 'b', 'c'})
 
 		boom := errors.New("conversion failed")
 		conv := func(v int) (string, error) {
