@@ -78,8 +78,6 @@ func (mgr *seqPackerManager) Run() error {
 					continue
 				}
 
-				mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
-
 				if err := mgr.flush(pfile); err != nil {
 					err = fmt.Errorf("failed to flush packer: %w", err)
 
@@ -121,6 +119,10 @@ func (mgr *seqPackerManager) Run() error {
 				case pm, ok := <-mgr.packerChan[i]:
 					if !ok {
 						if pfile != nil && pfile.Size() > 0 {
+							if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+								return err
+							}
+
 							packerResultChan <- pfile
 						}
 						return nil
@@ -133,10 +135,14 @@ func (mgr *seqPackerManager) Run() error {
 							return err
 						}
 
-						mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize))
+						if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+							return err
+						}
 					}
 
-					pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags)
+					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+						return err
+					}
 
 					if pfile.Size() > mgr.storageConf.Packfile.MaxSize {
 						packerResultChan <- pfile
@@ -147,15 +153,40 @@ func (mgr *seqPackerManager) Run() error {
 		})
 	}
 
+	inError := false
 	// Wait for workers to finish.
 	if err := workerGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Worker group error: %s", err)
+		mgr.appCtx.Cancel(err)
+		inError = true
 	}
 
 	// Close the result channel and wait for the flusher to finish.
 	close(packerResultChan)
 	if err := flusherGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Flusher group error: %s", err)
+		mgr.appCtx.Cancel(err)
+		inError = true
+	}
+
+	if inError {
+		// If we are in error we have to wait for the producers to catch up for
+		// the Cancellation meaning we still have to drain the channels.
+		drainingGroup := sync.WaitGroup{}
+		for i := range mgr.nChan {
+			drainingGroup.Go(func() {
+				for {
+					select {
+					case _, ok := <-mgr.packerChan[i]:
+						if !ok {
+							return
+						}
+					}
+				}
+			})
+		}
+
+		drainingGroup.Wait()
 	}
 
 	// Signal completion.
@@ -239,6 +270,5 @@ func (mgr *seqPackerManager) AddPadding(packfile packfile.Packfile, maxSize int)
 		return fmt.Errorf("failed to generate random padding MAC: %w", err)
 	}
 
-	packfile.AddBlob(resources.RT_RANDOM, versioning.GetCurrentVersion(resources.RT_RANDOM), mac, buffer, 0)
-	return nil
+	return packfile.AddBlob(resources.RT_RANDOM, versioning.GetCurrentVersion(resources.RT_RANDOM), mac, buffer, 0)
 }
