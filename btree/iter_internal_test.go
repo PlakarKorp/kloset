@@ -424,7 +424,7 @@ func TestBackwardIter(t *testing.T) {
 		require.NoError(t, it.Err())
 	})
 
-	t.Run("Next_RewindsAndDivesLef_tWhenRighDone", func(t *testing.T) {
+	t.Run("Next_RewindsAndDivesLeft_WhenRighDone", func(t *testing.T) {
 		st := InMemoryStore_t[rune, int]{}
 
 		leafL := Node[rune, int, int]{
