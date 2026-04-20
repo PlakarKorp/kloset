@@ -61,7 +61,7 @@ func NewSeqPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.C
 	}
 
 	for i := range nChan {
-		ret.packerChan[i] = make(chan PackerMsg, 100)
+		ret.packerChan[i] = make(chan PackerMsg)
 	}
 
 	return ret
@@ -153,16 +153,40 @@ func (mgr *seqPackerManager) Run() error {
 		})
 	}
 
+	inError := false
 	// Wait for workers to finish.
 	if err := workerGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Worker group error: %s", err)
 		mgr.appCtx.Cancel(err)
+		inError = true
 	}
 
 	// Close the result channel and wait for the flusher to finish.
 	close(packerResultChan)
 	if err := flusherGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Flusher group error: %s", err)
+		mgr.appCtx.Cancel(err)
+		inError = true
+	}
+
+	if inError {
+		// If we are in error we have to wait for the producers to catch up for
+		// the Cancellation meaning we still have to drain the channels.
+		drainingGroup := sync.WaitGroup{}
+		for i := range mgr.nChan {
+			drainingGroup.Go(func() {
+				for {
+					select {
+					case _, ok := <-mgr.packerChan[i]:
+						if !ok {
+							return
+						}
+					}
+				}
+			})
+		}
+
+		drainingGroup.Wait()
 	}
 
 	// Signal completion.
