@@ -547,6 +547,13 @@ func (r *Repository) Store() storage.Store {
 	return r.store
 }
 
+// WrapStore replaces the repository's store with the result of fn(currentStore).
+// This allows callers to inject middleware (e.g. a caching layer) after the
+// repository has been fully initialised.
+func (r *Repository) WrapStore(fn func(storage.Store) storage.Store) {
+	r.store = fn(r.store)
+}
+
 func (r *Repository) StorageSize() (int64, error) {
 	if r.storageSizeDirty {
 		size, err := r.store.Size(r.appContext)
