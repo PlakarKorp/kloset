@@ -126,8 +126,8 @@ func (lp *LocatePeriod) Empty() bool {
 }
 
 type LocateFilters struct {
-	Before time.Time `json:"before,omitempty" yaml:"before,omitempty"`
-	Since  time.Time `json:"since,omitempty" yaml:"since,omitempty"`
+	Before time.Time `json:"before,omitzero" yaml:"before,omitempty"`
+	Since  time.Time `json:"since,omitzero" yaml:"since,omitempty"`
 
 	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
 	Category    string   `json:"category,omitempty" yaml:"category,omitempty"`
@@ -145,25 +145,25 @@ type LocateFilters struct {
 }
 
 type LocatePeriods struct {
-	Minute LocatePeriod `json:"minute,omitempty" yaml:"minute,omitempty"`
-	Hour   LocatePeriod `json:"hour,omitempty" yaml:"hour,omitempty"`
-	Day    LocatePeriod `json:"day,omitempty" yaml:"day,omitempty"`
-	Week   LocatePeriod `json:"week,omitempty" yaml:"week,omitempty"`
-	Month  LocatePeriod `json:"month,omitempty" yaml:"month,omitempty"`
-	Year   LocatePeriod `json:"year,omitempty" yaml:"year,omitempty"`
+	Minute LocatePeriod `json:"minute,omitzero" yaml:"minute,omitempty"`
+	Hour   LocatePeriod `json:"hour,omitzero" yaml:"hour,omitempty"`
+	Day    LocatePeriod `json:"day,omitzero" yaml:"day,omitempty"`
+	Week   LocatePeriod `json:"week,omitzero" yaml:"week,omitempty"`
+	Month  LocatePeriod `json:"month,omitzero" yaml:"month,omitempty"`
+	Year   LocatePeriod `json:"year,omitzero" yaml:"year,omitempty"`
 
-	Monday    LocatePeriod `json:"monday,omitempty" yaml:"monday,omitempty"`
-	Tuesday   LocatePeriod `json:"tuesday,omitempty" yaml:"tuesday,omitempty"`
-	Wednesday LocatePeriod `json:"wednesday,omitempty" yaml:"wednesday,omitempty"`
-	Thursday  LocatePeriod `json:"thursday,omitempty" yaml:"thursday,omitempty"`
-	Friday    LocatePeriod `json:"friday,omitempty" yaml:"friday,omitempty"`
-	Saturday  LocatePeriod `json:"saturday,omitempty" yaml:"saturday,omitempty"`
-	Sunday    LocatePeriod `json:"sunday,omitempty" yaml:"sunday,omitempty"`
+	Monday    LocatePeriod `json:"monday,omitzero" yaml:"monday,omitempty"`
+	Tuesday   LocatePeriod `json:"tuesday,omitzero" yaml:"tuesday,omitempty"`
+	Wednesday LocatePeriod `json:"wednesday,omitzero" yaml:"wednesday,omitempty"`
+	Thursday  LocatePeriod `json:"thursday,omitzero" yaml:"thursday,omitempty"`
+	Friday    LocatePeriod `json:"friday,omitzero" yaml:"friday,omitempty"`
+	Saturday  LocatePeriod `json:"saturday,omitzero" yaml:"saturday,omitempty"`
+	Sunday    LocatePeriod `json:"sunday,omitzero" yaml:"sunday,omitempty"`
 }
 
 type LocateOptions struct {
-	Filters LocateFilters `json:"filters,omitempty" yaml:"filters,omitempty"`
-	Periods LocatePeriods `json:"periods,omitempty" yaml:"periods,omitempty"`
+	Filters LocateFilters `json:"filters,omitzero" yaml:"filters,omitempty"`
+	Periods LocatePeriods `json:"periods,omitzero" yaml:"periods,omitempty"`
 }
 
 func (lo *LocateOptions) HasPeriods() bool {
