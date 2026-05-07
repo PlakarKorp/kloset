@@ -94,13 +94,29 @@ func DeflateLZ4Stream(r io.Reader) (io.Reader, error) {
 	return pr, nil
 }
 
+type readCloserInternal struct {
+	input  io.Closer
+	reader io.ReadCloser
+}
+
+func (c *readCloserInternal) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *readCloserInternal) Close() error               { c.reader.Close(); return c.input.Close() }
+
 func InflateStream(name string, r io.ReadCloser) (io.ReadCloser, error) {
 	m := map[string]func(io.ReadCloser) (io.ReadCloser, error){
 		"GZIP": InflateGzipStream,
 		"LZ4":  InflateLZ4Stream,
 	}
 	if fn, exists := m[name]; exists {
-		return fn(r)
+		or, err := fn(r)
+		if err != nil {
+			return nil, err
+		}
+
+		return &readCloserInternal{
+			input:  r,
+			reader: or,
+		}, nil
 	}
 	return nil, fmt.Errorf("unsupported compression method %q", name)
 }
@@ -131,12 +147,9 @@ var lz4ReaderPool = sync.Pool{
 
 func InflateLZ4Stream(r io.ReadCloser) (io.ReadCloser, error) {
 	pr, pw := io.Pipe()
+	lz := lz4.NewReader(r)
 	go func() {
-		lz := lz4ReaderPool.Get().(*lz4.Reader)
-		lz.Reset(r)
-
 		defer pw.Close()
-		defer lz4ReaderPool.Put(lz)
 
 		_, err := io.Copy(pw, lz)
 		if err != nil {

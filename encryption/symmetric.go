@@ -330,6 +330,14 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 	return pr, nil
 }
 
+type readCloserInternal struct {
+	input  io.Closer
+	reader io.ReadCloser
+}
+
+func (c *readCloserInternal) Read(p []byte) (int, error) { return c.reader.Read(p) }
+func (c *readCloserInternal) Close() error               { c.reader.Close(); return c.input.Close() }
+
 // DecryptStream decrypts a stream using AES-GCM with a random session-specific subkey
 func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadCloser, error) {
 	if config.DataAlgorithm != "AES256-GCM-SIV" {
@@ -380,5 +388,5 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 		}
 	}()
 
-	return pr, nil
+	return &readCloserInternal{input: r, reader: pr}, nil
 }
