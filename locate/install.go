@@ -6,8 +6,8 @@ import (
 )
 
 func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
-	flags.Var(NewTimeFlag(&po.Filters.Before), "before", "filter by date")
-	flags.Var(NewTimeFlag(&po.Filters.Since), "since", "filter by date")
+	flags.Var(NewDurationFlag(&po.Filters.Before), "before", "filter by date")
+	flags.Var(NewDurationFlag(&po.Filters.Since), "since", "filter by date")
 
 	flags.StringVar(&po.Filters.Name, "name", "", "filter by name")
 	flags.StringVar(&po.Filters.Category, "category", "", "filter by category")

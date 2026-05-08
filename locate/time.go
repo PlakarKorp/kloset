@@ -80,3 +80,44 @@ func ParseTimeFlag(input string) (time.Time, error) {
 
 	return time.Time{}, fmt.Errorf("invalid time format: %q", input)
 }
+
+// DurationFlag implements flag.Value interface
+type DurationFlag struct {
+	dest *time.Duration
+}
+
+func NewDurationFlag(dest *time.Duration) *DurationFlag {
+	return &DurationFlag{dest}
+}
+
+func (t *DurationFlag) String() string {
+	if t.dest == nil || *t.dest == 0 {
+		return ""
+	}
+	return t.dest.String()
+}
+
+func (t *DurationFlag) Set(s string) error {
+	parsed, err := ParseDurationFlag(s)
+	if err != nil {
+		return err
+	}
+	*t.dest = parsed
+	return nil
+}
+
+func ParseDurationFlag(input string) (time.Duration, error) {
+	if strings.TrimSpace(input) != input {
+		return 0, fmt.Errorf("invalid time format: %q", input)
+	}
+
+	if input == "" {
+		return 0, nil
+	}
+
+	d, err := human2duration.ParseDuration(input)
+	if err != nil {
+		return 0, fmt.Errorf("invalid duration %q: %w", input, err)
+	}
+	return d, err
+}
