@@ -126,8 +126,8 @@ func (lp *LocatePeriod) Empty() bool {
 }
 
 type LocateFilters struct {
-	Before time.Time `json:"before,omitempty" yaml:"before,omitempty"`
-	Since  time.Time `json:"since,omitempty" yaml:"since,omitempty"`
+	Before time.Duration `json:"before,omitempty" yaml:"before,omitempty"`
+	Since  time.Duration `json:"since,omitempty" yaml:"since,omitempty"`
 
 	Name        string   `json:"name,omitempty" yaml:"name,omitempty"`
 	Category    string   `json:"category,omitempty" yaml:"category,omitempty"`
@@ -215,10 +215,10 @@ func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Period
 func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Saturday.Cap = n } }
 func WithPerSundaysCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Sunday.Cap = n } }
 
-func WithBefore(t time.Time) Option {
+func WithBefore(t time.Duration) Option {
 	return func(p *LocateOptions) { p.Filters.Before = t }
 }
-func WithSince(t time.Time) Option {
+func WithSince(t time.Duration) Option {
 	return func(p *LocateOptions) { p.Filters.Since = t }
 }
 func WithName(name string) Option {
@@ -261,11 +261,13 @@ func (lo *LocateOptions) Matches(it Item) bool {
 		}
 	}
 
+	now := time.Now()
+
 	// time window
-	if !lo.Filters.Before.IsZero() && it.Timestamp.After(lo.Filters.Before.UTC()) {
+	if lo.Filters.Before != 0 && it.Timestamp.After(now.Add(-lo.Filters.Before).UTC()) {
 		return false
 	}
-	if !lo.Filters.Since.IsZero() && it.Timestamp.Before(lo.Filters.Since.UTC()) {
+	if lo.Filters.Since != 0 && it.Timestamp.Before(now.Add(-lo.Filters.Since).UTC()) {
 		return false
 	}
 
@@ -454,5 +456,5 @@ func (lo *LocateOptions) Empty() bool {
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
 		lo.Filters.Perimeter == "" && lo.Filters.Job == "" &&
 		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
-		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest
+		lo.Filters.Before == 0 && lo.Filters.Since == 0 && !lo.Filters.Latest
 }
