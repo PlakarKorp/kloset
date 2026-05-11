@@ -80,7 +80,7 @@ func (m *mockStateCache) GetState(stateID objects.MAC) ([]byte, error) {
 func (m *mockStateCache) DelState(stateID objects.MAC) error {
 	for idx, se := range m.states {
 		if se.id == stateID {
-			slices.Delete(m.states, idx, idx+1)
+			m.states = slices.Delete(m.states, idx, idx+1)
 			return nil
 		}
 	}
