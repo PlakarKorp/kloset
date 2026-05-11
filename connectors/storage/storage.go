@@ -93,6 +93,10 @@ func NewConfigurationFromBytes(version versioning.Version, data []byte) (*Config
 func NewConfigurationFromWrappedBytes(data []byte) (*Configuration, error) {
 	var configuration Configuration
 
+	if len(data) < int(STORAGE_HEADER_SIZE)+int(STORAGE_FOOTER_SIZE) {
+		return nil, io.ErrUnexpectedEOF
+	}
+
 	version := versioning.Version(binary.LittleEndian.Uint32(data[12:16]))
 
 	data = data[:len(data)-int(STORAGE_FOOTER_SIZE)]
