@@ -145,6 +145,10 @@ func (mgr *seqPackerManager) Run() error {
 					}
 
 					if pfile.Size() > mgr.storageConf.Packfile.MaxSize {
+						if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+							return err
+						}
+
 						packerResultChan <- pfile
 						pfile = nil
 					}
