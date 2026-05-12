@@ -69,6 +69,7 @@ func NewSeqPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.C
 
 func (mgr *seqPackerManager) Run() error {
 	packerResultChan := make(chan packfile.Packfile, mgr.nChan)
+	partialPackfilesChan := make(chan packfile.Packfile, mgr.nChan)
 
 	flusherGroup, _ := errgroup.WithContext(context.TODO())
 	for range mgr.nChan {
@@ -119,11 +120,7 @@ func (mgr *seqPackerManager) Run() error {
 				case pm, ok := <-mgr.packerChan[i]:
 					if !ok {
 						if pfile != nil && pfile.Size() > 0 {
-							if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
-								return err
-							}
-
-							packerResultChan <- pfile
+							partialPackfilesChan <- pfile
 						}
 						return nil
 					}
@@ -165,6 +162,17 @@ func (mgr *seqPackerManager) Run() error {
 		inError = true
 	}
 
+	// No one is sending blobs we can attempt to merge the tail packfiles
+	close(partialPackfilesChan)
+
+	if !inError {
+		if err := mgr.mergeTailPackfiles(partialPackfilesChan, packerResultChan); err != nil {
+			mgr.appCtx.GetLogger().Error("Failed to merge partial packfiles: %s", err)
+			mgr.appCtx.Cancel(err)
+			inError = true
+		}
+	}
+
 	// Close the result channel and wait for the flusher to finish.
 	close(packerResultChan)
 	if err := flusherGroup.Wait(); err != nil {
@@ -191,6 +199,10 @@ func (mgr *seqPackerManager) Run() error {
 		}
 
 		drainingGroup.Wait()
+
+		for p := range partialPackfilesChan {
+			p.Cleanup()
+		}
 	}
 
 	// Signal completion.
@@ -275,4 +287,84 @@ func (mgr *seqPackerManager) AddPadding(packfile packfile.Packfile, maxSize int)
 	}
 
 	return packfile.AddBlob(resources.RT_RANDOM, versioning.GetCurrentVersion(resources.RT_RANDOM), mac, buffer, 0)
+}
+
+func (mgr *seqPackerManager) mergeTailPackfiles(partialPackfilesChan <-chan packfile.Packfile, packerResultChan chan<- packfile.Packfile) error {
+	var cur packfile.Packfile
+
+	cleanup := func(p packfile.Packfile) {
+		if cur != nil {
+			cur.Cleanup()
+		}
+
+		p.Cleanup()
+
+		for x := range partialPackfilesChan {
+			x.Cleanup()
+		}
+	}
+
+	for p := range partialPackfilesChan {
+		// First ever, let's use it to avoid allocating a new one.
+		if cur == nil {
+			cur = p
+			continue
+		}
+
+		for b, err := range p.Iterate() {
+			if err != nil {
+				cleanup(p)
+				return err
+			}
+
+			if b.Type == resources.RT_RANDOM {
+				continue
+			}
+
+			if cur == nil {
+				var err error
+				cur, err = mgr.packfileFactory(mgr.hashFactory)
+				if err != nil {
+					cleanup(p)
+					return err
+				}
+
+				if err := mgr.AddPadding(cur, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+					cleanup(p)
+					return err
+				}
+			}
+
+			if err := cur.AddBlob(b.Type, b.Version, b.MAC, b.Data, b.Flags); err != nil {
+				cleanup(p)
+				return err
+			}
+
+			if cur.Size() > mgr.storageConf.Packfile.MaxSize {
+				if err := mgr.AddPadding(cur, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+					cleanup(p)
+					return err
+				}
+
+				packerResultChan <- cur
+
+				// Next iteration will allocate a new one.
+				cur = nil
+			}
+		}
+
+		// p was fully ingested, clean it up
+		p.Cleanup()
+	}
+
+	if cur != nil {
+		if err := mgr.AddPadding(cur, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+			cur.Cleanup()
+			return err
+		}
+
+		packerResultChan <- cur
+	}
+
+	return nil
 }
