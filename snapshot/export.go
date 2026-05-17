@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path"
@@ -103,6 +104,11 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			}
 
 			emitter.Path(entrypath)
+
+			if !path.IsAbs(entrypath) {
+				emitter.PathError(entrypath, fmt.Errorf("snapshot entry has non-absolute path %q", entrypath))
+				return fmt.Errorf("snapshot entry has non-absolute path %q", entrypath)
+			}
 
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)
