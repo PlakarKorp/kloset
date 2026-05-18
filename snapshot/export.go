@@ -97,6 +97,8 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			}
 			i++
 
+			entrypath = path.Clean(entrypath)
+
 			// simulate a chroot: strip the parent path from the entry path
 			entrypath = strings.TrimPrefix(entrypath, tostrip)
 			if entrypath == "" {
