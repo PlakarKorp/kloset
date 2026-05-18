@@ -97,10 +97,19 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			}
 			i++
 
+			// path.Clean will not remove ".." elements if the path is not
+			// absolute.  so, let's make it absolute, clean it for good
+			// hygiene, then strip prefix and make sure it's still absolute.
+			if !strings.HasPrefix(entrypath, "/") {
+				entrypath = "/" + entrypath
+			}
+
+			entrypath = path.Clean(entrypath)
+
 			// simulate a chroot: strip the parent path from the entry path
 			entrypath = strings.TrimPrefix(entrypath, tostrip)
-			if entrypath == "" {
-				entrypath = "/"
+			if !strings.HasPrefix(entrypath, "/") {
+				entrypath = "/" + entrypath
 			}
 
 			emitter.Path(entrypath)
