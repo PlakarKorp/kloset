@@ -27,3 +27,41 @@ func TestCheck(t *testing.T) {
 	err = snap.Check(filepath, &snapshot.CheckOptions{})
 	require.NoError(t, err)
 }
+
+// TestCheckFullSnapshot runs Check against the snapshot root, exercising the
+// walk over every entry instead of a single file.
+func TestCheckFullSnapshot(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	require.NoError(t, snap.Check("/", &snapshot.CheckOptions{}))
+}
+
+// TestCheckFastMode runs Check with FastCheck enabled.  The fast path skips
+// the chunk-level MAC recomputation and just verifies that blobs exist.
+func TestCheckFastMode(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	require.NoError(t, snap.Check("/", &snapshot.CheckOptions{FastCheck: true}))
+}
+
+// TestCheckCachedRerun runs Check twice on the same snapshot so that the
+// second run hits the cached-status fast paths in Check / checkEntry / etc.
+func TestCheckCachedRerun(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	require.NoError(t, snap.Check("/", &snapshot.CheckOptions{}))
+	require.NoError(t, snap.Check("/", &snapshot.CheckOptions{}))
+}
+
+// TestCheckMissingPath verifies that asking Check to walk a path that does
+// not exist returns an error.
+func TestCheckMissingPath(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	err := snap.Check("/does/not/exist", &snapshot.CheckOptions{})
+	require.Error(t, err)
+}
