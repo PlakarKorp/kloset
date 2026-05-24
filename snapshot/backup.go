@@ -1371,6 +1371,14 @@ func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []st
 	// Indices into directories[] of dirs that need an actual rebuild.
 	var toBuild []int
 
+	// Bulk-load every directory's children from the scanlog in one
+	// query. Per-directory queries were the bottleneck of the pre-pass on
+	// a clean re-backup: ~120 µs each × tens of thousands of directories.
+	allChildren, err := sourceCtx.scanLog.AllChildren()
+	if err != nil {
+		return err
+	}
+
 	// Pre-pass: bottom-up reuse decision. Iterate in reverse alphabetical
 	// order — for paths this is bottom-up by depth because "/a/b" sorts
 	// after "/a". When a directory cannot be reused, propagate dirtiness
@@ -1378,7 +1386,7 @@ func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []st
 	// also fails.
 	for i := len(directories) - 1; i >= 0; i-- {
 		dir := directories[i]
-		children := sourceCtx.liveChildren(dir)
+		children := allChildren[dir]
 		childLists[i] = children
 
 		if mac, ok := sourceCtx.reusableDirpack(dir, children); ok {

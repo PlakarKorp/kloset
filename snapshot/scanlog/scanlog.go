@@ -318,6 +318,40 @@ func (s *ScanLog) ListPathnameEntries(prefix string, reverse bool) iter.Seq[Entr
 	return s.list(0, prefix, reverse, true)
 }
 
+// AllChildren returns, for every parent directory in the scanlog, the
+// sorted basenames of its immediate children. One bulk query instead of
+// one query per directory, which matters when buildDirpacks consults this
+// for every directory on a clean re-backup.
+//
+// Children are returned sorted by path ASC so callers can compare them
+// against the dircache's stored child list with a straight slice equality
+// check.
+func (s *ScanLog) AllChildren() (map[string][]string, error) {
+	rows, err := s.db.Query(`
+		SELECT parent, path
+		FROM entries
+		WHERE parent != path
+		ORDER BY parent ASC, path ASC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string][]string)
+	for rows.Next() {
+		var parent, p string
+		if err := rows.Scan(&parent, &p); err != nil {
+			return nil, err
+		}
+		out[parent] = append(out[parent], path.Base(p))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {
 
 	return func(yield func(Entry) bool) {
