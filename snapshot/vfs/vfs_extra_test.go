@@ -466,6 +466,19 @@ func TestErrorNodeFromBytes(t *testing.T) {
 // Xattr serialization round-trip
 // -----------------------------------------------------------------------
 
+func TestNewXattr(t *testing.T) {
+	rec := connectors.NewXattr("/etc/passwd", "user.comment", objects.AttributeExtended, nil)
+	mac := objects.MAC{1, 2, 3}
+
+	x := vfs.NewXattr(rec, mac, 128)
+	require.NotNil(t, x)
+	require.Equal(t, "/etc/passwd", x.Path)
+	require.Equal(t, "user.comment", x.Name)
+	require.Equal(t, objects.AttributeExtended, x.Type)
+	require.Equal(t, mac, x.Object)
+	require.Equal(t, int64(128), x.Size)
+}
+
 func TestXattrToBytes(t *testing.T) {
 	x := &vfs.Xattr{
 		Path: "/etc/passwd",
@@ -541,6 +554,20 @@ func TestNodeFromBytes(t *testing.T) {
 // -----------------------------------------------------------------------
 // IterNodes / XattrNodes / BTrees
 // -----------------------------------------------------------------------
+
+func TestIterErrorNodes(t *testing.T) {
+	_, snap := generateSnapshot2(t)
+	defer snap.Close()
+
+	fsc, err := snap.Filesystem()
+	require.NoError(t, err)
+
+	iter := fsc.IterErrorNodes()
+	require.NotNil(t, iter)
+	for iter.Next() {
+	}
+	require.NoError(t, iter.Err())
+}
 
 func TestIterNodes(t *testing.T) {
 	_, snap := generateSnapshot2(t)

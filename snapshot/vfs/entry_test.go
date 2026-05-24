@@ -82,6 +82,33 @@ func TestVfile(t *testing.T) {
 	require.Implements(t, (*iofs.FileInfo)(nil), statinfo)
 }
 
+// vfileMeta exposes the optional metadata accessors that the unexported
+// vfile struct implements (Name / Size / Path).  Asserting against this
+// interface lets us cover them without making vfile public.
+type vfileMeta interface {
+	Name() string
+	Size() int64
+	Path() string
+}
+
+func TestVfileMetaAccessors(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	fsc, err := snap.Filesystem()
+	require.NoError(t, err)
+
+	f, err := fsc.Open("/subdir/dummy.txt")
+	require.NoError(t, err)
+	defer f.Close()
+
+	meta, ok := f.(vfileMeta)
+	require.True(t, ok, "opened file should expose Name/Size/Path")
+	require.Equal(t, "dummy.txt", meta.Name())
+	require.Equal(t, int64(5), meta.Size())
+	require.Equal(t, "/subdir/dummy.txt", meta.Path())
+}
+
 func TestVdir(t *testing.T) {
 	_, snap := generateSnapshot(t)
 	defer snap.Close()
