@@ -220,6 +220,34 @@ func TestRepositoryCache(t *testing.T) {
 		require.True(t, found)
 	})
 
+	// Test stat cache operations
+	t.Run("Stat Cache Operations", func(t *testing.T) {
+		sourceKey := "fs:host:/data"
+		path := "/data/example.txt"
+		data := []byte("serialized cached path payload")
+
+		// Empty lookup returns nil (no error) so the backup falls through.
+		raw, err := cache.GetStatEntry(sourceKey, path)
+		require.NoError(t, err)
+		require.Nil(t, raw)
+
+		require.NoError(t, cache.PutStatEntry(sourceKey, path, data))
+
+		raw, err = cache.GetStatEntry(sourceKey, path)
+		require.NoError(t, err)
+		require.Equal(t, data, raw)
+
+		// A different source key for the same path must miss.
+		raw, err = cache.GetStatEntry("fs:other:/data", path)
+		require.NoError(t, err)
+		require.Nil(t, raw)
+
+		require.NoError(t, cache.DelStatEntry(sourceKey, path))
+		raw, err = cache.GetStatEntry(sourceKey, path)
+		require.NoError(t, err)
+		require.Nil(t, raw)
+	})
+
 	// Test snapshot operations
 	t.Run("Snapshot Operations", func(t *testing.T) {
 		stateID := objects.MAC{16, 17, 18}

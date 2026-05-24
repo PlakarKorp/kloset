@@ -57,7 +57,7 @@ type Manager struct {
 
 	cons Constructor
 
-	repositoryCache      map[uuid.UUID]*_RepositoryCache
+	repositoryCache      map[uuid.UUID]*RepositoryCache
 	repositoryCacheMutex sync.Mutex
 
 	vfsCacheMutex sync.Mutex
@@ -70,7 +70,7 @@ func NewManager(cons Constructor) *Manager {
 	return &Manager{
 		cons: cons,
 
-		repositoryCache:  make(map[uuid.UUID]*_RepositoryCache),
+		repositoryCache:  make(map[uuid.UUID]*RepositoryCache),
 		maintenanceCache: make(map[uuid.UUID]*MaintenanceCache),
 	}
 }
@@ -97,7 +97,7 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-func (m *Manager) Repository(repositoryID uuid.UUID) (*_RepositoryCache, error) {
+func (m *Manager) Repository(repositoryID uuid.UUID) (*RepositoryCache, error) {
 	if m.closed.Load() {
 		return nil, ErrClosed
 	}
