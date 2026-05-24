@@ -1,11 +1,14 @@
 package objects
 
 import (
+	"os"
 	"syscall"
 	"testing"
 	"time"
 
 	mocked_fileinfo "github.com/PlakarKorp/kloset/testing/fileinfo"
+	"github.com/stretchr/testify/require"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestParseFileInfoSortKeys(t *testing.T) {
@@ -228,5 +231,60 @@ func TestFileInfoFromStat(t *testing.T) {
 
 	if fileInfo.Groupname() != groupname {
 		t.Errorf("expected Groupname %v, got %v", groupname, fileInfo.Lgroupname)
+	}
+}
+
+func TestFileInfoSys(t *testing.T) {
+	fi := NewFileInfo("foo", 1, 0644, time.Unix(0, 0), 1, 2, 3, 4, 5)
+	sys := fi.Sys()
+	got, ok := sys.(FileInfo)
+	require.True(t, ok, "Sys() should return FileInfo")
+	require.Equal(t, fi, got)
+}
+
+func TestFileInfoToBytesRoundtrip(t *testing.T) {
+	fi := NewFileInfo("file.txt", 42, 0644, time.Unix(123456789, 0).UTC(), 7, 8, 9, 10, 1)
+	fi.Lusername = "alice"
+	fi.Lgroupname = "staff"
+
+	data, err := fi.ToBytes()
+	require.NoError(t, err)
+	require.NotEmpty(t, data)
+
+	var restored FileInfo
+	require.NoError(t, msgpack.Unmarshal(data, &restored))
+	require.True(t, fi.Equal(&restored))
+}
+
+func TestFileInfoEqualIgnoreSize(t *testing.T) {
+	now := time.Unix(1700000000, 0).UTC()
+	a := NewFileInfo("file.txt", 100, 0644, now, 1, 2, 3, 4, 1)
+	b := NewFileInfo("file.txt", 999, 0644, now, 1, 2, 3, 4, 1)
+	c := NewFileInfo("other.txt", 100, 0644, now, 1, 2, 3, 4, 1)
+
+	require.True(t, a.EqualIgnoreSize(&b), "files differing only in size should be equal-ignore-size")
+	require.False(t, a.Equal(&b), "files differing in size should not be Equal")
+	require.False(t, a.EqualIgnoreSize(&c), "files with different names should differ")
+}
+
+func TestFileInfoType(t *testing.T) {
+	now := time.Unix(0, 0)
+	cases := []struct {
+		mode os.FileMode
+		want string
+	}{
+		{0644, "regular"},
+		{os.ModeDir | 0755, "directory"},
+		{os.ModeSymlink | 0777, "symlink"},
+		{os.ModeDevice | 0644, "device"},
+		{os.ModeNamedPipe | 0644, "pipe"},
+		{os.ModeSocket | 0644, "socket"},
+		{os.ModeIrregular, "file"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.want, func(t *testing.T) {
+			fi := NewFileInfo("x", 1, tc.mode, now, 0, 0, 0, 0, 1)
+			require.Equal(t, tc.want, fi.Type())
+		})
 	}
 }
