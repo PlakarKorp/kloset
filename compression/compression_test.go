@@ -457,6 +457,40 @@ func TestInflateStream(t *testing.T) {
 	})
 }
 
+func TestInflateStreamCloseClosesUnderlyingReader(t *testing.T) {
+	// readCloserInternal.Close() closes both the inflated stream and the
+	// caller-supplied input reader. Verify both happen.
+	for _, algo := range []string{"GZIP", "LZ4"} {
+		t.Run(algo, func(t *testing.T) {
+			compressed := compressDataForTest(t, algo, []byte("payload"))
+			inputClosed := false
+			input := &closeRecorder{Reader: bytes.NewReader(compressed), onClose: func() { inputClosed = true }}
+
+			rc, err := cprss.InflateStream(algo, input)
+			require.NoError(t, err)
+			require.NotNil(t, rc)
+
+			_, err = io.ReadAll(rc)
+			require.NoError(t, err)
+
+			require.NoError(t, rc.Close())
+			require.True(t, inputClosed, "underlying input reader must be closed by Close()")
+		})
+	}
+}
+
+type closeRecorder struct {
+	io.Reader
+	onClose func()
+}
+
+func (c *closeRecorder) Close() error {
+	if c.onClose != nil {
+		c.onClose()
+	}
+	return nil
+}
+
 func TestLargeData(t *testing.T) {
 	t.Run("GZIP", func(t *testing.T) {
 		data := make([]byte, 10*1024*1024)
