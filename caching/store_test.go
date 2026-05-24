@@ -84,4 +84,8 @@ func TestDBStore(t *testing.T) {
 		require.NoError(t, err)
 		require.NotZero(t, idx)
 	})
+
+	t.Run("Close is a no-op (cache is not owned)", func(t *testing.T) {
+		require.NoError(t, store.Close())
+	})
 }

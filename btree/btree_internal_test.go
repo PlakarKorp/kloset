@@ -9,6 +9,11 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestInMemoryStoreClose(t *testing.T) {
+	s := InMemoryStore[rune, string]{}
+	require.NoError(t, s.Close())
+}
+
 func TestFromStorage_RootMustExists(t *testing.T) {
 	root := 999
 
