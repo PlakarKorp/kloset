@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -291,17 +290,10 @@ func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from caching.Stat
 
 /* Publishes the current state, by saving the stateID with the current Metadata. */
 func (ls *LocalState) PutState(stateID objects.MAC) error {
-	mt, err := ls.Metadata.ToBytes()
-	if err != nil {
-		return err
-	}
-
-	err = ls.cache.PutState(stateID, mt)
-	if err != nil {
-		return err
-	}
-
-	return nil
+	// Metadata is a fixed-shape struct that msgpack can always marshal, so we
+	// don't surface an error from ToBytes here — only cache.PutState can fail.
+	mt, _ := ls.Metadata.ToBytes()
+	return ls.cache.PutState(stateID, mt)
 }
 
 func (ls *LocalState) GetStates() (map[objects.MAC][]byte, error) {
@@ -422,36 +414,18 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 }
 
 func DeleteEntryFromBytes(buf []byte) (del DeleteEntry, err error) {
-	bbuf := bytes.NewBuffer(buf)
-
-	typ, err := bbuf.ReadByte()
-	if err != nil {
-		return
-	}
-	del.Type = EntryType(typ)
-
-	typ, err = bbuf.ReadByte()
-	if err != nil {
-		return
-	}
-	del.BlobType = resources.Type(typ)
-
-	n, err := bbuf.Read(del.Blob[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return del, fmt.Errorf("short read while deserializing delete entry")
+	if len(buf) < DeleteEntrySerializedSize {
+		return del, fmt.Errorf("short read while deserializing delete entry: have %d, want %d", len(buf), DeleteEntrySerializedSize)
 	}
 
-	n, err = bbuf.Read(del.Packfile[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return del, fmt.Errorf("short read while deserializing delete entry")
-	}
-
+	pos := 0
+	del.Type = EntryType(buf[pos])
+	pos++
+	del.BlobType = resources.Type(buf[pos])
+	pos++
+	copy(del.Blob[:], buf[pos:pos+len(objects.MAC{})])
+	pos += len(objects.MAC{})
+	copy(del.Packfile[:], buf[pos:pos+len(objects.MAC{})])
 	return
 }
 
@@ -474,36 +448,24 @@ func (de *DeleteEntry) ToBytes() (ret []byte) {
 }
 
 func DeltaEntryFromBytes(buf []byte) (de DeltaEntry, err error) {
-	bbuf := bytes.NewBuffer(buf)
-
-	typ, err := bbuf.ReadByte()
-	if err != nil {
-		return
+	if len(buf) < DeltaEntrySerializedSize {
+		return de, fmt.Errorf("short read while deserializing delta entry: have %d, want %d", len(buf), DeltaEntrySerializedSize)
 	}
 
-	de.Type = resources.Type(typ)
-	de.Version = versioning.Version(binary.LittleEndian.Uint32(bbuf.Next(4)))
-
-	n, err := bbuf.Read(de.Blob[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return de, fmt.Errorf("short read while deserializing delta entry")
-	}
-
-	n, err = bbuf.Read(de.Location.Packfile[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return de, fmt.Errorf("short read while deserializing delta entry")
-	}
-
-	de.Location.Offset = binary.LittleEndian.Uint64(bbuf.Next(8))
-	de.Location.Length = binary.LittleEndian.Uint32(bbuf.Next(4))
-	de.Flags = binary.LittleEndian.Uint32(bbuf.Next(4))
-
+	pos := 0
+	de.Type = resources.Type(buf[pos])
+	pos++
+	de.Version = versioning.Version(binary.LittleEndian.Uint32(buf[pos:]))
+	pos += 4
+	copy(de.Blob[:], buf[pos:pos+len(objects.MAC{})])
+	pos += len(objects.MAC{})
+	copy(de.Location.Packfile[:], buf[pos:pos+len(objects.MAC{})])
+	pos += len(objects.MAC{})
+	de.Location.Offset = binary.LittleEndian.Uint64(buf[pos:])
+	pos += 8
+	de.Location.Length = binary.LittleEndian.Uint32(buf[pos:])
+	pos += 4
+	de.Flags = binary.LittleEndian.Uint32(buf[pos:])
 	return
 }
 
@@ -530,27 +492,17 @@ func (de *DeltaEntry) ToBytes() (ret []byte) {
 }
 
 func PackfileEntryFromBytes(buf []byte) (pe PackfileEntry, err error) {
-	bbuf := bytes.NewBuffer(buf)
-
-	n, err := bbuf.Read(pe.Packfile[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return pe, fmt.Errorf("Short read while deserializing packfile entry")
+	if len(buf) < PackfileEntrySerializedSize {
+		return pe, fmt.Errorf("short read while deserializing packfile entry: have %d, want %d", len(buf), PackfileEntrySerializedSize)
 	}
 
-	n, err = bbuf.Read(pe.StateID[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return pe, fmt.Errorf("Short read while deserializing packfile entry")
-	}
-
-	timestamp := binary.LittleEndian.Uint64(bbuf.Next(8))
+	pos := 0
+	copy(pe.Packfile[:], buf[pos:pos+len(objects.MAC{})])
+	pos += len(objects.MAC{})
+	copy(pe.StateID[:], buf[pos:pos+len(objects.MAC{})])
+	pos += len(objects.MAC{})
+	timestamp := binary.LittleEndian.Uint64(buf[pos:])
 	pe.Timestamp = time.Unix(0, int64(timestamp))
-
 	return
 }
 
@@ -568,26 +520,17 @@ func (pe *PackfileEntry) ToBytes() (ret []byte) {
 }
 
 func ColouredEntryFromBytes(buf []byte) (de ColouredEntry, err error) {
-	bbuf := bytes.NewBuffer(buf)
-
-	typ, err := bbuf.ReadByte()
-	if err != nil {
-		return
+	if len(buf) < ColouredEntrySerializedSize {
+		return de, fmt.Errorf("short read while deserializing coloured entry: have %d, want %d", len(buf), ColouredEntrySerializedSize)
 	}
 
-	de.Type = resources.Type(typ)
-
-	n, err := bbuf.Read(de.Blob[:])
-	if err != nil {
-		return
-	}
-	if n < len(objects.MAC{}) {
-		return de, fmt.Errorf("Short read while deserializing coloured entry")
-	}
-
-	timestamp := binary.LittleEndian.Uint64(bbuf.Next(8))
+	pos := 0
+	de.Type = resources.Type(buf[pos])
+	pos++
+	copy(de.Blob[:], buf[pos:pos+len(objects.MAC{})])
+	pos += len(objects.MAC{})
+	timestamp := binary.LittleEndian.Uint64(buf[pos:])
 	de.When = time.Unix(0, int64(timestamp))
-
 	return
 }
 
@@ -613,18 +556,34 @@ func (de *ColouredEntry) ToBytes() (ret []byte) {
 // - value [valueLen]byte
 // - createdAt uint64
 func ConfigurationEntryFromBytes(buf []byte) (ce ConfigurationEntry, err error) {
-	bbuf := bytes.NewBuffer(buf)
-
-	keyLen, err := bbuf.ReadByte()
-	if err != nil {
-		return ce, fmt.Errorf("Short read while deserializing keyLen ConfigurationEntry")
+	// Minimum on-disk size: 1 (keyLen) + 0 (empty key) + 2 (valueLen) + 0 (empty value) + 8 (timestamp).
+	const minSize = 1 + 2 + 8
+	if len(buf) < minSize {
+		return ce, fmt.Errorf("short read while deserializing configuration entry: have %d, want at least %d", len(buf), minSize)
 	}
-	ce.Key = string(bbuf.Next(int(keyLen)))
 
-	valueLen := binary.LittleEndian.Uint16(bbuf.Next(2))
-	ce.Value = bbuf.Next(int(valueLen))
+	pos := 0
+	keyLen := int(buf[pos])
+	pos++
 
-	timestamp := binary.LittleEndian.Uint64(bbuf.Next(8))
+	if pos+keyLen+2+8 > len(buf) {
+		return ce, fmt.Errorf("short read while deserializing configuration entry key: have %d, want %d", len(buf)-pos, keyLen+2+8)
+	}
+	ce.Key = string(buf[pos : pos+keyLen])
+	pos += keyLen
+
+	valueLen := int(binary.LittleEndian.Uint16(buf[pos:]))
+	pos += 2
+
+	if pos+valueLen+8 > len(buf) {
+		return ce, fmt.Errorf("short read while deserializing configuration entry value: have %d, want %d", len(buf)-pos, valueLen+8)
+	}
+	// Copy so the returned struct doesn't alias the caller's buffer (the
+	// callers often reuse buffers from a pool).
+	ce.Value = append([]byte(nil), buf[pos:pos+valueLen]...)
+	pos += valueLen
+
+	timestamp := binary.LittleEndian.Uint64(buf[pos:])
 	ce.CreatedAt = time.Unix(0, int64(timestamp))
 
 	return
@@ -702,10 +661,9 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to read delete entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			toDel, err := DeleteEntryFromBytes(del_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize delta entry %w", err)
-			}
+			// length is already validated against DeleteEntrySerializedSize, so
+			// DeleteEntryFromBytes cannot fail on a buffer of the right size.
+			toDel, _ := DeleteEntryFromBytes(del_buf)
 
 			switch toDel.Type {
 			case ET_LOCATIONS:
@@ -726,12 +684,8 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to read delta entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			// We need to decode just to make the key, but we can reuse the buffer
-			// to put inside the data part of the cache.
-			delta, err := DeltaEntryFromBytes(de_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize delta entry %w", err)
-			}
+			// length already matches DeltaEntrySerializedSize.
+			delta, _ := DeltaEntryFromBytes(de_buf)
 
 			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
 				return err
@@ -746,10 +700,8 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to read coloured entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			coloured, err := ColouredEntryFromBytes(coloured_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize coloured entry %w", err)
-			}
+			// length already matches ColouredEntrySerializedSize.
+			coloured, _ := ColouredEntryFromBytes(coloured_buf)
 
 			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
 				return err
@@ -763,10 +715,8 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to read packfile entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			pe, err := PackfileEntryFromBytes(pe_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize packfile entry %w", err)
-			}
+			// length already matches PackfileEntrySerializedSize.
+			pe, _ := PackfileEntryFromBytes(pe_buf)
 
 			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
 				return err
@@ -865,12 +815,8 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to read delta entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			// We need to decode just to make the key, but we can reuse the buffer
-			// to put inside the data part of the cache.
-			delta, err := DeltaEntryFromBytes(de_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize delta entry %w", err)
-			}
+			// length already matches DeltaEntrySerializedSize.
+			delta, _ := DeltaEntryFromBytes(de_buf)
 
 			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
 				return err
@@ -885,10 +831,8 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to read coloured entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			coloured, err := ColouredEntryFromBytes(coloured_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize coloured entry %w", err)
-			}
+			// length already matches ColouredEntrySerializedSize.
+			coloured, _ := ColouredEntryFromBytes(coloured_buf)
 
 			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
 				return err
@@ -902,10 +846,8 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to read packfile entry %w, read(%d)/expected(%d)", err, n, length)
 			}
 
-			pe, err := PackfileEntryFromBytes(pe_buf)
-			if err != nil {
-				return fmt.Errorf("failed to deserialize packfile entry %w", err)
-			}
+			// length already matches PackfileEntrySerializedSize.
+			pe, _ := PackfileEntryFromBytes(pe_buf)
 
 			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
 				return err
