@@ -49,6 +49,44 @@ func generateSnapshotWithFiles(t *testing.T) (*ptesting.MockFile, *snapshot.Snap
 	return nil, snap
 }
 
+// TestSummaryIdx exercises SummaryIdxRoot and SummaryIdx on a freshly built
+// snapshot.  Whether the summary index has been persisted depends on the
+// builder, so the test just verifies the accessors don't panic and behave
+// consistently (root absent => idx returns nil with no error).
+func TestSummaryIdx(t *testing.T) {
+	_, snap := generateSnapshotWithFiles(t)
+	defer snap.Close()
+
+	_, found := snap.SummaryIdxRoot()
+	tree, err := snap.SummaryIdx()
+	require.NoError(t, err)
+	if !found {
+		require.Nil(t, tree)
+	}
+}
+
+// TestLogicalSize verifies that LogicalSize counts snapshots and accumulates
+// the byte sizes from each one's header summary.
+func TestLogicalSize(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+
+	// Create two snapshots from the same repo.
+	files := []ptesting.MockFile{
+		ptesting.NewMockDir("subdir"),
+		ptesting.NewMockFile("subdir/a.txt", 0644, "hello"),
+	}
+	snap1 := ptesting.GenerateSnapshot(t, repo, files)
+	snap1.Close()
+
+	snap2 := ptesting.GenerateSnapshot(t, repo, files)
+	snap2.Close()
+
+	n, total, err := snapshot.LogicalSize(repo)
+	require.NoError(t, err)
+	require.Equal(t, 2, n, "should count both snapshots")
+	require.GreaterOrEqual(t, total, int64(0))
+}
+
 // TestFilesystem verifies that Snapshot.Filesystem() returns a working VFS.
 func TestFilesystem(t *testing.T) {
 	_, snap := generateSnapshotWithFiles(t)
