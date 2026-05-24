@@ -151,6 +151,21 @@ func (c *RepositoryCache) DelStatEntry(source, path string) error {
 	return c.delete("__statcache__", source+":"+path)
 }
 
+// Dircache: per-source, per-directory cache of the previous backup's
+// dirpack MAC and the sorted list of immediate child names. Used to skip
+// rebuilding a dirpack for unchanged subtrees on subsequent backups.
+func (c *RepositoryCache) PutDirCacheEntry(source, path string, data []byte) error {
+	return c.put("__dircache__", source+":"+path, data)
+}
+
+func (c *RepositoryCache) GetDirCacheEntry(source, path string) ([]byte, error) {
+	return c.get("__dircache__", source+":"+path)
+}
+
+func (c *RepositoryCache) DelDirCacheEntry(source, path string) error {
+	return c.delete("__dircache__", source+":"+path)
+}
+
 func (c *RepositoryCache) PutSnapshot(stateID objects.MAC, data []byte) error {
 	return c.put("__snapshot__", fmt.Sprintf("%x", stateID), data)
 }

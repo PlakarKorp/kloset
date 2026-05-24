@@ -49,6 +49,13 @@ type sourceContext struct {
 	statCache    *caching.RepositoryCache
 	statCacheKey string
 
+	// dirty tracks which directories must have their dirpack rebuilt
+	// because at least one immediate child flowed through the slow path,
+	// or because the child set changed since the previous backup.
+	// Populated concurrently during import; consulted bottom-up at the
+	// start of buildDirpacks.
+	dirty dirtySet
+
 	vfsEntBatch *scanlog.ScanBatch
 	vfsEntLock  sync.Mutex
 
@@ -951,6 +958,10 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 	if err := sourceCtx.batchRecordEntry(scanlog.KindDirectory, dirEntry.Path(), "", dirEntryMAC, serialized, nil); err != nil {
 		return objects.MAC{}, err
 	}
+	// The directory entry payload changed (no statcache hit) so the
+	// parent's dirpack frame for this child also changes; the parent
+	// must rebuild.
+	sourceCtx.dirty.markChild(record.Pathname)
 	return dirEntryMAC, nil
 }
 
@@ -1003,6 +1014,11 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 			}
 		}
 		serializedFileEntry = serialized
+
+		// We wrote a fresh VFS entry blob, so the parent's dirpack
+		// frame for this child differs from the previous backup. Mark
+		// the parent directory for rebuild.
+		sourceCtx.dirty.markChild(record.Pathname)
 	}
 
 	fileSummary := &vfs.FileSummary{
@@ -1254,83 +1270,208 @@ func (sourceCtx *sourceContext) buildDirpack(builder *Builder, chunker *chunkers
 	return res.mac, nil
 }
 
+// liveChildren returns the sorted basenames of the immediate children of
+// dir as currently recorded in the scanlog. The scanlog already returns
+// rows ORDER BY path ASC so the basenames come out alphabetically; we use
+// them both to detect additions/deletions and as a stable input to the
+// dircache.
+func (sourceCtx *sourceContext) liveChildren(dir string) []string {
+	var children []string
+	for e := range sourceCtx.scanLog.ListDirectPathnames(dir, false) {
+		children = append(children, path.Base(e.Path))
+	}
+	return children
+}
+
+// reusableDirpack decides whether dir's dirpack from the previous backup
+// can be reused verbatim. Returns the cached dirpack MAC and true on a
+// reuse hit; otherwise (zero MAC, false), and dir is added to the dirty
+// set so its ancestors propagate correctly.
+//
+// Reuse requires all of:
+//   - statCache is available;
+//   - dir is not already marked dirty by per-record propagation;
+//   - a dircache entry exists for dir;
+//   - the live child set matches the cached one (catches add/delete/rename);
+//   - the cached dirpack blob still exists in the repository.
+func (sourceCtx *sourceContext) reusableDirpack(dir string, liveChildren []string) (objects.MAC, bool) {
+	if sourceCtx.statCache == nil {
+		return objects.MAC{}, false
+	}
+	if sourceCtx.dirty.isDirty(dir) {
+		return objects.MAC{}, false
+	}
+
+	raw, err := sourceCtx.statCache.GetDirCacheEntry(sourceCtx.statCacheKey, dir)
+	if err != nil || raw == nil {
+		return objects.MAC{}, false
+	}
+	cached, err := dirCacheEntryFromBytes(raw)
+	if err != nil {
+		_ = sourceCtx.statCache.DelDirCacheEntry(sourceCtx.statCacheKey, dir)
+		return objects.MAC{}, false
+	}
+
+	if !stringSlicesEqual(cached.Children, liveChildren) {
+		return objects.MAC{}, false
+	}
+
+	// The dirpack blob is referenced as an object in the repository.
+	if !sourceCtx.builder.repository.BlobExists(resources.RT_OBJECT, cached.DirpackMAC) {
+		return objects.MAC{}, false
+	}
+
+	return cached.DirpackMAC, true
+}
+
+func stringSlicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// recordDirCache persists the (dirpackMAC, children) tuple so a subsequent
+// backup can short-circuit dir's rebuild via reusableDirpack. Best effort:
+// failures are logged but do not fail the backup.
+func (sourceCtx *sourceContext) recordDirCache(dir string, dirpackMAC objects.MAC, children []string) {
+	if sourceCtx.statCache == nil {
+		return
+	}
+	entry := &dirCacheEntry{DirpackMAC: dirpackMAC, Children: children}
+	data, err := entry.serialize()
+	if err != nil {
+		return
+	}
+	if err := sourceCtx.statCache.PutDirCacheEntry(sourceCtx.statCacheKey, dir, data); err != nil {
+		sourceCtx.builder.Logger().Warn("dircache put failed for %s: %v", dir, err)
+	}
+}
+
 func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []string) error {
 	itemsCount := 0
+	reusedCount := 0
 	t0 := time.Now()
 	defer func() {
-		sourceCtx.builder.appContext.GetLogger().Trace("import", "building dirpack index took %s for %d entries", time.Since(t0), itemsCount)
+		sourceCtx.builder.appContext.GetLogger().Trace(
+			"import", "building dirpack index took %s for %d entries (%d reused)",
+			time.Since(t0), itemsCount, reusedCount)
 	}()
 
-	type directoryRequest struct {
-		directory string
-		idx       int
-	}
 	macs := make([]objects.MAC, len(directories))
-	directoriesChan := make(chan directoryRequest, builder.AppContext().MaxConcurrency*2)
+	// Per-directory child name list. Captured during the pre-pass so the
+	// rebuild path doesn't have to re-walk the scanlog, and the post-pass
+	// can persist them to the dircache.
+	childLists := make([][]string, len(directories))
+	// Indices into directories[] of dirs that need an actual rebuild.
+	var toBuild []int
 
-	// setup chunkers
-	var ckers []*chunkers.Chunker
-	for range builder.AppContext().MaxConcurrency {
-		cker, err := builder.repository.Chunker(nil)
-		if err != nil {
-			return err
+	// Pre-pass: bottom-up reuse decision. Iterate in reverse alphabetical
+	// order — for paths this is bottom-up by depth because "/a/b" sorts
+	// after "/a". When a directory cannot be reused, propagate dirtiness
+	// to its parent so the parent's own decision a few iterations later
+	// also fails.
+	for i := len(directories) - 1; i >= 0; i-- {
+		dir := directories[i]
+		children := sourceCtx.liveChildren(dir)
+		childLists[i] = children
+
+		if mac, ok := sourceCtx.reusableDirpack(dir, children); ok {
+			macs[i] = mac
+			reusedCount++
+			continue
 		}
-		ckers = append(ckers, cker)
+
+		sourceCtx.dirty.mark(dir)
+		if dir != "/" {
+			sourceCtx.dirty.mark(path.Dir(dir))
+		}
+		toBuild = append(toBuild, i)
 	}
+	itemsCount = len(directories)
 
-	g, ctx := errgroup.WithContext(builder.AppContext())
-
-	// emit directory processing requests, provide idx so that the workers can update
-	// the macs array with an immediate access regardless of their execution order...
-	g.Go(func() error {
-		defer close(directoriesChan)
-		for idx, directory := range directories {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case directoriesChan <- directoryRequest{directory: directory, idx: idx}:
-			}
-			itemsCount++
+	if len(toBuild) > 0 {
+		type directoryRequest struct {
+			directory string
+			idx       int
 		}
-		return nil
-	})
+		directoriesChan := make(chan directoryRequest, builder.AppContext().MaxConcurrency*2)
 
-	// compute multiple dirpacks concurrently, each one is pegged to a chunker
-	for i, cker := range ckers {
-		ck := cker
-		cIdx := i
+		// setup chunkers
+		var ckers []*chunkers.Chunker
+		for range builder.AppContext().MaxConcurrency {
+			cker, err := builder.repository.Chunker(nil)
+			if err != nil {
+				return err
+			}
+			ckers = append(ckers, cker)
+		}
 
+		g, ctx := errgroup.WithContext(builder.AppContext())
+
+		// emit directory processing requests, provide idx so that the workers can update
+		// the macs array with an immediate access regardless of their execution order...
 		g.Go(func() error {
-			for {
+			defer close(directoriesChan)
+			for _, idx := range toBuild {
 				select {
 				case <-ctx.Done():
 					return ctx.Err()
-
-				case req, ok := <-directoriesChan:
-					if !ok {
-						return nil
-					}
-
-					mac, err := sourceCtx.buildDirpack(builder, ck, cIdx, req.directory)
-					if err != nil {
-						return err
-					}
-
-					// lock-safe: each idx written exactly once
-					macs[req.idx] = mac
+				case directoriesChan <- directoryRequest{directory: directories[idx], idx: idx}:
 				}
 			}
+			return nil
 		})
-	}
 
-	if err := g.Wait(); err != nil {
-		return err
+		// compute multiple dirpacks concurrently, each one is pegged to a chunker
+		for i, cker := range ckers {
+			ck := cker
+			cIdx := i
+
+			g.Go(func() error {
+				for {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+
+					case req, ok := <-directoriesChan:
+						if !ok {
+							return nil
+						}
+
+						mac, err := sourceCtx.buildDirpack(builder, ck, cIdx, req.directory)
+						if err != nil {
+							return err
+						}
+
+						// lock-safe: each idx written exactly once
+						macs[req.idx] = mac
+					}
+				}
+			})
+		}
+
+		if err := g.Wait(); err != nil {
+			return err
+		}
 	}
 
 	for idx, directory := range directories {
 		if err := sourceCtx.indexes.dirpackidx.Insert(directory, macs[idx]); err != nil {
 			return err
 		}
+	}
+
+	// Persist the new dircache entries for the directories we actually
+	// rebuilt. Reused directories already have a valid cache entry from a
+	// previous backup; rewriting it is a no-op but harmless if we wanted.
+	for _, idx := range toBuild {
+		sourceCtx.recordDirCache(directories[idx], macs[idx], childLists[idx])
 	}
 	return nil
 }
