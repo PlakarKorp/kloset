@@ -26,6 +26,25 @@ func TestSourceDedupEqual(t *testing.T) {
 	require.Len(t, s.Importers(), 1)
 }
 
+func TestSourceGetters(t *testing.T) {
+	imp := &ptesting.MockImporter{
+		FakeRoot: "/home/foo",
+	}
+
+	s, err := snapshot.NewSource(context.Background(), imp)
+	require.NoError(t, err)
+
+	require.Equal(t, "mock", s.Origin())
+	require.Equal(t, "mock", s.Type())
+	require.Equal(t, "/home/foo", s.Root())
+	require.Equal(t, imp.Flags(), s.Flags())
+
+	excludes := s.GetExcludes()
+	require.NotNil(t, excludes)
+
+	require.NoError(t, s.SetExcludes([]string{"*.tmp"}))
+}
+
 func TestSourceDedupCommonPrefix(t *testing.T) {
 	imp1 := &ptesting.MockImporter{
 		FakeRoot: "/home/bar/baz",
