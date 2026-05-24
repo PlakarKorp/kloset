@@ -1,9 +1,11 @@
 package locate_test
 
 import (
+	"encoding/hex"
 	"testing"
 
 	"github.com/PlakarKorp/kloset/locate"
+	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -54,4 +56,80 @@ func TestParseSnapshotPath(t *testing.T) {
 			require.Equal(t, tt.wantPattern, gotPattern)
 		})
 	}
+}
+
+func TestLocateSnapshotByPrefix(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+
+	files := []ptesting.MockFile{
+		ptesting.NewMockDir("subdir"),
+		ptesting.NewMockFile("subdir/a.txt", 0644, "hello"),
+	}
+	s1 := ptesting.GenerateSnapshot(t, repo, files)
+	s2 := ptesting.GenerateSnapshot(t, repo, files)
+	defer s1.Close()
+	defer s2.Close()
+
+	// LookupSnapshotByPrefix with empty prefix must list all snapshots.
+	all := locate.LookupSnapshotByPrefix(repo, "")
+	require.GreaterOrEqual(t, len(all), 2)
+
+	id1 := s1.Header.Identifier
+	hexID := hex.EncodeToString(id1[:])
+
+	// Full hex must locate the exact snapshot.
+	got, err := locate.LocateSnapshotByPrefix(repo, hexID)
+	require.NoError(t, err)
+	require.Equal(t, id1, got)
+
+	// Bogus prefix must error.
+	_, err = locate.LocateSnapshotByPrefix(repo, "deadbeefnotanid")
+	require.Error(t, err)
+}
+
+func TestLocateSnapshotIDsAndMatch(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	files := []ptesting.MockFile{
+		ptesting.NewMockDir("subdir"),
+		ptesting.NewMockFile("subdir/a.txt", 0644, "hello"),
+	}
+	s1 := ptesting.GenerateSnapshot(t, repo, files)
+	s2 := ptesting.GenerateSnapshot(t, repo, files)
+	defer s1.Close()
+	defer s2.Close()
+
+	ids, err := locate.LocateSnapshotIDs(repo, nil)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(ids), 2)
+
+	matches, reasons, err := locate.Match(repo, nil)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(matches), 2)
+	require.NotNil(t, reasons)
+}
+
+func TestOpenSnapshotByPath(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	files := []ptesting.MockFile{
+		ptesting.NewMockDir("subdir"),
+		ptesting.NewMockFile("subdir/a.txt", 0644, "hello"),
+	}
+	s := ptesting.GenerateSnapshot(t, repo, files)
+	defer s.Close()
+
+	id := s.Header.Identifier
+	hexID := hex.EncodeToString(id[:])
+
+	snap, root, err := locate.OpenSnapshotByPath(repo, hexID+":/subdir")
+	require.NoError(t, err)
+	require.NotNil(t, snap)
+	defer snap.Close()
+	require.Contains(t, root, "/subdir")
+
+	snap2, root2, rel, err := locate.OpenSnapshotByPathRelative(repo, hexID+":subdir")
+	require.NoError(t, err)
+	require.NotNil(t, snap2)
+	defer snap2.Close()
+	require.NotEmpty(t, root2)
+	require.Equal(t, "subdir", rel)
 }
