@@ -10,16 +10,14 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    strategy:
-      matrix:
-        go: [ '1.23.3' ]
     steps:
     - uses: actions/checkout@v4
 
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ matrix.go }}
+        go-version-file: 'go.mod'
+        check-latest: true
 
     - name: Build
       run: go build -v ./...
