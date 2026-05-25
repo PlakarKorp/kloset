@@ -1,5 +1,7 @@
 # Kloset - Immutable Data Store Engine
 
+[![Go Report Card](https://goreportcard.com/badge/github.com/PlakarKorp/kloset)](https://goreportcard.com/report/github.com/PlakarKorp/kloset)
+
 ## Plakar V1.0.1 released
 
 We are proud to announce the release of Plakar v1.0.1, our first stable and production-ready version.
