@@ -7,10 +7,7 @@ coverage:
       default:
         informational: true
 
-comment:
-  layout: "reach,diff,flags,files"
-  behavior: default
-  require_changes: false
+comment: false
 
 ignore:
   - "testing/**/*"
