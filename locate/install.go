@@ -15,7 +15,19 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 	flags.StringVar(&po.Filters.Environment, "environment", "", "filter by environment")
 	flags.StringVar(&po.Filters.Perimeter, "perimeter", "", "filter by perimeter")
 	flags.StringVar(&po.Filters.Job, "job", "", "filter by job")
+	flags.StringVar(&po.Filters.Dataset, "dataset", "", "filter by dataset")
 	flags.BoolVar(&po.Filters.Latest, "latest", false, "consider only the latest matching item")
+
+	flags.Func("data-class", "filter by data class (repeat or comma-separated).",
+		func(v string) error {
+			for _, t := range strings.Split(v, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					po.Filters.DataClasses = append(po.Filters.DataClasses, t)
+				}
+			}
+			return nil
+		})
 
 	flags.Func("root", "filter by root (repeat).",
 		func(v string) error {
@@ -50,12 +62,12 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 			return nil
 		})
 
-	flags.Func("group-by", "group results by key: name, category, environment, perimeter, job, tag, origin, type, root.",
+	flags.Func("group-by", "group results by key: name, category, environment, perimeter, job, dataset, data-class, tag, origin, type, root.",
 		func(v string) error {
 			switch k := GroupByKey(strings.TrimSpace(v)); k {
 			case GroupByNone, GroupByName, GroupByCategory, GroupByEnvironment,
-				GroupByPerimeter, GroupByJob, GroupByTag, GroupByOrigin,
-				GroupByType, GroupByRoot:
+				GroupByPerimeter, GroupByJob, GroupByDataset, GroupByDataClass,
+				GroupByTag, GroupByOrigin, GroupByType, GroupByRoot:
 				po.GroupBy = k
 				return nil
 			default:
