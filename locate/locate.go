@@ -161,9 +161,25 @@ type LocatePeriods struct {
 	Sunday    LocatePeriod `json:"sunday,omitzero" yaml:"sunday,omitempty"`
 }
 
+type GroupByKey string
+
+const (
+	GroupByNone        GroupByKey = ""
+	GroupByName        GroupByKey = "name"
+	GroupByCategory    GroupByKey = "category"
+	GroupByEnvironment GroupByKey = "environment"
+	GroupByPerimeter   GroupByKey = "perimeter"
+	GroupByJob         GroupByKey = "job"
+	GroupByTag         GroupByKey = "tag"
+	GroupByOrigin      GroupByKey = "origin"
+	GroupByType        GroupByKey = "type"
+	GroupByRoot        GroupByKey = "root"
+)
+
 type LocateOptions struct {
 	Filters LocateFilters `json:"filters,omitzero" yaml:"filters,omitempty"`
 	Periods LocatePeriods `json:"periods,omitzero" yaml:"periods,omitempty"`
+	GroupBy GroupByKey    `json:"group_by,omitempty" yaml:"group_by,omitempty"`
 }
 
 func (lo *LocateOptions) HasPeriods() bool {
@@ -246,6 +262,9 @@ func WithID(id string) Option {
 	return func(p *LocateOptions) { p.Filters.IDs = append(p.Filters.IDs, id) }
 }
 func WithLatest(latest bool) Option { return func(p *LocateOptions) { p.Filters.Latest = latest } }
+func WithGroupBy(key GroupByKey) Option {
+	return func(p *LocateOptions) { p.GroupBy = key }
+}
 
 func (lo *LocateOptions) Matches(it Item) bool {
 	if len(lo.Filters.IDs) > 0 {
@@ -328,18 +347,80 @@ func (lo *LocateOptions) FilterAndSort(items []Item) []Item {
 
 func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]struct{}, map[objects.MAC]Reason) {
 	now = now.UTC()
-
 	filtered := lo.FilterAndSort(items)
+
+	if lo.GroupBy == GroupByNone {
+		return lo.applyPeriods(filtered, now)
+	}
+
+	groups := make(map[string][]Item)
+	for _, it := range filtered {
+		for _, k := range lo.groupKeys(it) {
+			groups[k] = append(groups[k], it)
+		}
+	}
 
 	kept := make(map[objects.MAC]struct{}, len(filtered))
 	reasons := make(map[objects.MAC]Reason, len(filtered))
+	for _, gitems := range groups {
+		gk, gr := lo.applyPeriods(gitems, now)
+		for id := range gk {
+			kept[id] = struct{}{}
+		}
+		for id, r := range gr {
+			if prev, ok := reasons[id]; !ok || (prev.Action == "delete" && r.Action == "keep") {
+				reasons[id] = r
+			}
+		}
+	}
+	return kept, reasons
+}
 
-	// nothing matched, no need to go further
+func (lo *LocateOptions) groupKeys(it Item) []string {
+	switch lo.GroupBy {
+	case GroupByName:
+		return []string{it.Filters.Name}
+	case GroupByCategory:
+		return []string{it.Filters.Category}
+	case GroupByEnvironment:
+		return []string{it.Filters.Environment}
+	case GroupByPerimeter:
+		return []string{it.Filters.Perimeter}
+	case GroupByJob:
+		return []string{it.Filters.Job}
+	case GroupByTag:
+		if len(it.Filters.Tags) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Tags
+	case GroupByOrigin:
+		if len(it.Filters.Origins) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Origins
+	case GroupByType:
+		if len(it.Filters.Types) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Types
+	case GroupByRoot:
+		if len(it.Filters.Roots) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Roots
+	default:
+		return []string{""}
+	}
+}
+
+func (lo *LocateOptions) applyPeriods(filtered []Item, now time.Time) (map[objects.MAC]struct{}, map[objects.MAC]Reason) {
+	kept := make(map[objects.MAC]struct{}, len(filtered))
+	reasons := make(map[objects.MAC]Reason, len(filtered))
+
 	if len(filtered) == 0 {
 		return kept, reasons
 	}
 
-	// we won't group by periods
 	if !lo.HasPeriods() {
 		for _, s := range filtered {
 			id := s.ItemID
@@ -454,5 +535,6 @@ func (lo *LocateOptions) Empty() bool {
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
 		lo.Filters.Perimeter == "" && lo.Filters.Job == "" &&
 		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
-		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest
+		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest &&
+		lo.GroupBy == GroupByNone
 }

@@ -2,6 +2,7 @@ package locate
 
 import (
 	"flag"
+	"fmt"
 	"strings"
 )
 
@@ -47,6 +48,19 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 				}
 			}
 			return nil
+		})
+
+	flags.Func("group-by", "group results by key: name, category, environment, perimeter, job, tag, origin, type, root.",
+		func(v string) error {
+			switch k := GroupByKey(strings.TrimSpace(v)); k {
+			case GroupByNone, GroupByName, GroupByCategory, GroupByEnvironment,
+				GroupByPerimeter, GroupByJob, GroupByTag, GroupByOrigin,
+				GroupByType, GroupByRoot:
+				po.GroupBy = k
+				return nil
+			default:
+				return fmt.Errorf("invalid -group-by value %q", v)
+			}
 		})
 
 	flags.Func("tag", "filter by tag (repeat or comma-separated). All specified tags must be present.",
