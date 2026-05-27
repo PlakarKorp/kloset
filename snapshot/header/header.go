@@ -89,6 +89,8 @@ type Header struct {
 	Perimeter       string             `msgpack:"perimeter" json:"perimeter"`
 	Job             string             `msgpack:"job" json:"job"`
 	Replicas        uint32             `msgpack:"replicas" json:"replicas"`
+	Dataset         string             `msgpack:"dataset" json:"dataset"`
+	DataClasses     []string           `msgpack:"data_classes" json:"data_classes"`
 	Classifications []Classification   `msgpack:"classifications" json:"classifications"`
 	Tags            []string           `msgpack:"tags" json:"tags"`
 	Context         []KeyValue         `msgpack:"context" json:"context"`
@@ -106,6 +108,7 @@ func NewHeader(name string, identifier objects.MAC) *Header {
 		Perimeter:       "default",
 		Job:             "default",
 		Replicas:        1,
+		DataClasses:     []string{},
 		Classifications: []Classification{},
 		Tags:            []string{},
 
