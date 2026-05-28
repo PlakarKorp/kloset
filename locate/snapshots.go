@@ -106,10 +106,12 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 					Environment: h.Environment,
 					Perimeter:   h.Perimeter,
 					Job:         h.Job,
+					Dataset:     h.Dataset,
 					Tags:        h.Tags,
 					Types:       types,
 					Origins:     origins,
 					Roots:       roots,
+					DataClasses: h.DataClasses,
 				},
 			}
 

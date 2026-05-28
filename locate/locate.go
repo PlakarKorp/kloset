@@ -32,10 +32,12 @@ type ItemFilters struct {
 	Environment string
 	Perimeter   string
 	Job         string
+	Dataset     string
 	Tags        []string
 	Types       []string
 	Origins     []string
 	Roots       []string
+	DataClasses []string
 }
 
 func (it *ItemFilters) HasTag(tag string) bool {
@@ -98,6 +100,30 @@ func (it ItemFilters) HasTypes(types []string) bool {
 	return false
 }
 
+func (it ItemFilters) HasDataClass(class string) bool {
+	if class == "" {
+		return true
+	}
+	for _, c := range it.DataClasses {
+		if c == class {
+			return true
+		}
+	}
+	return false
+}
+
+func (it ItemFilters) HasDataClasses(classes []string) bool {
+	if len(classes) == 0 {
+		return true
+	}
+	for _, c := range classes {
+		if it.HasDataClass(c) {
+			return true
+		}
+	}
+	return false
+}
+
 func (it ItemFilters) HasRoot(root string) bool {
 	if root == "" {
 		return true
@@ -134,14 +160,16 @@ type LocateFilters struct {
 	Environment string   `json:"environment,omitempty" yaml:"environment,omitempty"`
 	Perimeter   string   `json:"perimeter,omitempty" yaml:"perimeter,omitempty"`
 	Job         string   `json:"job,omitempty" yaml:"job,omitempty"`
+	Dataset     string   `json:"dataset,omitempty" yaml:"dataset,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	IgnoreTags  []string `json:"ignore_tags,omitempty" yaml:"ignore_tags,omitempty"`
 
-	Latest  bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
-	IDs     []string `json:"ids,omitempty" yaml:"ids,omitempty"`
-	Types   []string `json:"types,omitempty" yaml:"types,omitempty"`
-	Origins []string `json:"origins,omitempty" yaml:"origins,omitempty"`
-	Roots   []string `json:"roots,omitempty" yaml:"roots,omitempty"`
+	Latest      bool     `json:"latest,omitempty" yaml:"latest,omitempty"` // if true, consider only the latest matching item
+	IDs         []string `json:"ids,omitempty" yaml:"ids,omitempty"`
+	Types       []string `json:"types,omitempty" yaml:"types,omitempty"`
+	Origins     []string `json:"origins,omitempty" yaml:"origins,omitempty"`
+	Roots       []string `json:"roots,omitempty" yaml:"roots,omitempty"`
+	DataClasses []string `json:"data_classes,omitempty" yaml:"data_classes,omitempty"`
 }
 
 type LocatePeriods struct {
@@ -161,9 +189,27 @@ type LocatePeriods struct {
 	Sunday    LocatePeriod `json:"sunday,omitzero" yaml:"sunday,omitempty"`
 }
 
+type GroupByKey string
+
+const (
+	GroupByNone        GroupByKey = ""
+	GroupByName        GroupByKey = "name"
+	GroupByCategory    GroupByKey = "category"
+	GroupByEnvironment GroupByKey = "environment"
+	GroupByPerimeter   GroupByKey = "perimeter"
+	GroupByJob         GroupByKey = "job"
+	GroupByDataset     GroupByKey = "dataset"
+	GroupByDataClass   GroupByKey = "data-class"
+	GroupByTag         GroupByKey = "tag"
+	GroupByOrigin      GroupByKey = "origin"
+	GroupByType        GroupByKey = "type"
+	GroupByRoot        GroupByKey = "root"
+)
+
 type LocateOptions struct {
 	Filters LocateFilters `json:"filters,omitzero" yaml:"filters,omitempty"`
 	Periods LocatePeriods `json:"periods,omitzero" yaml:"periods,omitempty"`
+	GroupBy GroupByKey    `json:"group_by,omitempty" yaml:"group_by,omitempty"`
 }
 
 func (lo *LocateOptions) HasPeriods() bool {
@@ -236,6 +282,12 @@ func WithPerimeter(perimeter string) Option {
 func WithJob(job string) Option {
 	return func(p *LocateOptions) { p.Filters.Job = job }
 }
+func WithDataset(dataset string) Option {
+	return func(p *LocateOptions) { p.Filters.Dataset = dataset }
+}
+func WithDataClass(class string) Option {
+	return func(p *LocateOptions) { p.Filters.DataClasses = append(p.Filters.DataClasses, class) }
+}
 func WithTag(tag string) Option {
 	return func(p *LocateOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
 }
@@ -246,6 +298,9 @@ func WithID(id string) Option {
 	return func(p *LocateOptions) { p.Filters.IDs = append(p.Filters.IDs, id) }
 }
 func WithLatest(latest bool) Option { return func(p *LocateOptions) { p.Filters.Latest = latest } }
+func WithGroupBy(key GroupByKey) Option {
+	return func(p *LocateOptions) { p.GroupBy = key }
+}
 
 func (lo *LocateOptions) Matches(it Item) bool {
 	if len(lo.Filters.IDs) > 0 {
@@ -283,6 +338,12 @@ func (lo *LocateOptions) Matches(it Item) bool {
 		return false
 	}
 	if lo.Filters.Job != "" && it.Filters.Job != lo.Filters.Job {
+		return false
+	}
+	if lo.Filters.Dataset != "" && it.Filters.Dataset != lo.Filters.Dataset {
+		return false
+	}
+	if !it.Filters.HasDataClasses(lo.Filters.DataClasses) {
 		return false
 	}
 	for _, tag := range lo.Filters.IgnoreTags {
@@ -328,18 +389,87 @@ func (lo *LocateOptions) FilterAndSort(items []Item) []Item {
 
 func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]struct{}, map[objects.MAC]Reason) {
 	now = now.UTC()
-
 	filtered := lo.FilterAndSort(items)
+
+	if lo.GroupBy == GroupByNone {
+		return lo.applyPeriods(filtered, now)
+	}
+
+	groups := make(map[string][]Item)
+	for _, it := range filtered {
+		for _, k := range lo.groupKeys(it) {
+			groups[k] = append(groups[k], it)
+		}
+	}
 
 	kept := make(map[objects.MAC]struct{}, len(filtered))
 	reasons := make(map[objects.MAC]Reason, len(filtered))
+	for _, gitems := range groups {
+		gk, gr := lo.applyPeriods(gitems, now)
+		for id := range gk {
+			kept[id] = struct{}{}
+		}
+		for id, r := range gr {
+			if prev, ok := reasons[id]; !ok || (prev.Action == "delete" && r.Action == "keep") {
+				reasons[id] = r
+			}
+		}
+	}
+	return kept, reasons
+}
 
-	// nothing matched, no need to go further
+func (lo *LocateOptions) groupKeys(it Item) []string {
+	switch lo.GroupBy {
+	case GroupByName:
+		return []string{it.Filters.Name}
+	case GroupByCategory:
+		return []string{it.Filters.Category}
+	case GroupByEnvironment:
+		return []string{it.Filters.Environment}
+	case GroupByPerimeter:
+		return []string{it.Filters.Perimeter}
+	case GroupByJob:
+		return []string{it.Filters.Job}
+	case GroupByDataset:
+		return []string{it.Filters.Dataset}
+	case GroupByDataClass:
+		if len(it.Filters.DataClasses) == 0 {
+			return []string{""}
+		}
+		return it.Filters.DataClasses
+	case GroupByTag:
+		if len(it.Filters.Tags) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Tags
+	case GroupByOrigin:
+		if len(it.Filters.Origins) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Origins
+	case GroupByType:
+		if len(it.Filters.Types) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Types
+	case GroupByRoot:
+		if len(it.Filters.Roots) == 0 {
+			return []string{""}
+		}
+		return it.Filters.Roots
+	default:
+		return []string{""}
+	}
+}
+
+func (lo *LocateOptions) applyPeriods(filtered []Item, now time.Time) (map[objects.MAC]struct{}, map[objects.MAC]Reason) {
+	kept := make(map[objects.MAC]struct{}, len(filtered))
+	reasons := make(map[objects.MAC]Reason, len(filtered))
+
 	if len(filtered) == 0 {
 		return kept, reasons
 	}
 
-	// we won't group by periods
 	if !lo.HasPeriods() {
 		for _, s := range filtered {
 			id := s.ItemID
@@ -452,7 +582,9 @@ func (lo *LocateOptions) Match(items []Item, now time.Time) (map[objects.MAC]str
 func (lo *LocateOptions) Empty() bool {
 	return !lo.HasPeriods() &&
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
-		lo.Filters.Perimeter == "" && lo.Filters.Job == "" &&
+		lo.Filters.Perimeter == "" && lo.Filters.Job == "" && lo.Filters.Dataset == "" &&
 		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
-		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest
+		len(lo.Filters.DataClasses) == 0 &&
+		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest &&
+		lo.GroupBy == GroupByNone
 }
