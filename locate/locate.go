@@ -239,6 +239,15 @@ func WithJob(job string) Option {
 func WithTag(tag string) Option {
 	return func(p *LocateOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
 }
+func WithIgnoreTag(tag string) Option {
+	return func(p *LocateOptions) { p.Filters.IgnoreTags = append(p.Filters.IgnoreTags, tag) }
+}
+func WithType(id string) Option {
+	return func(p *LocateOptions) { p.Filters.Types = append(p.Filters.Types, id) }
+}
+func WithRoot(id string) Option {
+	return func(p *LocateOptions) { p.Filters.Roots = append(p.Filters.Roots, id) }
+}
 func WithOrigin(origin string) Option {
 	return func(p *LocateOptions) { p.Filters.Origins = append(p.Filters.Origins, origin) }
 }
