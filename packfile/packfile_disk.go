@@ -40,7 +40,7 @@ func NewPackfileOnDisk(tempDir string, hf HashFactory) (Packfile, error) {
 		bufferedWriter:  bufio.NewWriterSize(f, 1<<20),
 		totalHash:       hf(),
 		hf:              hf,
-		footerTimestamp: time.Now().Unix(),
+		footerTimestamp: time.Now().UnixNano(),
 	}
 	p.combinedWriter = io.MultiWriter(p.bufferedWriter, p.totalHash)
 
