@@ -282,6 +282,8 @@ func (snap *Builder) Lock() (chan bool, error) {
 				snap.repository.DeleteLock(snap.Header.Identifier)
 				return nil, err
 			}
+
+			continue
 		}
 
 		// There is an exclusive lock in place, we need to abort.
