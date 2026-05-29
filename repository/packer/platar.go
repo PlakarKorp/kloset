@@ -6,6 +6,7 @@ import (
 	"hash"
 	"io"
 	"runtime"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -23,6 +24,9 @@ type platarPackerManager struct {
 
 	packerChan     chan interface{}
 	packerChanDone chan struct{}
+
+	closing   chan struct{}
+	closeOnce sync.Once
 
 	storageConf  *storage.Configuration
 	encodingFunc func(io.Reader) (io.Reader, error)
@@ -44,6 +48,7 @@ func NewPlatarPackerManager(ctx *kcontext.KContext, storageConfiguration *storag
 		packingCache:   cache,
 		packerChan:     make(chan interface{}, runtime.NumCPU()*2+1),
 		packerChanDone: make(chan struct{}),
+		closing:        make(chan struct{}),
 		storageConf:    storageConfiguration,
 		encodingFunc:   encodingFunc,
 		hashFactory:    hashFactory,
@@ -64,6 +69,8 @@ func (mgr *platarPackerManager) Run() error {
 				select {
 				case <-workerCtx.Done():
 					return workerCtx.Err()
+				case <-mgr.closing:
+					return nil
 				case msg, ok := <-mgr.packerChan:
 					if !ok {
 						return nil
@@ -103,7 +110,7 @@ func (mgr *platarPackerManager) Run() error {
 }
 
 func (mgr *platarPackerManager) Wait() {
-	close(mgr.packerChan)
+	mgr.closeOnce.Do(func() { close(mgr.closing) })
 	<-mgr.packerChanDone
 }
 
@@ -126,8 +133,13 @@ func (mgr *platarPackerManager) InsertIfNotPresent(Type resources.Type, mac obje
 }
 
 func (mgr *platarPackerManager) Put(_ int, Type resources.Type, mac objects.MAC, data []byte) error {
-	mgr.packerChan <- &PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: data}
-	return nil
+	msg := &PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: data}
+	select {
+	case mgr.packerChan <- msg:
+		return nil
+	case <-mgr.closing:
+		return ErrShutdown
+	}
 }
 
 func (mgr *platarPackerManager) Exists(Type resources.Type, mac objects.MAC) (bool, error) {

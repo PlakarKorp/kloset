@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -22,10 +23,19 @@ import (
 	"github.com/PlakarKorp/kloset/versioning"
 )
 
+// ErrShutdown is returned by Put when Wait has been called. See
+// PlakarKorp/plakar#2106.
+var ErrShutdown = errors.New("packer: manager has been shut down")
+
 type seqPackerManager struct {
 	inflightMACs   map[resources.Type]*sync.Map
 	packerChan     []chan PackerMsg
 	packerChanDone chan struct{}
+
+	// closing is closed by Wait to signal shutdown to both Run workers and
+	// in-flight Put callers (which select on it instead of sending blindly).
+	closing   chan struct{}
+	closeOnce sync.Once
 
 	packfileFactory packfile.PackfileCtor
 	storageConf     *storage.Configuration
@@ -51,6 +61,7 @@ func NewSeqPackerManager(ctx *kcontext.KContext, storageConfiguration *storage.C
 		inflightMACs:    inflightsMACs,
 		packerChan:      make([]chan PackerMsg, nChan),
 		packerChanDone:  make(chan struct{}),
+		closing:         make(chan struct{}),
 		packfileFactory: packfileFactory,
 		storageConf:     storageConfiguration,
 		encodingFunc:    encodingFunc,
@@ -112,20 +123,27 @@ func (mgr *seqPackerManager) Run() error {
 		workerGroup.Go(func() error {
 			var pfile packfile.Packfile
 
+			// flushTail finalizes the in-flight packfile, if any, before
+			// the worker returns.
+			flushTail := func() error {
+				if pfile != nil && pfile.Size() > 0 {
+					if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
+						return err
+					}
+					packerResultChan <- pfile
+				}
+				return nil
+			}
+
 			for {
 				select {
 				case <-workerCtx.Done():
 					return workerCtx.Err()
+				case <-mgr.closing:
+					return flushTail()
 				case pm, ok := <-mgr.packerChan[i]:
 					if !ok {
-						if pfile != nil && pfile.Size() > 0 {
-							if err := mgr.AddPadding(pfile, int(mgr.storageConf.Chunking.MinSize)); err != nil {
-								return err
-							}
-
-							packerResultChan <- pfile
-						}
-						return nil
+						return flushTail()
 					}
 
 					if pfile == nil {
@@ -157,12 +175,10 @@ func (mgr *seqPackerManager) Run() error {
 		})
 	}
 
-	inError := false
 	// Wait for workers to finish.
 	if err := workerGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Worker group error: %s", err)
 		mgr.appCtx.Cancel(err)
-		inError = true
 	}
 
 	// Close the result channel and wait for the flusher to finish.
@@ -170,40 +186,17 @@ func (mgr *seqPackerManager) Run() error {
 	if err := flusherGroup.Wait(); err != nil {
 		mgr.appCtx.GetLogger().Error("Flusher group error: %s", err)
 		mgr.appCtx.Cancel(err)
-		inError = true
 	}
 
-	if inError {
-		// If we are in error we have to wait for the producers to catch up for
-		// the Cancellation meaning we still have to drain the channels.
-		drainingGroup := sync.WaitGroup{}
-		for i := range mgr.nChan {
-			drainingGroup.Go(func() {
-				for {
-					select {
-					case _, ok := <-mgr.packerChan[i]:
-						if !ok {
-							return
-						}
-					}
-				}
-			})
-		}
-
-		drainingGroup.Wait()
-	}
-
-	// Signal completion.
 	mgr.packerChanDone <- struct{}{}
 	close(mgr.packerChanDone)
 	return nil
 }
 
 func (mgr *seqPackerManager) Wait() {
-	for i := range mgr.nChan {
-		close(mgr.packerChan[i])
-	}
-
+	// closeOnce makes Wait safe to call more than once; some error paths in
+	// snapshot.Backup do call it twice.
+	mgr.closeOnce.Do(func() { close(mgr.closing) })
 	<-mgr.packerChanDone
 }
 
@@ -217,26 +210,38 @@ func (mgr *seqPackerManager) InsertIfNotPresent(Type resources.Type, mac objects
 }
 
 func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
-	if encodedReader, err := mgr.encodingFunc(bytes.NewReader(data)); err != nil {
+	// Skip encoding work if shutdown was already signalled.
+	select {
+	case <-mgr.closing:
+		return ErrShutdown
+	default:
+	}
+
+	encodedReader, err := mgr.encodingFunc(bytes.NewReader(data))
+	if err != nil {
 		return err
-	} else {
-		encoded, err := io.ReadAll(encodedReader)
-		if err != nil {
-			return err
-		}
+	}
+	encoded, err := io.ReadAll(encodedReader)
+	if err != nil {
+		return err
+	}
 
-		if Type != resources.RT_OBJECT && Type != resources.RT_CHUNK {
-			mgr.packerChan[mgr.nChan-1] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
-		} else {
-			if hint == -1 {
-				mgr.packerChan[randv2.IntN(mgr.nChan-1)] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
-			} else {
-				mgr.packerChan[hint] <- PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
-			}
+	var i int
+	switch {
+	case Type != resources.RT_OBJECT && Type != resources.RT_CHUNK:
+		i = mgr.nChan - 1
+	case hint == -1:
+		i = randv2.IntN(mgr.nChan - 1)
+	default:
+		i = hint
+	}
 
-		}
-
+	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
+	select {
+	case mgr.packerChan[i] <- msg:
 		return nil
+	case <-mgr.closing:
+		return ErrShutdown
 	}
 }
 
