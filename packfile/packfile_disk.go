@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"hash"
 	"io"
+	"iter"
 	"os"
 	"time"
 
@@ -95,7 +96,6 @@ func (w *PackfileOnDisk) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, 
 	_ = binary.Write(&rawFooter, binary.LittleEndian, w.curOff)
 	_ = binary.Write(&rawFooter, binary.LittleEndian, w.indexMAC)
 	_ = binary.Write(&rawFooter, binary.LittleEndian, w.footerFlags)
-
 	encFooter, err := encoder(bytes.NewReader(rawFooter.Bytes()))
 	if err != nil {
 		return nil, objects.NilMac, err
@@ -123,4 +123,27 @@ func (w *PackfileOnDisk) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, 
 	}
 
 	return w.f, objects.MAC(w.totalHash.Sum(nil)), nil
+}
+
+func (p *PackfileOnDisk) Iterate() iter.Seq2[*BlobData, error] {
+	return func(yield func(*BlobData, error) bool) {
+		if err := p.bufferedWriter.Flush(); err != nil {
+			if !yield(nil, err) {
+				return
+			}
+		}
+
+		for _, b := range p.records {
+			out := make([]byte, b.Length)
+			if _, err := p.f.ReadAt(out, int64(b.Offset)); err != nil {
+				if !yield(nil, err) {
+					return
+				}
+			}
+
+			if !yield(&BlobData{b, out}, nil) {
+				return
+			}
+		}
+	}
 }

@@ -3,6 +3,7 @@ package packfile
 import (
 	"hash"
 	"io"
+	"iter"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -18,6 +19,11 @@ type Blob struct {
 	Offset  uint64
 	Length  uint32
 	Flags   uint32
+}
+
+type BlobData struct {
+	Blob
+	Data []byte
 }
 
 const BLOB_RECORD_SIZE = 56
@@ -38,6 +44,7 @@ type Packfile interface {
 	Size() uint64
 	Entries() []Blob
 	Serialize(EncodingFn) (io.Reader, objects.MAC, error)
+	Iterate() iter.Seq2[*BlobData, error]
 	Cleanup() error
 }
 

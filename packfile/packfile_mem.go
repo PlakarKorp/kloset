@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"iter"
 	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -338,6 +339,19 @@ func (p *PackfileInMemory) AddBlob(resourceType resources.Type, version versioni
 	p.Footer.IndexOffset = uint64(len(p.Blobs))
 
 	return nil
+}
+
+func (p *PackfileInMemory) Iterate() iter.Seq2[*BlobData, error] {
+	return func(yield func(*BlobData, error) bool) {
+		for _, b := range p.Index {
+			out := make([]byte, b.Length)
+			copy(out, p.Blobs[b.Offset:b.Offset+uint64(b.Length)])
+
+			if !yield(&BlobData{b, out}, nil) {
+				return
+			}
+		}
+	}
 }
 
 func (p *PackfileInMemory) Entries() []Blob {
