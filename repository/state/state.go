@@ -422,6 +422,10 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 }
 
 func DeleteEntryFromBytes(buf []byte) (del DeleteEntry, err error) {
+	if len(buf) < DeleteEntrySerializedSize {
+		return del, fmt.Errorf("short read while deserializing delete entry: have %d, want %d", len(buf), DeleteEntrySerializedSize)
+	}
+
 	bbuf := bytes.NewBuffer(buf)
 
 	typ, err := bbuf.ReadByte()
@@ -474,6 +478,10 @@ func (de *DeleteEntry) ToBytes() (ret []byte) {
 }
 
 func DeltaEntryFromBytes(buf []byte) (de DeltaEntry, err error) {
+	if len(buf) < DeltaEntrySerializedSize {
+		return de, fmt.Errorf("short read while deserializing delta entry: have %d, want %d", len(buf), DeltaEntrySerializedSize)
+	}
+
 	bbuf := bytes.NewBuffer(buf)
 
 	typ, err := bbuf.ReadByte()
@@ -530,6 +538,10 @@ func (de *DeltaEntry) ToBytes() (ret []byte) {
 }
 
 func PackfileEntryFromBytes(buf []byte) (pe PackfileEntry, err error) {
+	if len(buf) < PackfileEntrySerializedSize {
+		return pe, fmt.Errorf("short read while deserializing packfile entry: have %d, want %d", len(buf), PackfileEntrySerializedSize)
+	}
+
 	bbuf := bytes.NewBuffer(buf)
 
 	n, err := bbuf.Read(pe.Packfile[:])
@@ -568,6 +580,9 @@ func (pe *PackfileEntry) ToBytes() (ret []byte) {
 }
 
 func ColouredEntryFromBytes(buf []byte) (de ColouredEntry, err error) {
+	if len(buf) < ColouredEntrySerializedSize {
+		return de, fmt.Errorf("short read while deserializing coloured entry: have %d, want %d", len(buf), ColouredEntrySerializedSize)
+	}
 	bbuf := bytes.NewBuffer(buf)
 
 	typ, err := bbuf.ReadByte()
@@ -613,6 +628,11 @@ func (de *ColouredEntry) ToBytes() (ret []byte) {
 // - value [valueLen]byte
 // - createdAt uint64
 func ConfigurationEntryFromBytes(buf []byte) (ce ConfigurationEntry, err error) {
+	const minSize = 1 + 2 + 8
+	if len(buf) < minSize {
+		return ce, fmt.Errorf("short read while deserializing configuration entry: have %d, want at least %d", len(buf), minSize)
+	}
+
 	bbuf := bytes.NewBuffer(buf)
 
 	keyLen, err := bbuf.ReadByte()
