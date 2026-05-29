@@ -252,7 +252,7 @@ func (m *mockStateCache) GetConfigurations() iter.Seq[[]byte] {
 
 func (c *mockStateCache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
 	key := fmt.Sprintf("%d:%x", typ, blobCsum)
-	c.coloured[key] = data
+	c.deleted[key] = data
 	return nil
 }
 
