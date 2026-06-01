@@ -228,7 +228,7 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 
 	var i int
 	switch {
-	case Type != resources.RT_OBJECT && Type != resources.RT_CHUNK:
+	case Type != resources.RT_CHUNK:
 		i = mgr.nChan - 1
 	case hint == -1:
 		i = randv2.IntN(mgr.nChan - 1)
