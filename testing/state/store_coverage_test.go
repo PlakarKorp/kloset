@@ -64,18 +64,18 @@ func TestStorePutGetListState(t *testing.T) {
 	mac := objects.MAC{0xAA}
 	payload := []byte("state payload")
 
-	n, err := s.Put(ctx, storage.StorageResourceState, mac, bytes.NewReader(payload))
+	n, err := s.Put(ctx, storage.StorageResourceState, mac, bytes.NewReader(payload), 0)
 	require.NoError(t, err)
 	require.Equal(t, int64(len(payload)), n)
 
-	rc, err := s.Get(ctx, storage.StorageResourceState, mac, nil)
+	rc, err := s.Get(ctx, storage.StorageResourceState, mac, nil, 0)
 	require.NoError(t, err)
 	got, err := io.ReadAll(rc)
 	require.NoError(t, err)
 	require.NoError(t, rc.Close())
 	require.Equal(t, payload, got)
 
-	macs, err := s.List(ctx, storage.StorageResourceState)
+	macs, err := s.List(ctx, storage.StorageResourceState, 0)
 	require.NoError(t, err)
 	require.Contains(t, macs, mac)
 }
@@ -83,21 +83,21 @@ func TestStorePutGetListState(t *testing.T) {
 // TestStorePutUnsupported exercises the unsupported-resource branch of Put.
 func TestStorePutUnsupported(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Put(context.Background(), storage.StorageResourcePackfile, objects.MAC{}, bytes.NewReader(nil))
+	_, err := s.Put(context.Background(), storage.StorageResourcePackfile, objects.MAC{}, bytes.NewReader(nil), 0)
 	require.ErrorIs(t, err, errors.ErrUnsupported)
 }
 
 // TestStoreGetUnsupported exercises the unsupported-resource branch of Get.
 func TestStoreGetUnsupported(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.Get(context.Background(), storage.StorageResourcePackfile, objects.MAC{}, nil)
+	_, err := s.Get(context.Background(), storage.StorageResourcePackfile, objects.MAC{}, nil, 0)
 	require.ErrorIs(t, err, errors.ErrUnsupported)
 }
 
 // TestStoreListUnsupported exercises the unsupported-resource branch of List.
 func TestStoreListUnsupported(t *testing.T) {
 	s := newTestStore(t)
-	_, err := s.List(context.Background(), storage.StorageResourcePackfile)
+	_, err := s.List(context.Background(), storage.StorageResourcePackfile, 0)
 	require.ErrorIs(t, err, errors.ErrUnsupported)
 }
 
@@ -105,7 +105,7 @@ func TestStoreListUnsupported(t *testing.T) {
 // Delete. (The state branch panics by design, so we don't test it.)
 func TestStoreDeleteUnsupported(t *testing.T) {
 	s := newTestStore(t)
-	err := s.Delete(context.Background(), storage.StorageResourcePackfile, objects.MAC{})
+	err := s.Delete(context.Background(), storage.StorageResourcePackfile, objects.MAC{}, 0)
 	require.ErrorIs(t, err, errors.ErrUnsupported)
 }
 
@@ -120,7 +120,7 @@ func TestStorePutStateReadError(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	t.Cleanup(func() { ctx.Close() })
 
-	_, err := s.Put(ctx, storage.StorageResourceState, objects.MAC{0xEE}, errReader{})
+	_, err := s.Put(ctx, storage.StorageResourceState, objects.MAC{0xEE}, errReader{}, 0)
 	require.Error(t, err)
 }
 
@@ -128,6 +128,6 @@ func TestStorePutStateReadError(t *testing.T) {
 func TestStoreDeleteStatePanics(t *testing.T) {
 	s := newTestStore(t)
 	require.Panics(t, func() {
-		_ = s.Delete(context.Background(), storage.StorageResourceState, objects.MAC{})
+		_ = s.Delete(context.Background(), storage.StorageResourceState, objects.MAC{}, 0)
 	})
 }

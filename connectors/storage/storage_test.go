@@ -53,19 +53,19 @@ func (m *mockStore) Flags() location.Flags                      { return 0 }
 func (m *mockStore) Mode(context.Context) (storage.Mode, error) { return 0, nil }
 func (m *mockStore) Size(context.Context) (int64, error)        { return 0, nil }
 
-func (m *mockStore) List(context.Context, storage.StorageResource) ([]objects.MAC, error) {
+func (m *mockStore) List(context.Context, storage.StorageResource, uint32) ([]objects.MAC, error) {
 	return nil, nil
 }
 
-func (m *mockStore) Put(context.Context, storage.StorageResource, objects.MAC, io.Reader) (int64, error) {
+func (m *mockStore) Put(context.Context, storage.StorageResource, objects.MAC, io.Reader, uint32) (int64, error) {
 	return 0, nil
 }
 
-func (m *mockStore) Get(context.Context, storage.StorageResource, objects.MAC, *storage.Range) (io.ReadCloser, error) {
+func (m *mockStore) Get(context.Context, storage.StorageResource, objects.MAC, *storage.Range, uint32) (io.ReadCloser, error) {
 	return nil, nil
 }
 
-func (m *mockStore) Delete(context.Context, storage.StorageResource, objects.MAC) error {
+func (m *mockStore) Delete(context.Context, storage.StorageResource, objects.MAC, uint32) error {
 	return nil
 }
 
