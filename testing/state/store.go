@@ -72,7 +72,7 @@ func (s *store) List(ctx context.Context, res storage.StorageResource, flags uin
 	return nil, errors.ErrUnsupported
 }
 
-func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader, flag uint32) (int64, error) {
+func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader, flags uint32) (int64, error) {
 	switch res {
 	case storage.StorageResourceState:
 		data, err := io.ReadAll(rd)
