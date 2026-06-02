@@ -770,7 +770,7 @@ func (r *Repository) GetStates() ([]objects.MAC, error) {
 		r.Logger().Trace("repository", "GetStates(): %s", time.Since(t0))
 	}()
 
-	return r.store.List(r.appContext, storage.StorageResourceState, 0)
+	return r.store.List(r.appContext, storage.StorageResourceState)
 }
 
 func (r *Repository) OpenStateFromStateFile(file string) (io.ReadCloser, versioning.Version, error) {
@@ -810,7 +810,7 @@ func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, versioning.Versio
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
 	}()
 
-	raw, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil, 0)
+	raw, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -863,7 +863,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 	}
 
 	span := r.ioStats.GetWriteSpan()
-	nbytes, err := r.store.Put(r.appContext, storage.StorageResourceState, mac, rd, 0)
+	nbytes, err := r.store.Put(r.appContext, storage.StorageResourceState, mac, rd)
 	if nbytes > 0 {
 		span.Add(nbytes)
 	}
@@ -876,7 +876,7 @@ func (r *Repository) DeleteState(mac objects.MAC) error {
 		r.Logger().Trace("repository", "DeleteState(%x, ...): %s", mac, time.Since(t0))
 	}()
 
-	return r.store.Delete(r.appContext, storage.StorageResourceState, mac, 0)
+	return r.store.Delete(r.appContext, storage.StorageResourceState, mac)
 }
 
 func (r *Repository) GetPackfiles() ([]objects.MAC, error) {
@@ -885,7 +885,7 @@ func (r *Repository) GetPackfiles() ([]objects.MAC, error) {
 		r.Logger().Trace("repository", "GetPackfiles(): %s", time.Since(t0))
 	}()
 
-	return r.store.List(r.appContext, storage.StorageResourcePackfile, 0)
+	return r.store.List(r.appContext, storage.StorageResourcePackfile)
 }
 
 func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, error) {
@@ -896,7 +896,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 
 	hasher := r.GetMACHasher()
 
-	rd, err := r.store.Get(r.appContext, storage.StorageResourcePackfile, mac, nil, 0)
+	rd, err := r.store.Get(r.appContext, storage.StorageResourcePackfile, mac, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1019,7 +1019,7 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	rd, err := r.store.Get(r.appContext, storage.StorageResourcePackfile, loc.Packfile, &storage.Range{
 		Offset: offset + uint64(storage.STORAGE_HEADER_SIZE) - offsetDelta,
 		Length: realLen,
-	}, 0)
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -1065,7 +1065,7 @@ func (r *Repository) DeletePackfile(mac objects.MAC) error {
 		r.Logger().Trace("repository", "DeletePackfile(%x): %s", mac, time.Since(t0))
 	}()
 
-	return r.store.Delete(r.appContext, storage.StorageResourcePackfile, mac, 0)
+	return r.store.Delete(r.appContext, storage.StorageResourcePackfile, mac)
 }
 
 func (r *Repository) HasDeletedPackfile(mac objects.MAC) (bool, error) {
@@ -1329,7 +1329,7 @@ func (r *Repository) GetLocks() ([]objects.MAC, error) {
 		r.Logger().Trace("repository", "GetLocks(): %s", time.Since(t0))
 	}()
 
-	return r.store.List(r.appContext, storage.StorageResourceLock, 0)
+	return r.store.List(r.appContext, storage.StorageResourceLock)
 }
 
 func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
@@ -1338,7 +1338,7 @@ func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
 	}()
 
-	raw, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil, 0)
+	raw, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1374,7 +1374,7 @@ func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
 		return 0, err
 	}
 
-	return r.store.Put(r.appContext, storage.StorageResourceLock, lockID, rd, 0)
+	return r.store.Put(r.appContext, storage.StorageResourceLock, lockID, rd)
 }
 
 func (r *Repository) DeleteLock(lockID objects.MAC) error {
@@ -1383,7 +1383,7 @@ func (r *Repository) DeleteLock(lockID objects.MAC) error {
 		r.Logger().Trace("repository", "DeleteLock(%x, ...): %s", lockID, time.Since(t0))
 	}()
 
-	return r.store.Delete(r.appContext, storage.StorageResourceLock, lockID, 0)
+	return r.store.Delete(r.appContext, storage.StorageResourceLock, lockID)
 }
 
 func (r *Repository) ListPackfileEntries() iter.Seq2[state.PackfileEntry, error] {
