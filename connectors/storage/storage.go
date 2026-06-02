@@ -151,6 +151,19 @@ func (s StorageResource) String() string {
 	}
 }
 
+// Pass a flag to the storage, (ab)using the context. When we go for a new
+// version of the protocol roll this out as a parameter.
+type flagCtxKey struct{}
+
+func WithFlag(ctx context.Context, flag uint32) context.Context {
+	return context.WithValue(ctx, flagCtxKey{}, flag)
+}
+
+func Flag(ctx context.Context) uint32 {
+	fl, _ := ctx.Value(flagCtxKey{}).(uint32)
+	return fl
+}
+
 type Range struct {
 	Offset uint64
 	Length uint32
