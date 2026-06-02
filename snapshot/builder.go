@@ -101,6 +101,8 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 	snap.Header.Environment = builderOptions.Environment
 	snap.Header.Perimeter = builderOptions.Perimeter
 	snap.Header.Job = builderOptions.Job
+	snap.Header.Dataset = builderOptions.Dataset
+	snap.Header.DataClasses = append(snap.Header.DataClasses, builderOptions.DataClasses...)
 
 	return snap, nil
 }

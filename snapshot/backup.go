@@ -69,6 +69,8 @@ type BuilderOptions struct {
 	Environment     string
 	Perimeter       string
 	Job             string
+	Dataset         string
+	DataClasses     []string
 	NoCheckpoint    bool
 	NoCommit        bool
 	NoXattr         bool
