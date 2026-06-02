@@ -3,105 +3,47 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/PlakarKorp/kloset)](https://goreportcard.com/report/github.com/PlakarKorp/kloset)
 [![codecov](https://codecov.io/gh/PlakarKorp/kloset/branch/main/graph/badge.svg)](https://codecov.io/gh/PlakarKorp/kloset)
 
-## Plakar V1.0.1 released
+## What is Kloset?
 
-We are proud to announce the release of Plakar v1.0.1, our first stable and production-ready version.
+Kloset is an open-source, immutable data store engine designed to package data along with its context, structure, metadata, and integrity. It is the storage engine powering [Plakar](https://github.com/PlakarKorp/plakar).
 
-This release marks the transition of Plakar from an experimental engine to a mature, extensible platform ready for real-world usage in both personal and enterprise contexts.
+Rather than treating backups as opaque archives, Kloset represents all data internally as a virtual filesystem. This abstraction fits any data source — filesystems, databases, object stores, APIs — and supports efficient storage, indexing, and recovery without relying on external state or centralized coordination.
 
-Technical blog post: [Here](https://www.plakar.io/posts/2025-05-01/introducing-plakar-v1.0-to-redefine-open-source-data-protection-with-3m-funding/)
+What Kloset provides:
 
-## Introduction
+- **Immutable storage**: data is split into deduplicated, compressed, and encrypted chunks stored by content hash. Once written, it is never modified;
+- **Self-describing snapshots**: every snapshot includes all the metadata needed to understand the structure and context of the backup, without external dependencies;
+- **Granular restore**: snapshots can be browsed and partially restored without unpacking the full dataset;
+- **Pluggable connectors**: sources, targets, and storage backends are modular — Kloset does not care what it is backing up, only that the data can be listed and read;
+- **Cryptographic auditability**: each snapshot carries a digest tree for data and metadata, making it independently verifiable and tamper-evident;
+- **Built-in encryption**: all data is encrypted at the source before leaving the client, covering both data and metadata.
 
-plakar provides an intuitive, powerful, and scalable backup solution.
+For a deeper look at the architecture, read the [Kloset blog post](https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/).
 
-Plakar goes beyond file-level backups. It captures application data with its full context.
+## Architecture
 
-Data and context are stored using [Kloset](https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/), an open-source, immutable data store that enables the implementation of advanced data protection scenarios.
+Kloset is organized into three main layers:
 
-Plakar's main strengths:
-- **Effortless**: Easy to use, clean default. Check out our [quick start guide](https://plakar.io/docs/v1.1.0/quickstart/).
-- **Secure**: Provide audited end-to-end encryption for data and metadata. See our latest [crypto audit report](https://www.plakar.io/posts/2025-02-28/audit-of-plakar-cryptography/).
-- **Reliable**: Backups are stored in Kloset, an open-source immutable data store. Learn more about [Kloset](https://www.plakar.io/posts/2025-04-29/kloset-the-immutable-data-store/).
-- **Vertically scalable**: Backup and restore very large datasets with limited RAM usage.
-- **Horizontally scalable**: Support high concurrency and multiple backups type in a single Kloset.
-- **Browsable**: Browse, sort, search, and compare backups using the Plakar UI.
-- **Fast**: backup, check, sync and restore are  operations are optimized for large-scale data.
-- **Efficient**: more restore points, less storage, thanks to Kloset's unmatched deduplication and compression.
-- **Open Source and actively maintained**: open source forever and now maintained by [Plakar Korp](https://www.plakar.io)
+**Storage layer.** Handles writing and retrieving streams of raw, opaque bytes. All data reaching this layer is already compressed and encrypted. The storage layer is fully parallelized, backpressure-aware, and built on a pluggable connector model supporting filesystems, SFTP, S3-compatible object stores, and more.
 
-Simplicity and efficiency are plakar's main priorities.
+**Repository layer.** Sits above storage and acts as a local encoding and decoding proxy. During backup, it compresses and encrypts data before passing it to storage. During restore, it decrypts and decompresses before exposing data to higher layers. It also maintains a local content index to avoid redundant writes.
 
-Our mission is to set a new standard for effortless secure data protection. 
+**Snapshot layer.** Organizes raw data into coherent, structured groups representing a backup at a specific point in time. Each snapshot captures a complete view of a dataset including type, tree hierarchy, metadata, content hashes, and logical relationships. Snapshots enable incremental backups, change tracking, and historical inspection.
 
-## Plakar UI
+## Contributing and reporting issues
 
-Plakar includes a built-in web-based user interface to **monitor, browse, and restore** your backups with ease.
+Please read the [contributing guidelines](./CONTRIBUTING.md) and [code of conduct](./CODE_OF_CONDUCT.md) before opening a pull request.
 
-### 🖥️ Launch the UI
+If you find a bug or want to request a change, please open an issue:
 
-You can start the interface from any machine with access to your backups:
-
-```
-$ plakar ui
-```
-
-### 📂 Snapshot Overview
-
-Quickly list all available snapshots and explore them:
-
-![Snapshot browser](https://www.plakar.io/readme/snapshot-list.png)
-
-### 🔍 Granular Browsing
-
-Navigate the contents of each snapshot to inspect, compare, or selectively restore files:
-
-![Snapshot browser](https://www.plakar.io/readme/snapshot-browser.png)
-
-
-## Requirement
-
-`plakar` requires Go 1.23.3 or higher,
-it may work on older versions but hasn't been tested.
-
-
-## Installing the CLI
-
-```
-go install github.com/PlakarKorp/plakar/cmd/plakar@latest
-```
-
-## Quickstart
-
-plakar quickstart: https://plakar.io/docs/v1.1.0/quickstart/
-
-A taste of plakar (please follow the quickstart to begin):
-```
-$ plakar at /var/backups create                             # Create a repository
-$ plakar at /var/backups backup /private/etc                # Backup /private/etc
-$ plakar at /var/backups ls                                 # List all repository backup
-$ plakar at /var/backups restore -to /tmp/restore 9abc3294  # Restore a backup to /tmp/restore
-$ plakar at /var/backups ui                                 # Start the UI
-$ plakar at /var/backups sync to @s3                        # Synchronise a backup repository to S3
-
-```
-
-## Notable Capabilities
-
-- **Instant recovery**: Instantly mount large backups on any devices without full restoration.
-- **Distributed backup**: Kloset can be easily distributed to implement 3,2,1 rule or advanced strategies (push, pull, sync) across heterogeneous environments.
-- **Granular restore**: Restore a complete snapshot or only a subset of your data.
-- **Cross-storage restore**: Back up from one storage type (e.g., S3-compatible object store) and restore to another (e.g., file system)..
-- **Production safe-guarding**: Automatically adjusts backup speed to avoid impacting production workloads.
-- **Lock-free maintenance**: Perform garbage collection without interrupting backup or restore operations.
-- **Integrations**: back up and restore from and to any source (file systems, object stores, SaaS applications...) with the right integration.
-
-
-## Documentation
-
-For the latest information,
-you can read the documentation available at https://plakar.io/docs/
+https://github.com/PlakarKorp/kloset/issues
 
 ## Community
 
-You can join our very active [Discord](https://discord.com/invite/uqdP9Wfzx3) to discuss the project !
+- [Discord](https://discord.gg/A2yvjS6r2C)
+- [Reddit](https://www.reddit.com/r/plakar/)
+- [YouTube](https://www.youtube.com/@PlakarKorp)
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for release notes and version history.
