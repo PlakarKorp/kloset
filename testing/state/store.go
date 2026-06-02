@@ -59,7 +59,7 @@ func (s *store) Size(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
-func (s *store) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
+func (s *store) List(ctx context.Context, res storage.StorageResource, flags uint32) ([]objects.MAC, error) {
 	switch res {
 	case storage.StorageResourceState:
 		var all []objects.MAC
@@ -72,7 +72,7 @@ func (s *store) List(ctx context.Context, res storage.StorageResource) ([]object
 	return nil, errors.ErrUnsupported
 }
 
-func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader, flags uint32) (int64, error) {
 	switch res {
 	case storage.StorageResourceState:
 		data, err := io.ReadAll(rd)
@@ -87,7 +87,7 @@ func (s *store) Put(ctx context.Context, res storage.StorageResource, mac object
 	return -1, errors.ErrUnsupported
 }
 
-func (s *store) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+func (s *store) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range, flags uint32) (io.ReadCloser, error) {
 	switch res {
 	case storage.StorageResourceState:
 		return io.NopCloser(bytes.NewReader(s.states[mac])), nil
@@ -96,7 +96,7 @@ func (s *store) Get(ctx context.Context, res storage.StorageResource, mac object
 	return nil, errors.ErrUnsupported
 }
 
-func (s *store) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
+func (s *store) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC, flags uint32) error {
 	switch res {
 	case storage.StorageResourceState:
 		panic("!!!")
