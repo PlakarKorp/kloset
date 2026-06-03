@@ -97,11 +97,11 @@ func TestPutBlobIfNotExists(t *testing.T) {
 	require.NotNil(t, writer)
 
 	// Test putting a blob
-	err = writer.PutBlobIfNotExists(resources.RT_CONFIG, objects.MAC{}, []byte("test"))
+	err = writer.PutBlobIfNotExists(resources.RT_CONFIG, objects.MAC{}, []byte("test"), true)
 	require.NoError(t, err)
 
 	// Test putting the same blob again
-	err = writer.PutBlobIfNotExists(resources.RT_CONFIG, objects.MAC{}, []byte("test"))
+	err = writer.PutBlobIfNotExists(resources.RT_CONFIG, objects.MAC{}, []byte("test"), true)
 	require.NoError(t, err)
 }
 
@@ -130,7 +130,7 @@ func TestPutBlob(t *testing.T) {
 	require.NotNil(t, writer)
 
 	// Test putting a blob
-	err = writer.PutBlob(resources.RT_CONFIG, objects.MAC{}, []byte("test"))
+	err = writer.PutBlob(resources.RT_CONFIG, objects.MAC{}, []byte("test"), true)
 	require.NoError(t, err)
 }
 

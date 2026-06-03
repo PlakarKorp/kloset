@@ -114,7 +114,7 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		newmac := dst.repository.ComputeMAC(data)
 		dst.Header.Identifier = newmac
 		if dst.repository.BlobExists(resources.RT_SIGNATURE, newmac) {
-			err = dst.repository.PutBlob(resources.RT_SIGNATURE, newmac, data)
+			err = dst.repository.PutBlob(resources.RT_SIGNATURE, newmac, data, true)
 			if err != nil {
 				return err
 			}
