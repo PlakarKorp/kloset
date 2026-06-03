@@ -18,6 +18,8 @@ type PackfileInMemory struct {
 	Blobs  []byte
 	Index  []Blob
 	Footer PackfileInMemoryFooter
+
+	hot bool
 }
 
 type PackfileInMemoryFooter struct {
@@ -360,4 +362,12 @@ func (p *PackfileInMemory) getBlob(mac objects.MAC) ([]byte, bool) {
 		}
 	}
 	return nil, false
+}
+
+func (p *PackfileInMemory) SetHot() {
+	p.hot = true
+}
+
+func (p *PackfileInMemory) Hot() bool {
+	return p.hot
 }

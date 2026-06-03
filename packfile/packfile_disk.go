@@ -27,6 +27,8 @@ type PackfileOnDisk struct {
 	footerTimestamp int64
 	footerFlags     uint32
 	indexMAC        objects.MAC
+
+	hot bool
 }
 
 func NewPackfileOnDisk(tempDir string, hf HashFactory) (Packfile, error) {
@@ -123,4 +125,12 @@ func (w *PackfileOnDisk) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, 
 	}
 
 	return w.f, objects.MAC(w.totalHash.Sum(nil)), nil
+}
+
+func (p *PackfileOnDisk) SetHot() {
+	p.hot = true
+}
+
+func (p *PackfileOnDisk) Hot() bool {
+	return p.hot
 }

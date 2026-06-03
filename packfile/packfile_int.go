@@ -38,6 +38,8 @@ type Packfile interface {
 	Size() uint64
 	Entries() []Blob
 	Serialize(EncodingFn) (io.Reader, objects.MAC, error)
+	SetHot()
+	Hot() bool
 	Cleanup() error
 }
 

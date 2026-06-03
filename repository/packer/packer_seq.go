@@ -158,6 +158,11 @@ func (mgr *seqPackerManager) Run() error {
 						}
 					}
 
+					// One blob is enough to taint the whole packfile as hot.
+					if pm.Flags&PackfileHot != 0 {
+						pfile.SetHot()
+					}
+
 					pm.Flags &^= PackfileHot
 					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, uint32(pm.Flags)); err != nil {
 						return err
