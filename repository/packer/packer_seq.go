@@ -9,6 +9,7 @@ import (
 	"hash"
 	"io"
 	"math/big"
+	"math/bits"
 	randv2 "math/rand/v2"
 	"sync"
 	"time"
@@ -158,6 +159,7 @@ func (mgr *seqPackerManager) Run() error {
 						}
 					}
 
+					pm.Flags &^= PackfileHot
 					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, uint32(pm.Flags)); err != nil {
 						return err
 					}
@@ -236,7 +238,12 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 		i = hint
 	}
 
-	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
+	var f PackerMsgFlags
+	if hot {
+		f |= PackfileHot
+	}
+
+	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded, Flags: f}
 	select {
 	case mgr.packerChan[i] <- msg:
 		return nil
