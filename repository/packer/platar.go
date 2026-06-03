@@ -70,6 +70,18 @@ func (mgr *platarPackerManager) Run() error {
 				case <-workerCtx.Done():
 					return workerCtx.Err()
 				case <-mgr.closing:
+					// Channel is buffered we need to drain!
+					for msg := range mgr.packerChan {
+						pm, ok := msg.(*PackerMsg)
+						if !ok {
+							return fmt.Errorf("unexpected message type")
+						}
+
+						if err := pfile.WriteBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+							return fmt.Errorf("failed to write blob: %w", err)
+						}
+					}
+
 					return nil
 				case msg, ok := <-mgr.packerChan:
 					if !ok {
@@ -110,7 +122,7 @@ func (mgr *platarPackerManager) Run() error {
 }
 
 func (mgr *platarPackerManager) Wait() {
-	mgr.closeOnce.Do(func() { close(mgr.closing) })
+	mgr.closeOnce.Do(func() { close(mgr.closing); close(mgr.packerChan) })
 	<-mgr.packerChanDone
 }
 
