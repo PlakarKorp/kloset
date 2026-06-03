@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"io"
 	"sync"
 	"time"
@@ -258,8 +259,13 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		return err
 	}
 
+	var ctx context.Context = r.appContext
+	if pfile.Hot() {
+		ctx = storage.WithFlag(ctx, storage.StorageHot)
+	}
+
 	span := r.ioStats.GetWriteSpan()
-	nbytes, err := r.store.Put(r.appContext, storage.StorageResourcePackfile, mac, rd)
+	nbytes, err := r.store.Put(ctx, storage.StorageResourcePackfile, mac, rd)
 
 	span.Add(nbytes)
 	if err != nil {

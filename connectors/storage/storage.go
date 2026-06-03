@@ -155,12 +155,18 @@ func (s StorageResource) String() string {
 // version of the protocol roll this out as a parameter.
 type flagCtxKey struct{}
 
-func WithFlag(ctx context.Context, flag uint32) context.Context {
+type StorageFlag uint32
+
+const (
+	StorageHot StorageFlag = 1 << iota
+)
+
+func WithFlag(ctx context.Context, flag StorageFlag) context.Context {
 	return context.WithValue(ctx, flagCtxKey{}, flag)
 }
 
-func Flag(ctx context.Context) uint32 {
-	fl, _ := ctx.Value(flagCtxKey{}).(uint32)
+func Flag(ctx context.Context) StorageFlag {
+	fl, _ := ctx.Value(flagCtxKey{}).(StorageFlag)
 	return fl
 }
 
