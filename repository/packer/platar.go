@@ -79,7 +79,7 @@ func (mgr *platarPackerManager) Run() error {
 							return fmt.Errorf("unexpected message type")
 						}
 
-						if err := pfile.WriteBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+						if err := pfile.WriteBlob(pm.Type, pm.Version, pm.MAC, pm.Data, uint32(pm.Flags)); err != nil {
 							return fmt.Errorf("failed to write blob: %w", err)
 						}
 					}
@@ -95,7 +95,7 @@ func (mgr *platarPackerManager) Run() error {
 						return fmt.Errorf("unexpected message type")
 					}
 
-					if err := pfile.WriteBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+					if err := pfile.WriteBlob(pm.Type, pm.Version, pm.MAC, pm.Data, uint32(pm.Flags)); err != nil {
 						return fmt.Errorf("failed to write blob: %w", err)
 					}
 				}
@@ -146,7 +146,7 @@ func (mgr *platarPackerManager) InsertIfNotPresent(Type resources.Type, mac obje
 	return false, nil
 }
 
-func (mgr *platarPackerManager) Put(_ int, Type resources.Type, mac objects.MAC, data []byte) error {
+func (mgr *platarPackerManager) Put(_ int, Type resources.Type, mac objects.MAC, data []byte, _ bool) error {
 	select {
 	case <-mgr.closing:
 		return ErrShutdown

@@ -158,7 +158,7 @@ func (mgr *seqPackerManager) Run() error {
 						}
 					}
 
-					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, uint32(pm.Flags)); err != nil {
 						return err
 					}
 
@@ -209,7 +209,7 @@ func (mgr *seqPackerManager) InsertIfNotPresent(Type resources.Type, mac objects
 	return false, nil
 }
 
-func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
+func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC, data []byte, hot bool) error {
 	// Skip encoding work if shutdown was already signalled.
 	select {
 	case <-mgr.closing:

@@ -172,7 +172,7 @@ func (r *RepositoryWriter) PutBlobWithHint(hint int, Type resources.Type, mac ob
 		return nil
 	}
 
-	return r.PackerManager.Put(hint, Type, mac, data)
+	return r.PackerManager.Put(hint, Type, mac, data, false)
 }
 
 func (r *RepositoryWriter) PutBlobIfNotExists(Type resources.Type, mac objects.MAC, data []byte) error {
@@ -194,7 +194,7 @@ func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []
 		return nil
 	}
 
-	return r.PackerManager.Put(-1, Type, mac, data)
+	return r.PackerManager.Put(-1, Type, mac, data, false)
 }
 
 // State manipulation function.

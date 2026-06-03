@@ -56,7 +56,7 @@ func TestSeqPackerRunAndWait(t *testing.T) {
 
 	mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 		17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
-	err := mgr.Put(0, resources.RT_CONFIG, mac, []byte("test blob content"))
+	err := mgr.Put(0, resources.RT_CONFIG, mac, []byte("test blob content"), false)
 	require.NoError(t, err)
 
 	mgr.Wait()
@@ -92,7 +92,7 @@ func TestSeqPackerRunMultipleBlobs(t *testing.T) {
 		for j := range data {
 			data[j] = byte(i*10 + j)
 		}
-		require.NoError(t, mgr.Put(i%ctx.MaxConcurrency, resources.RT_CONFIG, mac, data))
+		require.NoError(t, mgr.Put(i%ctx.MaxConcurrency, resources.RT_CONFIG, mac, data, false))
 	}
 
 	mgr.Wait()
@@ -120,7 +120,7 @@ func TestSeqPackerPutChunkRouting(t *testing.T) {
 
 	for i := range 4 {
 		mac := objects.MAC{byte(i + 100)}
-		require.NoError(t, mgr.Put(-1, resources.RT_CHUNK, mac, []byte("chunk data")))
+		require.NoError(t, mgr.Put(-1, resources.RT_CHUNK, mac, []byte("chunk data"), false))
 	}
 
 	mgr.Wait()
@@ -203,7 +203,7 @@ func TestSeqPackerObjectRouting(t *testing.T) {
 	go func() { runErr <- mgr.Run() }()
 
 	mac := objects.MAC{0x77}
-	require.NoError(t, mgr.Put(0, resources.RT_OBJECT, mac, []byte("object data")))
+	require.NoError(t, mgr.Put(0, resources.RT_OBJECT, mac, []byte("object data"), false))
 
 	mgr.Wait()
 	require.NoError(t, <-runErr)
