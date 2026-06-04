@@ -70,8 +70,10 @@ func (mgr *platarPackerManager) Run() error {
 				case <-workerCtx.Done():
 					return workerCtx.Err()
 				case <-mgr.closing:
-					// Channel is buffered we need to drain!
-					for msg := range mgr.packerChan {
+					// Channel is buffered we need to drain, we can't close it
+					// to avoid a panic in Put.
+					for len(mgr.packerChan) > 0 {
+						msg := <-mgr.packerChan
 						pm, ok := msg.(*PackerMsg)
 						if !ok {
 							return fmt.Errorf("unexpected message type")
@@ -122,7 +124,7 @@ func (mgr *platarPackerManager) Run() error {
 }
 
 func (mgr *platarPackerManager) Wait() {
-	mgr.closeOnce.Do(func() { close(mgr.closing); close(mgr.packerChan) })
+	mgr.closeOnce.Do(func() { close(mgr.closing) })
 	<-mgr.packerChanDone
 }
 
@@ -145,6 +147,12 @@ func (mgr *platarPackerManager) InsertIfNotPresent(Type resources.Type, mac obje
 }
 
 func (mgr *platarPackerManager) Put(_ int, Type resources.Type, mac objects.MAC, data []byte) error {
+	select {
+	case <-mgr.closing:
+		return ErrShutdown
+	default:
+	}
+
 	msg := &PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: data}
 	select {
 	case mgr.packerChan <- msg:
