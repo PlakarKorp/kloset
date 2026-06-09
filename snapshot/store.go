@@ -54,7 +54,7 @@ func (s *SnapshotStore[K, V]) Put(node *btree.Node[K, objects.MAC, V]) (objects.
 	}
 
 	mac := s.snapBuilder.repository.ComputeMAC(bytes)
-	return mac, s.snapBuilder.repository.PutBlobIfNotExists(s.blobtype, mac, bytes)
+	return mac, s.snapBuilder.repository.PutBlobIfNotExists(s.blobtype, mac, bytes, true)
 }
 
 func (s *SnapshotStore[K, V]) Close() error {
@@ -82,5 +82,5 @@ func persistIndex[K any, P comparable, VA, VB any](snap *Builder, tree *btree.BT
 	}
 
 	mac = snap.repository.ComputeMAC(bytes)
-	return mac, snap.repository.PutBlobIfNotExists(rootres, mac, bytes)
+	return mac, snap.repository.PutBlobIfNotExists(rootres, mac, bytes, true)
 }

@@ -140,7 +140,7 @@ func TestPlatarPackerManager_Put(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 		data := []byte("test data")
 
-		err := mgr.Put(0, resources.RT_CONFIG, mac, data)
+		err := mgr.Put(0, resources.RT_CONFIG, mac, data, false)
 		require.NoError(t, err)
 	})
 
@@ -149,7 +149,7 @@ func TestPlatarPackerManager_Put(t *testing.T) {
 			mac := objects.MAC{byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i)}
 			data := []byte("test data " + string(rune(i+'0')))
 
-			err := mgr.Put(0, resources.RT_CONFIG, mac, data)
+			err := mgr.Put(0, resources.RT_CONFIG, mac, data, false)
 			require.NoError(t, err)
 		}
 	})
@@ -163,7 +163,7 @@ func TestPlatarPackerManager_Put(t *testing.T) {
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 		data := []byte("test data")
 
-		err = mgrWithFailingEncoding.Put(0, resources.RT_CONFIG, mac, data)
+		err = mgrWithFailingEncoding.Put(0, resources.RT_CONFIG, mac, data, false)
 		// Do not expect an error, as Put does not return encoding errors in platar.go
 	})
 }
@@ -239,7 +239,7 @@ func TestPlatarPackerManager_RunAndWait(t *testing.T) {
 		// Add some data to process
 		mac := objects.MAC{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32}
 		data := []byte("test data")
-		err = mgr.Put(0, resources.RT_CONFIG, mac, data)
+		err = mgr.Put(0, resources.RT_CONFIG, mac, data, false)
 		require.NoError(t, err)
 
 		// Wait for completion
@@ -290,7 +290,7 @@ func TestPlatarPackerManager_RunAndWait(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			mac := objects.MAC{byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i), byte(i)}
 			data := []byte("test data " + string(rune(i+'0')))
-			err := mgr.Put(0, resources.RT_CONFIG, mac, data)
+			err := mgr.Put(0, resources.RT_CONFIG, mac, data, false)
 			require.NoError(t, err)
 		}
 

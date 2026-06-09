@@ -158,7 +158,13 @@ func (mgr *seqPackerManager) Run() error {
 						}
 					}
 
-					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, pm.Flags); err != nil {
+					// One blob is enough to taint the whole packfile as hot.
+					if pm.Flags&PackfileHot != 0 {
+						pfile.SetHot()
+					}
+
+					pm.Flags &^= PackfileHot
+					if err := pfile.AddBlob(pm.Type, pm.Version, pm.MAC, pm.Data, uint32(pm.Flags)); err != nil {
 						return err
 					}
 
@@ -209,7 +215,7 @@ func (mgr *seqPackerManager) InsertIfNotPresent(Type resources.Type, mac objects
 	return false, nil
 }
 
-func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
+func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC, data []byte, hot bool) error {
 	// Skip encoding work if shutdown was already signalled.
 	select {
 	case <-mgr.closing:
@@ -236,7 +242,12 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 		i = hint
 	}
 
-	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded}
+	var f PackerMsgFlags
+	if hot {
+		f |= PackfileHot
+	}
+
+	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded, Flags: f}
 	select {
 	case mgr.packerChan[i] <- msg:
 		return nil

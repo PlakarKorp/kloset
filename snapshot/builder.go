@@ -424,12 +424,12 @@ func (snap *Builder) PutSnapshot() ([]byte, error) {
 	if kp := snap.appContext.Keypair; kp != nil {
 		serializedHdrMAC := snap.repository.ComputeMAC(serializedHdr)
 		signature := kp.Sign(serializedHdrMAC[:])
-		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature); err != nil {
+		if err := snap.repository.PutBlob(resources.RT_SIGNATURE, snap.Header.Identifier, signature, true); err != nil {
 			return nil, err
 		}
 	}
 
-	if err := snap.repository.PutBlob(resources.RT_SNAPSHOT, snap.Header.Identifier, serializedHdr); err != nil {
+	if err := snap.repository.PutBlob(resources.RT_SNAPSHOT, snap.Header.Identifier, serializedHdr, true); err != nil {
 		return nil, err
 	}
 

@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"io"
 	"sync"
 	"time"
@@ -153,14 +154,14 @@ func (r *RepositoryWriter) BlobExists(Type resources.Type, mac objects.MAC) bool
 	return r.state.BlobExists(Type, mac)
 }
 
-func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
+func (r *RepositoryWriter) PutBlobIfNotExistsWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte, hot bool) error {
 	if r.BlobExists(Type, mac) {
 		return nil
 	}
-	return r.PutBlobWithHint(hint, Type, mac, data)
+	return r.PutBlobWithHint(hint, Type, mac, data, hot)
 }
 
-func (r *RepositoryWriter) PutBlobWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte) error {
+func (r *RepositoryWriter) PutBlobWithHint(hint int, Type resources.Type, mac objects.MAC, data []byte, hot bool) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repositorywriter", "PutBlobWithHint(%d, %s, %x): %s", hint, Type, mac, time.Since(t0))
@@ -172,17 +173,17 @@ func (r *RepositoryWriter) PutBlobWithHint(hint int, Type resources.Type, mac ob
 		return nil
 	}
 
-	return r.PackerManager.Put(hint, Type, mac, data)
+	return r.PackerManager.Put(hint, Type, mac, data, hot)
 }
 
-func (r *RepositoryWriter) PutBlobIfNotExists(Type resources.Type, mac objects.MAC, data []byte) error {
+func (r *RepositoryWriter) PutBlobIfNotExists(Type resources.Type, mac objects.MAC, data []byte, hot bool) error {
 	if r.BlobExists(Type, mac) {
 		return nil
 	}
-	return r.PutBlob(Type, mac, data)
+	return r.PutBlob(Type, mac, data, hot)
 }
 
-func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []byte) error {
+func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []byte, hot bool) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repositorywriter", "PutBlob(%s, %x): %s", Type, mac, time.Since(t0))
@@ -194,7 +195,7 @@ func (r *RepositoryWriter) PutBlob(Type resources.Type, mac objects.MAC, data []
 		return nil
 	}
 
-	return r.PackerManager.Put(-1, Type, mac, data)
+	return r.PackerManager.Put(-1, Type, mac, data, hot)
 }
 
 // State manipulation function.
@@ -258,8 +259,13 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 		return err
 	}
 
+	var ctx context.Context = r.appContext
+	if pfile.Hot() {
+		ctx = storage.WithFlag(ctx, storage.StorageHot)
+	}
+
 	span := r.ioStats.GetWriteSpan()
-	nbytes, err := r.store.Put(r.appContext, storage.StorageResourcePackfile, mac, rd)
+	nbytes, err := r.store.Put(ctx, storage.StorageResourcePackfile, mac, rd)
 
 	span.Add(nbytes)
 	if err != nil {
