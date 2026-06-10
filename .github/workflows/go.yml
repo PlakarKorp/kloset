@@ -12,6 +12,8 @@ jobs:
       contents: read
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 2
 
     - name: Set up Go
       uses: actions/setup-go@v5
@@ -22,11 +24,36 @@ jobs:
     - name: Build
       run: go build -v ./...
 
+    # Produce a coverage profile (Codecov coverage) and a JUnit XML (Codecov
+    # Test Analytics) in one run. continue-on-error + explicit exit keeps the
+    # upload steps reachable on test failure — that is exactly when the test
+    # results are most useful; a later step re-surfaces the failure.
     - name: Test
-      run: go test -v -coverprofile=coverage.out -covermode=atomic -timeout 1m ./...
+      id: gotest
+      continue-on-error: true
+      run: |
+        go install github.com/jstemmer/go-junit-report/v2@latest
+        set -o pipefail
+        go test -v -coverprofile=coverage.out -covermode=atomic -timeout 1m -json ./... \
+          | "$(go env GOPATH)/bin/go-junit-report" -parser gojson -set-exit-code > junit.xml
+        status=$?
+        echo "test_exit=$status" >> "$GITHUB_OUTPUT"
+        exit $status
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
+      uses: codecov/codecov-action@v5
       with:
+        token: ${{ secrets.CODECOV_TOKEN }}
         files: ./coverage.out
         fail_ci_if_error: false
+
+    - name: Upload test results to Codecov
+      if: ${{ !cancelled() }}
+      uses: codecov/test-results-action@v1
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        files: ./junit.xml
+
+    - name: Fail if tests failed
+      if: ${{ steps.gotest.outputs.test_exit != '0' }}
+      run: exit 1
