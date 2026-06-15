@@ -210,11 +210,10 @@ func TestGetEntryForBackupWithCache(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestXattrLookup exercises Entry.Xattr's btree lookup path. Note: the xattr
-// index is currently keyed by the bare record pathname (see buildXattrIndex in
-// snapshot/backup.go), whereas Entry.Xattr composes "<path><name><sep>", so a
-// lookup by attribute name does not match and returns ErrNotExist. We assert
-// that observed behaviour rather than a found value.
+// TestXattrLookup exercises Entry.Xattr's btree lookup path. The xattr index is
+// keyed by Xattr.ToPath() ("<path><name><sep>") on the write side (recordXattr
+// in snapshot/backup.go), matching the key Entry.Xattr composes, so an existing
+// attribute is retrievable and an unknown one returns ErrNotExist.
 func TestXattrLookup(t *testing.T) {
 	_, snap := generateRichSnapshot(t)
 	defer snap.Close()
@@ -225,11 +224,14 @@ func TestXattrLookup(t *testing.T) {
 	e, err := fs.GetEntry("/dir/file.txt")
 	require.NoError(t, err)
 
-	_, err = e.Xattr(fs, "user.comment")
-	require.Error(t, err)
+	rd, err := e.Xattr(fs, "user.comment")
+	require.NoError(t, err)
+	value, err := io.ReadAll(rd)
+	require.NoError(t, err)
+	require.Equal(t, "an xattr value", string(value))
 
 	_, err = e.Xattr(fs, "user.nope")
-	require.Error(t, err)
+	require.ErrorIs(t, err, iofs.ErrNotExist)
 }
 
 // TestErrorsIterator exercises the Errors iterator over a snapshot that
