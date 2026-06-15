@@ -72,29 +72,21 @@ func TestPackfileOnDiskAddBlobWriteError(t *testing.T) {
 	require.Error(t, err)
 }
 
-// --- NewPackfileInMemoryFromBytes footer-parse error branches -------------
+// --- NewPackfileInMemoryFromBytes footer-parse branches -------------------
 //
-// These exercise the per-field binary.Read failures while parsing the footer
-// (packfile_mem.go lines 128-142). We build a buffer whose trailing
-// FOOTER_SIZE bytes are present so Seek(-FOOTER_SIZE) succeeds, but where the
-// footer region itself is truncated relative to what binary.Read needs once
-// the reader position is taken into account.
-//
-// The simplest reliable way to hit these is to provide a buffer of exactly
-// FOOTER_SIZE bytes filled such that after the data-section read, the index
-// loop and MAC check fail — but the footer-field reads themselves succeed on a
-// full FOOTER_SIZE buffer. To drive a footer-field read error we instead make
-// the whole buffer shorter via a buffer where Seek lands mid-footer is not
-// possible. Hence we assert the documented behaviour: a buffer of exactly
-// FOOTER_SIZE with IndexOffset==0 parses the footer fully, leaving only the
-// MAC check to fail.
+// A valid packfile always has a full FOOTER_SIZE-byte footer (Seek(-FOOTER_SIZE)
+// must succeed before any field is read), so the individual footer-field reads
+// cannot fail on real input. The reachable failure after a clean footer parse
+// is the IndexMAC check: a buffer of exactly FOOTER_SIZE with IndexOffset==0
+// parses the footer fully, then the recomputed (empty) index MAC won't match a
+// nonzero stored IndexMAC.
 func TestNewPackfileInMemoryFromBytesFooterOnlyMACMismatch(t *testing.T) {
 	footerBuf := &bytes.Buffer{}
-	_ = binary.Write(footerBuf, binary.LittleEndian, int64(0))      // Timestamp
-	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(0))     // Count
-	_ = binary.Write(footerBuf, binary.LittleEndian, uint64(0))     // IndexOffset
+	_ = binary.Write(footerBuf, binary.LittleEndian, int64(0))       // Timestamp
+	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(0))      // Count
+	_ = binary.Write(footerBuf, binary.LittleEndian, uint64(0))      // IndexOffset
 	_ = binary.Write(footerBuf, binary.LittleEndian, objects.MAC{1}) // IndexMAC (nonzero)
-	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(0))     // Flags
+	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(0))      // Flags
 	require.Equal(t, FOOTER_SIZE, footerBuf.Len())
 
 	// Empty index + nonzero IndexMAC => the recomputed MAC (of nothing) won't

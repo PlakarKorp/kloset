@@ -14,9 +14,35 @@ import (
 	"github.com/PlakarKorp/kloset/versioning"
 )
 
+// diskBackend abstracts the buffered-file operations performed at the end of
+// Serialize (flush the buffer, fsync, rewind). It exists so tests can inject a
+// backend whose Flush/Sync/Seek fail independently — a real *os.File cannot be
+// made to fail those at will once writing has succeeded.
+type diskBackend interface {
+	io.Writer
+	Flush() error
+	Sync() error
+	Seek(offset int64, whence int) (int64, error)
+	// reader returns the io.Reader handed back from Serialize after a rewind.
+	reader() io.Reader
+}
+
+// fileBackend is the production diskBackend, pairing a bufio.Writer with the
+// *os.File it wraps.
+type fileBackend struct {
+	f  *os.File
+	bw *bufio.Writer
+}
+
+func (b *fileBackend) Write(p []byte) (int, error)               { return b.bw.Write(p) }
+func (b *fileBackend) Flush() error                              { return b.bw.Flush() }
+func (b *fileBackend) Sync() error                               { return b.f.Sync() }
+func (b *fileBackend) Seek(off int64, whence int) (int64, error) { return b.f.Seek(off, whence) }
+func (b *fileBackend) reader() io.Reader                         { return b.f }
+
 type PackfileOnDisk struct {
 	f              *os.File
-	bufferedWriter *bufio.Writer
+	backend        diskBackend
 	totalHash      hash.Hash
 	combinedWriter io.Writer
 	hf             HashFactory
@@ -39,12 +65,12 @@ func NewPackfileOnDisk(tempDir string, hf HashFactory) (Packfile, error) {
 
 	p := &PackfileOnDisk{
 		f:               f,
-		bufferedWriter:  bufio.NewWriterSize(f, 1<<20),
+		backend:         &fileBackend{f: f, bw: bufio.NewWriterSize(f, 1<<20)},
 		totalHash:       hf(),
 		hf:              hf,
 		footerTimestamp: time.Now().UnixNano(),
 	}
-	p.combinedWriter = io.MultiWriter(p.bufferedWriter, p.totalHash)
+	p.combinedWriter = io.MultiWriter(p.backend, p.totalHash)
 
 	return p, nil
 }
@@ -74,12 +100,10 @@ func (w *PackfileOnDisk) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, 
 
 	ciw := io.MultiWriter(rawIdx, idxHash)
 	for _, r := range w.records {
-		_ = binary.Write(ciw, binary.LittleEndian, r.Type)
-		_ = binary.Write(ciw, binary.LittleEndian, r.Version)
-		_ = binary.Write(ciw, binary.LittleEndian, r.MAC)
-		_ = binary.Write(ciw, binary.LittleEndian, r.Offset)
-		_ = binary.Write(ciw, binary.LittleEndian, r.Length)
-		_ = binary.Write(ciw, binary.LittleEndian, r.Flags)
+		// ciw only wraps in-memory writers (bytes.Buffer + hash.Hash), so
+		// these writes cannot fail; the error is intentionally ignored, as in
+		// the pre-helper version of this loop.
+		_ = writeBlobRecord(ciw, r)
 	}
 
 	copy(w.indexMAC[:], idxHash.Sum(nil))
@@ -92,11 +116,8 @@ func (w *PackfileOnDisk) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, 
 	}
 
 	var rawFooter bytes.Buffer
-	_ = binary.Write(&rawFooter, binary.LittleEndian, w.footerTimestamp)
-	_ = binary.Write(&rawFooter, binary.LittleEndian, uint32(len(w.records)))
-	_ = binary.Write(&rawFooter, binary.LittleEndian, w.curOff)
-	_ = binary.Write(&rawFooter, binary.LittleEndian, w.indexMAC)
-	_ = binary.Write(&rawFooter, binary.LittleEndian, w.footerFlags)
+	// rawFooter is an in-memory buffer; this write cannot fail.
+	_ = writeFooterFields(&rawFooter, w.footerTimestamp, uint32(len(w.records)), w.curOff, w.indexMAC, w.footerFlags)
 
 	encFooter, err := encoder(bytes.NewReader(rawFooter.Bytes()))
 	if err != nil {
@@ -112,19 +133,19 @@ func (w *PackfileOnDisk) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, 
 	}
 
 	// Flush and sync before publishing the file.
-	if err := w.bufferedWriter.Flush(); err != nil {
+	if err := w.backend.Flush(); err != nil {
 		return nil, objects.NilMac, err
 	}
 
-	if err := w.f.Sync(); err != nil {
+	if err := w.backend.Sync(); err != nil {
 		return nil, objects.NilMac, err
 	}
 
-	if _, err := w.f.Seek(0, io.SeekStart); err != nil {
+	if _, err := w.backend.Seek(0, io.SeekStart); err != nil {
 		return nil, objects.NilMac, err
 	}
 
-	return w.f, objects.MAC(w.totalHash.Sum(nil)), nil
+	return w.backend.reader(), objects.MAC(w.totalHash.Sum(nil)), nil
 }
 
 func (p *PackfileOnDisk) SetHot() {
