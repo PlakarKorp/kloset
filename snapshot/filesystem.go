@@ -1,23 +1,12 @@
 package snapshot
 
 import (
-	"github.com/PlakarKorp/kloset/connectors/storage"
-	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 	if s.filesystem != nil {
 		return s.filesystem, nil
-	}
-
-	mode, err := s.repository.Store().Mode(s.AppContext())
-	if err != nil {
-		return nil, err
-	}
-
-	if mode&storage.ModeRead == 0 {
-		return nil, repository.ErrNotReadable
 	}
 
 	didx, err := s.DirPack()
@@ -38,15 +27,6 @@ func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 func (s *Snapshot) FilesystemWithCache() (*vfs.Filesystem, error) {
 	if s.filesystem != nil {
 		return s.filesystem, nil
-	}
-
-	mode, err := s.repository.Store().Mode(s.AppContext())
-	if err != nil {
-		return nil, err
-	}
-
-	if mode&storage.ModeRead == 0 {
-		return nil, repository.ErrNotReadable
 	}
 
 	didx, err := s.DirPack()
