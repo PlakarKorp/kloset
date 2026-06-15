@@ -1,6 +1,7 @@
 package snapshot_test
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -78,4 +79,39 @@ func TestSynchronizeNoCommit(t *testing.T) {
 	defer dstBuilder.Close()
 
 	require.NoError(t, srcSnap.Synchronize(dstBuilder))
+}
+
+// TestSynchronizeRich synchronizes a source snapshot that carries xattrs and a
+// recorded error, exercising the xattr/error loops of syncImporter.Import and
+// Filesystem.ResolveXattr.
+func TestSynchronizeRich(t *testing.T) {
+	srcSnap := generateRichBackup(t)
+	defer srcSnap.Close()
+
+	dstRepo := ptesting.GenerateRepository(t, nil, nil, nil)
+	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+		Name: "sync-rich",
+	})
+	require.NoError(t, err)
+	require.NotNil(t, dstBuilder)
+
+	require.NoError(t, srcSnap.Synchronize(dstBuilder))
+	require.NoError(t, dstBuilder.Close())
+	require.NoError(t, dstBuilder.Repository().RebuildState())
+
+	synced, err := snapshot.Load(dstRepo, dstBuilder.Header.Identifier)
+	require.NoError(t, err)
+	defer synced.Close()
+
+	fs, err := synced.Filesystem()
+	require.NoError(t, err)
+
+	// The xattr should survive into the synchronized snapshot.
+	e, err := fs.GetEntry("/data/file.txt")
+	require.NoError(t, err)
+	rd, err := e.Xattr(fs, "user.note")
+	require.NoError(t, err)
+	data, err := io.ReadAll(rd)
+	require.NoError(t, err)
+	require.Equal(t, "note value", string(data))
 }
