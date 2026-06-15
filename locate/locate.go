@@ -33,11 +33,26 @@ type ItemFilters struct {
 	Perimeter   string
 	Job         string
 	Dataset     string
+	Ignores     []string
 	Tags        []string
 	Types       []string
 	Origins     []string
 	Roots       []string
 	DataClasses []string
+}
+
+func (it *ItemFilters) HasIgnore(ignore string) bool {
+	if ignore == "" {
+		return true
+	}
+
+	for _, i := range it.Ignores {
+		if i == ignore {
+			return true
+		}
+	}
+
+	return false
 }
 
 func (it *ItemFilters) HasTag(tag string) bool {
@@ -161,6 +176,7 @@ type LocateFilters struct {
 	Perimeter   string   `json:"perimeter,omitempty" yaml:"perimeter,omitempty"`
 	Job         string   `json:"job,omitempty" yaml:"job,omitempty"`
 	Dataset     string   `json:"dataset,omitempty" yaml:"dataset,omitempty"`
+	Ignores     []string `json:"ignores,omitempty" yaml:"ignore,omitempty"`
 	Tags        []string `json:"tags,omitempty" yaml:"tags,omitempty"`
 	IgnoreTags  []string `json:"ignore_tags,omitempty" yaml:"ignore_tags,omitempty"`
 
@@ -238,13 +254,19 @@ func WithKeepWeeks(n int) Option   { return func(p *LocateOptions) { p.Periods.W
 func WithKeepMonths(n int) Option  { return func(p *LocateOptions) { p.Periods.Month.Keep = n } }
 func WithKeepYears(n int) Option   { return func(p *LocateOptions) { p.Periods.Year.Keep = n } }
 
-func WithKeepMondays(n int) Option    { return func(p *LocateOptions) { p.Periods.Monday.Keep = n } }
-func WithKeepTuesdays(n int) Option   { return func(p *LocateOptions) { p.Periods.Tuesday.Keep = n } }
+func WithKeepMondays(n int) Option { return func(p *LocateOptions) { p.Periods.Monday.Keep = n } }
+
+func WithKeepTuesdays(n int) Option { return func(p *LocateOptions) { p.Periods.Tuesday.Keep = n } }
+
 func WithKeepWednesdays(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Keep = n } }
-func WithKeepThursdays(n int) Option  { return func(p *LocateOptions) { p.Periods.Thursday.Keep = n } }
-func WithKeepFridays(n int) Option    { return func(p *LocateOptions) { p.Periods.Friday.Keep = n } }
-func WithKeepSaturdays(n int) Option  { return func(p *LocateOptions) { p.Periods.Saturday.Keep = n } }
-func WithKeepSundays(n int) Option    { return func(p *LocateOptions) { p.Periods.Sunday.Keep = n } }
+
+func WithKeepThursdays(n int) Option { return func(p *LocateOptions) { p.Periods.Thursday.Keep = n } }
+
+func WithKeepFridays(n int) Option { return func(p *LocateOptions) { p.Periods.Friday.Keep = n } }
+
+func WithKeepSaturdays(n int) Option { return func(p *LocateOptions) { p.Periods.Saturday.Keep = n } }
+
+func WithKeepSundays(n int) Option { return func(p *LocateOptions) { p.Periods.Sunday.Keep = n } }
 
 func WithPerMinuteCap(n int) Option { return func(p *LocateOptions) { p.Periods.Minute.Cap = n } }
 func WithPerHourCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Hour.Cap = n } }
@@ -253,56 +275,80 @@ func WithPerWeekCap(n int) Option   { return func(p *LocateOptions) { p.Periods.
 func WithPerMonthCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Month.Cap = n } }
 func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Year.Cap = n } }
 
-func WithPerMondayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Monday.Cap = n } }
-func WithPerTuesdayCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Tuesday.Cap = n } }
-func WithPerWednsdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Cap = n } }
+func WithPerMondayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Monday.Cap = n } }
+
+func WithPerTuesdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Tuesday.Cap = n } }
+
+func WithPerWednesdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Cap = n } }
+
 func WithPerThursdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Thursday.Cap = n } }
-func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Friday.Cap = n } }
+
+func WithPerFridayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Friday.Cap = n } }
+
 func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Saturday.Cap = n } }
-func WithPerSundaysCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Sunday.Cap = n } }
+
+func WithPerSundaysCap(n int) Option { return func(p *LocateOptions) { p.Periods.Sunday.Cap = n } }
 
 func WithBefore(t time.Time) Option {
 	return func(p *LocateOptions) { p.Filters.Before = t }
 }
+
 func WithSince(t time.Time) Option {
 	return func(p *LocateOptions) { p.Filters.Since = t }
 }
+
 func WithName(name string) Option {
 	return func(p *LocateOptions) { p.Filters.Name = name }
 }
+
 func WithCategory(category string) Option {
 	return func(p *LocateOptions) { p.Filters.Category = category }
 }
+
 func WithEnvironment(env string) Option {
 	return func(p *LocateOptions) { p.Filters.Environment = env }
 }
+
 func WithPerimeter(perimeter string) Option {
 	return func(p *LocateOptions) { p.Filters.Perimeter = perimeter }
 }
+
 func WithJob(job string) Option {
 	return func(p *LocateOptions) { p.Filters.Job = job }
 }
+
 func WithDataset(dataset string) Option {
 	return func(p *LocateOptions) { p.Filters.Dataset = dataset }
 }
+
 func WithDataClass(class string) Option {
 	return func(p *LocateOptions) { p.Filters.DataClasses = append(p.Filters.DataClasses, class) }
 }
+
+func WithIgnore(ignore string) Option {
+	return func(p *LocateOptions) { p.Filters.Ignores = append(p.Filters.Ignores, ignore) }
+}
+
 func WithTag(tag string) Option {
 	return func(p *LocateOptions) { p.Filters.Tags = append(p.Filters.Tags, tag) }
 }
+
 func WithIgnoreTag(tag string) Option {
 	return func(p *LocateOptions) { p.Filters.IgnoreTags = append(p.Filters.IgnoreTags, tag) }
 }
+
 func WithType(id string) Option {
 	return func(p *LocateOptions) { p.Filters.Types = append(p.Filters.Types, id) }
 }
+
 func WithRoot(id string) Option {
 	return func(p *LocateOptions) { p.Filters.Roots = append(p.Filters.Roots, id) }
 }
+
 func WithOrigin(origin string) Option {
 	return func(p *LocateOptions) { p.Filters.Origins = append(p.Filters.Origins, origin) }
 }
+
 func WithID(id string) Option {
 	return func(p *LocateOptions) { p.Filters.IDs = append(p.Filters.IDs, id) }
 }
@@ -354,6 +400,11 @@ func (lo *LocateOptions) Matches(it Item) bool {
 	}
 	if !it.Filters.HasDataClasses(lo.Filters.DataClasses) {
 		return false
+	}
+	for _, ignore := range lo.Filters.Ignores {
+		if it.Filters.HasIgnore(ignore) {
+			return false
+		}
 	}
 	for _, tag := range lo.Filters.IgnoreTags {
 		if it.Filters.HasTag(tag) {
@@ -593,7 +644,7 @@ func (lo *LocateOptions) Empty() bool {
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
 		lo.Filters.Perimeter == "" && lo.Filters.Job == "" && lo.Filters.Dataset == "" &&
 		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
-		len(lo.Filters.DataClasses) == 0 &&
+		len(lo.Filters.DataClasses) == 0 && len(lo.Filters.Ignores) == 0 &&
 		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest &&
 		lo.GroupBy == GroupByNone
 }

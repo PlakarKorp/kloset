@@ -75,6 +75,16 @@ func (po *LocateOptions) installGenericFlags(flags *flag.FlagSet) {
 			}
 		})
 
+	flags.Func("ignore", "ignore pattern, gitignore format (can be repeated).",
+		func(i string) error {
+			i = strings.TrimSpace(i)
+			if i != "" {
+				po.Filters.Ignores = append(po.Filters.Ignores, i)
+			}
+
+			return nil
+		})
+
 	flags.Func("tag", "filter by tag (repeat or comma-separated). All specified tags must be present.",
 		func(v string) error {
 			for _, t := range strings.Split(v, ",") {
