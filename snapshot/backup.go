@@ -1370,6 +1370,11 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
+	// if root points at a file, move it to its parent directory
+	if b, err := sourceCtx.scanLog.GetFile(sourceCtx.source.root); b != nil && err == nil {
+		sourceCtx.source.root = path.Dir(sourceCtx.source.root)
+	}
+
 	/* relinking must happen before anything else so we guarantee there are no orphan pathnames */
 	if err := snap.relinkNodes(sourceCtx); err != nil {
 		return nil, err
