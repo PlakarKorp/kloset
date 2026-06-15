@@ -34,3 +34,38 @@ func TestArchive(t *testing.T) {
 		require.NoError(t, err)
 	}
 }
+
+// TestArchiveTarballAndDir covers the tarball (gzip) format and archiving a
+// directory path (the "." / rebase branches).
+func TestArchiveTarballAndDir(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	var buf bytes.Buffer
+	// Tarball over the whole tree, with rebase off, exercises the gzip
+	// fallthrough and the non-rebased output-path branch.
+	require.NoError(t, snap.Archive(&buf, snapshot.ArchiveTarball, []string{"/"}, false))
+	require.NotZero(t, buf.Len())
+
+	// Directory path with rebase on hits the "outpath == ''" => "." branch.
+	var buf2 bytes.Buffer
+	require.NoError(t, snap.Archive(&buf2, snapshot.ArchiveTar, []string{"/"}, true))
+}
+
+// TestArchiveInvalidFormat covers the ErrInvalidArchiveFormat branch.
+func TestArchiveInvalidFormat(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	err := snap.Archive(&bytes.Buffer{}, "bogus", []string{"/"}, true)
+	require.ErrorIs(t, err, snapshot.ErrInvalidArchiveFormat)
+}
+
+// TestArchiveMissingPath covers the WalkDir-error branch in Archive.
+func TestArchiveMissingPath(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	err := snap.Archive(&bytes.Buffer{}, snapshot.ArchiveTar, []string{"/no/such/path"}, true)
+	require.Error(t, err)
+}
