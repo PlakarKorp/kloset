@@ -64,3 +64,30 @@ func TestNewFromBytesError(t *testing.T) {
 	_, err := NewFromBytes([]byte("not valid msgpack data at all !!"))
 	require.Error(t, err)
 }
+
+// TestGetSourceInvalidIndex verifies GetSource panics on out-of-range indices.
+func TestGetSourceInvalidIndex(t *testing.T) {
+	h := NewHeader("test", objects.MAC{})
+	require.Panics(t, func() { h.GetSource(-1) })
+	require.Panics(t, func() { h.GetSource(0) }) // no sources yet
+	h.Sources = append(h.Sources, NewSource())
+	require.Panics(t, func() { h.GetSource(1) }) // one past the end
+}
+
+// TestSortHeadersEqualKeys exercises the comparator's terminal "return false"
+// path, reached when two headers compare equal on every sort key.
+func TestSortHeadersEqualKeys(t *testing.T) {
+	ts := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	mac := objects.MAC{9}
+	a := NewHeader("a", mac)
+	a.Timestamp = ts
+	b := NewHeader("b", mac)
+	b.Timestamp = ts
+
+	headers := []Header{*a, *b}
+	// Both share Identifier and Timestamp, so each comparison falls through to
+	// the final `return false`.
+	err := SortHeaders(headers, []string{"Identifier", "Timestamp"})
+	require.NoError(t, err)
+	require.Len(t, headers, 2)
+}
