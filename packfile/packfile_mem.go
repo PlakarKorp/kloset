@@ -38,19 +38,7 @@ func NewInMemoryFooterFromBytes(version versioning.Version, serialized []byte) (
 
 	reader := bytes.NewReader(serialized)
 	footer.Version = version
-	if err := binary.Read(reader, binary.LittleEndian, &footer.Timestamp); err != nil {
-		return footer, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.Count); err != nil {
-		return footer, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.IndexOffset); err != nil {
-		return footer, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.IndexMAC); err != nil {
-		return footer, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.Flags); err != nil {
+	if err := readFooterFields(reader, &footer); err != nil {
 		return footer, err
 	}
 	return footer, nil
@@ -60,39 +48,11 @@ func NewInMemoryIndexFromBytes(version versioning.Version, serialized []byte) ([
 	reader := bytes.NewReader(serialized)
 	index := make([]Blob, 0)
 	for reader.Len() > 0 {
-		var resourceType resources.Type
-		var resourceVersion versioning.Version
-		var mac objects.MAC
-		var blobOffset uint64
-		var blobLength uint32
-		var blobFlags uint32
-
-		if err := binary.Read(reader, binary.LittleEndian, &resourceType); err != nil {
+		blob, err := readBlobRecord(reader)
+		if err != nil {
 			return nil, err
 		}
-		if err := binary.Read(reader, binary.LittleEndian, &resourceVersion); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &mac); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &blobOffset); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &blobLength); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &blobFlags); err != nil {
-			return nil, err
-		}
-		index = append(index, Blob{
-			Type:    resourceType,
-			Version: resourceVersion,
-			MAC:     mac,
-			Offset:  blobOffset,
-			Length:  blobLength,
-			Flags:   blobFlags,
-		})
+		index = append(index, blob)
 	}
 	return index, nil
 }
@@ -125,19 +85,7 @@ func NewPackfileInMemoryFromBytes(hasher hash.Hash, version versioning.Version, 
 
 	footer.Version = version
 
-	if err := binary.Read(reader, binary.LittleEndian, &footer.Timestamp); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.Count); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.IndexOffset); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.IndexMAC); err != nil {
-		return nil, err
-	}
-	if err := binary.Read(reader, binary.LittleEndian, &footer.Flags); err != nil {
+	if err := readFooterFields(reader, &footer); err != nil {
 		return nil, err
 	}
 
@@ -159,62 +107,18 @@ func NewPackfileInMemoryFromBytes(hasher hash.Hash, version versioning.Version, 
 	p.Blobs = data
 	p.hasher.Reset()
 	for remaining > 0 {
-		var resourceType resources.Type
-		var resourceVersion versioning.Version
-		var mac objects.MAC
-		var blobOffset uint64
-		var blobLength uint32
-		var blobFlags uint32
-
-		if err := binary.Read(reader, binary.LittleEndian, &resourceType); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &resourceVersion); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &mac); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &blobOffset); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &blobLength); err != nil {
-			return nil, err
-		}
-		if err := binary.Read(reader, binary.LittleEndian, &blobFlags); err != nil {
+		blob, err := readBlobRecord(reader)
+		if err != nil {
 			return nil, err
 		}
 
-		if blobOffset+uint64(blobLength) > p.Footer.IndexOffset {
+		if blob.Offset+uint64(blob.Length) > p.Footer.IndexOffset {
 			return nil, fmt.Errorf("blob offset + blob length exceeds total length of packfile")
 		}
 
-		if err := binary.Write(p.hasher, binary.LittleEndian, resourceType); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, resourceVersion); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, mac); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blobOffset); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blobLength); err != nil {
-			return nil, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blobFlags); err != nil {
-			return nil, err
-		}
-		p.Index = append(p.Index, Blob{
-			Type:    resourceType,
-			Version: resourceVersion,
-			MAC:     mac,
-			Offset:  blobOffset,
-			Length:  blobLength,
-			Flags:   blobFlags,
-		})
+		// p.hasher is a hash.Hash; writing to it cannot fail.
+		_ = writeBlobRecord(p.hasher, blob)
+		p.Index = append(p.Index, blob)
 		remaining -= BLOB_RECORD_SIZE
 	}
 	mac := objects.MAC(p.hasher.Sum(nil))
@@ -226,104 +130,70 @@ func NewPackfileInMemoryFromBytes(hasher hash.Hash, version versioning.Version, 
 }
 
 func (p *PackfileInMemory) Serialize(encoder EncodingFn) (io.Reader, objects.MAC, error) {
+	buffer := &bytes.Buffer{}
+	mac, err := p.serializeTo(buffer, encoder)
+	if err != nil {
+		return nil, objects.NilMac, err
+	}
+	return buffer, mac, nil
+}
+
+// serializeTo writes the full packfile byte stream to dst and returns the
+// total MAC. It is split out from Serialize so the destination writer can be
+// substituted in tests to exercise the write-error branches that a
+// bytes.Buffer can never trigger on its own.
+func (p *PackfileInMemory) serializeTo(dst io.Writer, encoder EncodingFn) (objects.MAC, error) {
 	// We need an hash of the index, so let's first calculate that.
 	idxBuffer := &bytes.Buffer{}
 	p.hasher.Reset()
+	idxWriter := io.MultiWriter(idxBuffer, p.hasher)
 	for _, blob := range p.Index {
-		if err := binary.Write(idxBuffer, binary.LittleEndian, blob.Type); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(idxBuffer, binary.LittleEndian, blob.Version); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(idxBuffer, binary.LittleEndian, blob.MAC); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(idxBuffer, binary.LittleEndian, blob.Offset); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(idxBuffer, binary.LittleEndian, blob.Length); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(idxBuffer, binary.LittleEndian, blob.Flags); err != nil {
-			return nil, objects.NilMac, err
-		}
-
-		if err := binary.Write(p.hasher, binary.LittleEndian, blob.Type); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blob.Version); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blob.MAC); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blob.Offset); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blob.Length); err != nil {
-			return nil, objects.NilMac, err
-		}
-		if err := binary.Write(p.hasher, binary.LittleEndian, blob.Flags); err != nil {
-			return nil, objects.NilMac, err
-		}
+		// idxWriter wraps only in-memory writers (bytes.Buffer + hash.Hash),
+		// so this cannot fail.
+		_ = writeBlobRecord(idxWriter, blob)
 	}
 	p.Footer.IndexMAC = objects.MAC(p.hasher.Sum(nil))
 
 	// Now reset hasher and start constructing the final file format.
 	// First the data.
-	buffer := &bytes.Buffer{}
-	teeWriter := io.MultiWriter(buffer, p.hasher)
+	teeWriter := io.MultiWriter(dst, p.hasher)
 
 	if err := binary.Write(teeWriter, binary.LittleEndian, p.Blobs); err != nil {
-		return nil, objects.NilMac, err
+		return objects.NilMac, err
 	}
 
 	// Second the encoded index.
 	encodedIdx, err := encoder(idxBuffer)
 	if err != nil {
-		return nil, objects.NilMac, err
+		return objects.NilMac, err
 	}
 
 	scratchPad := make([]byte, 1024)
 	if _, err := io.CopyBuffer(teeWriter, encodedIdx, scratchPad); err != nil {
-		return nil, objects.NilMac, err
+		return objects.NilMac, err
 	}
 
 	footerBuffer := &bytes.Buffer{}
-	if err := binary.Write(footerBuffer, binary.LittleEndian, p.Footer.Timestamp); err != nil {
-		return nil, objects.NilMac, err
-	}
-	if err := binary.Write(footerBuffer, binary.LittleEndian, p.Footer.Count); err != nil {
-		return nil, objects.NilMac, err
-	}
-	if err := binary.Write(footerBuffer, binary.LittleEndian, p.Footer.IndexOffset); err != nil {
-		return nil, objects.NilMac, err
-	}
-	if err := binary.Write(footerBuffer, binary.LittleEndian, p.Footer.IndexMAC); err != nil {
-		return nil, objects.NilMac, err
-	}
-	if err := binary.Write(footerBuffer, binary.LittleEndian, p.Footer.Flags); err != nil {
-		return nil, objects.NilMac, err
-	}
+	// footerBuffer is an in-memory buffer; this write cannot fail.
+	_ = writeFooterFields(footerBuffer, p.Footer.Timestamp, p.Footer.Count, p.Footer.IndexOffset, p.Footer.IndexMAC, p.Footer.Flags)
 
 	// Third the encoded footer
 	encodedFooter, err := encoder(footerBuffer)
 	if err != nil {
-		return nil, objects.NilMac, err
+		return objects.NilMac, err
 	}
 
 	footerLen, err := io.CopyBuffer(teeWriter, encodedFooter, scratchPad)
 	if err != nil {
-		return nil, objects.NilMac, err
+		return objects.NilMac, err
 	}
 
 	// Finally write the encoded footer length.
 	if err := binary.Write(teeWriter, binary.LittleEndian, uint32(footerLen)); err != nil {
-		return nil, objects.NilMac, err
+		return objects.NilMac, err
 	}
 
-	return buffer, objects.MAC(p.hasher.Sum(nil)), nil
+	return objects.MAC(p.hasher.Sum(nil)), nil
 }
 
 func (p *PackfileInMemory) AddBlob(resourceType resources.Type, version versioning.Version, mac objects.MAC, data []byte, flags uint32) error {
