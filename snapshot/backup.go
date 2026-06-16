@@ -134,9 +134,10 @@ func (sourceCtx *sourceContext) recordXattr(idx int, record *connectors.Record, 
 	if err != nil {
 		return nil
 	}
-	return sourceCtx.scanLog.PutPathMAC(scanlog.KindXattr, record.Pathname, mac)
-
-	//return sourceCtx.indexes.xattridx.Insert(xattr.ToPath(), serialized)
+	// Key the index by Xattr.ToPath() ("<path><name><sep>") so it matches the
+	// composed key Entry.Xattr looks up; keying by the bare pathname would make
+	// extended attributes unretrievable.
+	return sourceCtx.scanLog.PutPathMAC(scanlog.KindXattr, xattr.ToPath(), mac)
 }
 
 func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *connectors.Record) bool {
