@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	chunkSize         = 64 * 1024 // Size of each chunk for encryption/decryption
-	DEFAULT_KDF       = "ARGON2ID"
-	AESGMSIV_OVERHEAD = subtle.AESGCMSIVNonceSize + aes.BlockSize
+	chunkSize          = 64 * 1024 // Size of each chunk for encryption/decryption
+	DEFAULT_KDF        = "ARGON2ID"
+	AESGCMSIVNonceSize = 12
+	AESGMSIV_OVERHEAD  = AESGCMSIVNonceSize + aes.BlockSize
 )
 
 type Configuration struct {
