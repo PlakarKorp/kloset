@@ -810,10 +810,11 @@ func (r *Repository) GetState(mac objects.MAC) (io.ReadCloser, versioning.Versio
 		r.Logger().Trace("repository", "GetState(%x): %s", mac, time.Since(t0))
 	}()
 
-	raw, err := r.store.Get(r.appContext, storage.StorageResourceState, mac, nil)
+	rawBytes, err := r.getWithECC(r.appContext, storage.StorageResourceState, mac, r.verifyEnvelope(resources.RT_STATE))
 	if err != nil {
 		return nil, 0, err
 	}
+	raw := io.NopCloser(bytes.NewReader(rawBytes))
 
 	version, rd, err := storage.Deserialize(r.GetMACHasher(), resources.RT_STATE, raw)
 	if err != nil {
@@ -863,7 +864,7 @@ func (r *Repository) PutState(mac objects.MAC, rd io.Reader) error {
 	}
 
 	span := r.ioStats.GetWriteSpan()
-	nbytes, err := r.store.Put(r.appContext, storage.StorageResourceState, mac, rd)
+	nbytes, err := r.putWithECC(r.appContext, storage.StorageResourceState, mac, rd)
 	if nbytes > 0 {
 		span.Add(nbytes)
 	}
@@ -896,10 +897,11 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 
 	hasher := r.GetMACHasher()
 
-	rd, err := r.store.Get(r.appContext, storage.StorageResourcePackfile, mac, nil)
+	rawBytes, err := r.getWithECC(r.appContext, storage.StorageResourcePackfile, mac, r.verifyEnvelope(resources.RT_PACKFILE))
 	if err != nil {
 		return nil, err
 	}
+	rd := io.NopCloser(bytes.NewReader(rawBytes))
 
 	defer rd.Close()
 	packfileVersion, rd, err := storage.Deserialize(hasher, resources.RT_PACKFILE, rd)

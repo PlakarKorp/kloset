@@ -10,6 +10,7 @@ import (
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/connectors/storage"
+	"github.com/PlakarKorp/kloset/ecc"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -21,6 +22,18 @@ import (
 )
 
 func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer, passphrase *[]byte) *repository.Repository {
+	repo, _ := generateRepository(t, bufout, buferr, passphrase, nil)
+	return repo
+}
+
+// GenerateRepositoryWithECC builds a repository with ECC enabled using the
+// given configuration and returns both the repository and the underlying
+// MockBackend, so tests can corrupt stored objects to exercise repair.
+func GenerateRepositoryWithECC(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer, passphrase *[]byte, eccConfig *ecc.Configuration) (*repository.Repository, *MockBackend) {
+	return generateRepository(t, bufout, buferr, passphrase, eccConfig)
+}
+
+func generateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer, passphrase *[]byte, eccConfig *ecc.Configuration) (*repository.Repository, *MockBackend) {
 	// init temporary directories
 	tmpRepoDirRoot, err := os.MkdirTemp("", "tmp_repo")
 	require.NoError(t, err)
@@ -39,12 +52,13 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 
 	// create a storage
 
-	r, err := storage.New(ctx, map[string]string{"location": "mock://" + tmpRepoDir})
+	backend := NewMockBackend(map[string]string{"location": "mock://" + tmpRepoDir})
+	var r storage.Store = backend
 	require.NotNil(t, r)
-	require.NoError(t, err)
 
 	config := storage.NewConfiguration()
 	config.Compression = nil
+	config.ECC = eccConfig
 	hasher := hashing.GetHasher(hashing.DEFAULT_HASHING_ALGORITHM)
 
 	var key []byte
@@ -101,5 +115,5 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 	repo, err := repository.New(ctx, key, r, serializedConfig)
 	require.NoError(t, err, "creating repository")
 
-	return repo
+	return repo, backend
 }

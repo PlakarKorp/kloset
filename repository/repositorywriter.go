@@ -265,7 +265,7 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	}
 
 	span := r.ioStats.GetWriteSpan()
-	nbytes, err := r.store.Put(ctx, storage.StorageResourcePackfile, mac, rd)
+	nbytes, err := r.putWithECC(ctx, storage.StorageResourcePackfile, mac, rd)
 
 	span.Add(nbytes)
 	if err != nil {

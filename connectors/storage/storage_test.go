@@ -13,6 +13,7 @@ import (
 	"github.com/PlakarKorp/kloset/chunking"
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/connectors/storage"
+	"github.com/PlakarKorp/kloset/ecc"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -218,6 +219,21 @@ func TestNewConfigurationFromBytes(t *testing.T) {
 		require.Equal(t, cfg.Hashing, decoded.Hashing)
 		require.Equal(t, cfg.Compression, decoded.Compression)
 		require.Equal(t, cfg.Encryption, decoded.Encryption)
+		require.Nil(t, decoded.ECC, "ECC defaults to disabled")
+	})
+
+	t.Run("ECCRoundTrips", func(t *testing.T) {
+		cfg := storage.NewConfiguration()
+		cfg.ECC = ecc.NewDefaultConfiguration()
+
+		data, err := cfg.ToBytes()
+		require.NoError(t, err)
+
+		decoded, err := storage.NewConfigurationFromBytes(versioning.Version(1), data)
+		require.NoError(t, err)
+		require.NotNil(t, decoded.ECC)
+		require.Equal(t, cfg.ECC.DataShards, decoded.ECC.DataShards)
+		require.Equal(t, cfg.ECC.ParityShards, decoded.ECC.ParityShards)
 	})
 
 	t.Run("UsesVersionArgument", func(t *testing.T) {

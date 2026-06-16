@@ -29,6 +29,7 @@ import (
 
 	"github.com/PlakarKorp/kloset/chunking"
 	"github.com/PlakarKorp/kloset/compression"
+	"github.com/PlakarKorp/kloset/ecc"
 	"github.com/PlakarKorp/kloset/encryption"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/kcontext"
@@ -63,6 +64,11 @@ type Configuration struct {
 	Hashing     hashing.Configuration      `json:"hashing"`
 	Compression *compression.Configuration `json:"compression"`
 	Encryption  *encryption.Configuration  `json:"encryption"`
+
+	// ECC, when non-nil, enables optional Reed-Solomon error-correcting codes
+	// for packfiles and states. A nil value (the default) disables ECC and
+	// leaves the on-disk layout byte-identical to a non-ECC repository.
+	ECC *ecc.Configuration `json:"ecc,omitempty" msgpack:"ecc,omitempty"`
 }
 
 func NewConfiguration() *Configuration {

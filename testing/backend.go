@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -18,7 +19,7 @@ import (
 
 func init() {
 	storage.Register("mock", 0, func(ctx context.Context, proto string, storeConfig map[string]string) (storage.Store, error) {
-		return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}, nil
+		return NewMockBackend(storeConfig), nil
 	})
 }
 
@@ -65,11 +66,13 @@ var behaviors = map[string]mockedBackendBehavior{
 
 // MockBackend implements the Backend interface for testing purposes
 type MockBackend struct {
-	configuration []byte
-	location      string
-	locks         map[objects.MAC][]byte
-	stateMACs     map[objects.MAC][]byte
-	packfileMACs  map[objects.MAC][]byte
+	configuration   []byte
+	location        string
+	locks           map[objects.MAC][]byte
+	stateMACs       map[objects.MAC][]byte
+	packfileMACs    map[objects.MAC][]byte
+	eccPackfileMACs map[objects.MAC][]byte
+	eccStateMACs    map[objects.MAC][]byte
 
 	packfileMutex sync.Mutex
 	// used to trigger different behaviors during tests
@@ -77,7 +80,71 @@ type MockBackend struct {
 }
 
 func NewMockBackend(storeConfig map[string]string) *MockBackend {
-	return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}
+	return &MockBackend{
+		location:        storeConfig["location"],
+		locks:           make(map[objects.MAC][]byte),
+		stateMACs:       make(map[objects.MAC][]byte),
+		packfileMACs:    make(map[objects.MAC][]byte),
+		eccPackfileMACs: make(map[objects.MAC][]byte),
+		eccStateMACs:    make(map[objects.MAC][]byte),
+	}
+}
+
+// resourceMap returns the in-memory map backing a given storage resource, or
+// nil if the resource is not backed by a simple MAC->bytes map.
+func (mb *MockBackend) resourceMap(res storage.StorageResource) map[objects.MAC][]byte {
+	switch res {
+	case storage.StorageResourcePackfile:
+		return mb.packfileMACs
+	case storage.StorageResourceState:
+		return mb.stateMACs
+	case storage.StorageResourceLock:
+		return mb.locks
+	case storage.StorageResourceECCPackfile:
+		return mb.eccPackfileMACs
+	case storage.StorageResourceECCState:
+		return mb.eccStateMACs
+	}
+	return nil
+}
+
+// Corrupt flips the byte at the given offset of a stored object, simulating
+// on-disk bit rot. It is a test helper only.
+func (mb *MockBackend) Corrupt(res storage.StorageResource, mac objects.MAC, offset int) error {
+	mb.packfileMutex.Lock()
+	defer mb.packfileMutex.Unlock()
+	m := mb.resourceMap(res)
+	if m == nil {
+		return errors.ErrUnsupported
+	}
+	buf, ok := m[mac]
+	if !ok || offset < 0 || offset >= len(buf) {
+		return errors.New("mock: cannot corrupt: missing object or offset out of range")
+	}
+	buf[offset] ^= 0xFF
+	return nil
+}
+
+// CorruptRange flips count bytes starting at offset of a stored object.
+func (mb *MockBackend) CorruptRange(res storage.StorageResource, mac objects.MAC, offset, count int) error {
+	for i := 0; i < count; i++ {
+		if err := mb.Corrupt(res, mac, offset+i); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Has reports whether an object exists for the given resource and MAC.
+func (mb *MockBackend) Has(res storage.StorageResource, mac objects.MAC) bool {
+	mb.packfileMutex.Lock()
+	defer mb.packfileMutex.Unlock()
+	m := mb.resourceMap(res)
+	if m == nil {
+		return false
+	}
+	_, ok := m[mac]
+	return ok
 }
 
 func (mb *MockBackend) Create(ctx context.Context, configuration []byte) error {
@@ -138,89 +205,59 @@ func (mb *MockBackend) Size(ctx context.Context) (int64, error) {
 }
 
 func (mb *MockBackend) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
-	switch res {
-	case storage.StorageResourcePackfile:
-		ret := make([]objects.MAC, 0)
-		for MAC := range mb.packfileMACs {
-			ret = append(ret, MAC)
-		}
-		return ret, nil
-	case storage.StorageResourceState:
-		ret := make([]objects.MAC, 0)
-		for MAC := range mb.stateMACs {
-			ret = append(ret, MAC)
-		}
-		return ret, nil
-	case storage.StorageResourceLock:
-		locks := make([]objects.MAC, 0)
-		for lock := range mb.locks {
-			locks = append(locks, lock)
-		}
-		return locks, nil
+	m := mb.resourceMap(res)
+	if m == nil {
+		return nil, errors.ErrUnsupported
 	}
-
-	return nil, errors.ErrUnsupported
+	mb.packfileMutex.Lock()
+	defer mb.packfileMutex.Unlock()
+	ret := make([]objects.MAC, 0, len(m))
+	for MAC := range m {
+		ret = append(ret, MAC)
+	}
+	return ret, nil
 }
 
 func (mb *MockBackend) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
-	switch res {
-	case storage.StorageResourcePackfile:
-		mb.packfileMutex.Lock()
-		defer mb.packfileMutex.Unlock()
-
-		var buffer bytes.Buffer
-		io.Copy(&buffer, rd)
-		mb.packfileMACs[mac] = buffer.Bytes()
-		return int64(buffer.Len()), nil
-	case storage.StorageResourceState:
-		var buffer bytes.Buffer
-		io.Copy(&buffer, rd)
-		mb.stateMACs[mac] = buffer.Bytes()
-		return int64(buffer.Len()), nil
-	case storage.StorageResourceLock:
-		var buffer bytes.Buffer
-		io.Copy(&buffer, rd)
-		mb.locks[mac] = buffer.Bytes()
-		return int64(buffer.Len()), nil
+	m := mb.resourceMap(res)
+	if m == nil {
+		return -1, errors.ErrUnsupported
 	}
-
-	return -1, errors.ErrUnsupported
+	var buffer bytes.Buffer
+	// NB: copy errors are intentionally ignored to mirror the historical mock
+	// behavior (some writers, e.g. ptar pipes, close early in tests).
+	io.Copy(&buffer, rd)
+	mb.packfileMutex.Lock()
+	defer mb.packfileMutex.Unlock()
+	m[mac] = buffer.Bytes()
+	return int64(buffer.Len()), nil
 }
 
 func (mb *MockBackend) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
-	switch res {
-	case storage.StorageResourcePackfile:
-		if rg == nil {
-			buffer := bytes.NewReader(mb.packfileMACs[mac])
-			return io.NopCloser(buffer), nil
-		} else {
-			buffer := bytes.NewReader(mb.packfileMACs[mac])
-			return io.NopCloser(io.NewSectionReader(buffer, int64(rg.Offset), int64(rg.Length))), nil
-		}
-
-	case storage.StorageResourceState:
-		var buffer bytes.Buffer
-		buffer.Write(mb.stateMACs[mac])
-		return io.NopCloser(&buffer), nil
-	case storage.StorageResourceLock:
-		return io.NopCloser(bytes.NewReader(mb.locks[mac])), nil
+	m := mb.resourceMap(res)
+	if m == nil {
+		return nil, errors.ErrUnsupported
 	}
-
-	return nil, errors.ErrUnsupported
+	mb.packfileMutex.Lock()
+	data, ok := m[mac]
+	mb.packfileMutex.Unlock()
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	if rg == nil {
+		return io.NopCloser(bytes.NewReader(data)), nil
+	}
+	return io.NopCloser(io.NewSectionReader(bytes.NewReader(data), int64(rg.Offset), int64(rg.Length))), nil
 }
 
 func (mb *MockBackend) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
-	switch res {
-	case storage.StorageResourcePackfile:
-		delete(mb.packfileMACs, mac)
-	case storage.StorageResourceState:
-		delete(mb.stateMACs, mac)
-	case storage.StorageResourceLock:
-		delete(mb.locks, mac)
-	default:
+	m := mb.resourceMap(res)
+	if m == nil {
 		return errors.ErrUnsupported
 	}
-
+	mb.packfileMutex.Lock()
+	defer mb.packfileMutex.Unlock()
+	delete(m, mac)
 	return nil
 }
 
