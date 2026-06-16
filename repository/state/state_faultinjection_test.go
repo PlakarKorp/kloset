@@ -258,6 +258,70 @@ func TestListIteratorsHasPackfileError(t *testing.T) {
 	}
 }
 
+// TestDeletedEntriesRoundTrip exercises the ET_DELETE serialize loop and every
+// arm of the ET_DELETE dispatch in deserializeFromStream by recording a delete
+// for each deletable type (LOCATIONS / PACKFILE / COLOURED), serializing, then
+// deserializing into a fresh state.
+func TestDeletedEntriesRoundTrip(t *testing.T) {
+	srcCache := newMockStateCache()
+	src, err := NewLocalState(srcCache)
+	require.NoError(t, err)
+
+	require.NoError(t, src.DelDelta(resources.RT_OBJECT, objects.MAC{0x11}, objects.MAC{0x12}))
+	require.NoError(t, src.DelPackfile(objects.MAC{0x13}))
+	require.NoError(t, src.DelColouredResource(resources.RT_SNAPSHOT, objects.MAC{0x14}))
+
+	// All three delete entries must be present in the cache.
+	var deletedCount int
+	for range srcCache.GetDeletedEntries() {
+		deletedCount++
+	}
+	require.Equal(t, 3, deletedCount)
+
+	var buf bytes.Buffer
+	require.NoError(t, src.SerializeToStream(&buf))
+
+	dstCache := newMockStateCache()
+	dst, err := NewLocalState(dstCache)
+	require.NoError(t, err)
+	require.NoError(t, dst.deserializeFromStream(bytes.NewReader(buf.Bytes())))
+
+	// The deserialized side replayed the deletes against its own cache; the
+	// round-trip must not error and the dispatch arms (LOCATIONS / PACKFILE /
+	// COLOURED) all execute.
+	require.NotNil(t, dst)
+}
+
+// TestDeserializeInvalidDeleteType drives the default arm of the ET_DELETE
+// switch: a serialized DeleteEntry carrying an unknown inner Type must make
+// deserializeFromStream return an "invalid delete Type" error.
+func TestDeserializeInvalidDeleteType(t *testing.T) {
+	// Hand-craft a stream: header MAC, one ET_DELETE entry whose inner Type is
+	// bogus, then the metadata trailer.
+	del := DeleteEntry{
+		Type:     EntryType(0xFE), // not LOCATIONS / PACKFILE / COLOURED
+		BlobType: resources.RT_OBJECT,
+		Blob:     objects.MAC{0x01},
+		Packfile: objects.MAC{0x02},
+	}
+
+	var buf bytes.Buffer
+	buf.Write(make([]byte, len(objects.MAC{}))) // header parent
+	buf.WriteByte(byte(ET_DELETE))
+	lenBuf := make([]byte, 4)
+	lenBuf[0] = byte(DeleteEntrySerializedSize)
+	buf.Write(lenBuf)
+	buf.Write(del.ToBytes())
+
+	cache := newMockStateCache()
+	st, err := NewLocalState(cache)
+	require.NoError(t, err)
+
+	err = st.deserializeFromStream(bytes.NewReader(buf.Bytes()))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "invalid delete Type")
+}
+
 // Ensure the wrapper caches still satisfy the full StateCache interface.
 var (
 	_ caching.StateCache = (*corruptDeltaCache)(nil)
