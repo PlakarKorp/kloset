@@ -475,7 +475,7 @@ func TestSerializeToStream(t *testing.T) {
 		StateID:   objects.MAC{17, 18, 19, 20},
 		Timestamp: time.Now(),
 	}
-	state.PutPackfile(packfileEntry.StateID, packfileEntry.Packfile)
+	state.PutPackfile(packfileEntry.StateID, packfileEntry.Packfile, 0)
 
 	configEntry := &ConfigurationEntry{
 		Key:       "test_key",
@@ -531,7 +531,7 @@ func TestPackfileEntrySerialization(t *testing.T) {
 
 	// Serialize
 	data := original.ToBytes()
-	require.Len(t, data, PackfileEntrySerializedSize)
+	require.Len(t, data, PackfileEntrySerializedSizeV2)
 
 	// Deserialize
 	deserialized, err := PackfileEntryFromBytes(data)

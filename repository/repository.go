@@ -549,14 +549,39 @@ func (r *Repository) Store() storage.Store {
 
 func (r *Repository) StorageSize() (int64, error) {
 	if r.storageSizeDirty {
-		size, err := r.store.Size(r.appContext)
-		if err != nil {
-			return 0, err
+		var totSize uint64
+		var old bool
+
+		if r.state != nil {
+			for p, err := range r.state.ListPackfileEntries() {
+				if err != nil {
+					return 0, err
+				}
+
+				// We have an old repo, fallback to slow method
+				if p.Size == 0 {
+					old = true
+					break
+				}
+
+				totSize += p.Size
+			}
 		}
 
-		r.storageSize = size
-		r.storageSizeDirty = false
+		if old {
+			size, err := r.store.Size(r.appContext)
+			if err != nil {
+				return 0, err
+			}
+
+			r.storageSize = size
+			r.storageSizeDirty = false
+		} else {
+			r.storageSize = int64(totSize)
+			r.storageSizeDirty = false
+		}
 	}
+
 	return r.storageSize, nil
 }
 
