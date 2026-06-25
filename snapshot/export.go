@@ -59,16 +59,20 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	go func() {
 		for ack := range results {
 			if ack.Err != nil {
+				emitter.PathError(ack.Record.Pathname, ack.Err)
 				if ack.Record.FileInfo.IsDir() {
-					emitter.PathError(ack.Record.Pathname, ack.Err)
 					emitter.DirectoryError(ack.Record.Pathname, ack.Err)
+				} else if ack.Record.FileInfo.Mode()&os.ModeSymlink != 0 {
+					emitter.SymlinkError(ack.Record.Pathname, ack.Err)
 				} else {
-					emitter.PathError(ack.Record.Pathname, ack.Err)
 					emitter.FileError(ack.Record.Pathname, ack.Err)
 				}
 			} else if !ack.Record.IsXattr {
 				if ack.Record.FileInfo.IsDir() {
 					emitter.DirectoryOk(ack.Record.Pathname, ack.Record.FileInfo)
+					emitter.PathOk(ack.Record.Pathname)
+				} else if ack.Record.FileInfo.Mode()&os.ModeSymlink != 0 {
+					emitter.SymlinkOk(ack.Record.Pathname)
 					emitter.PathOk(ack.Record.Pathname)
 				} else {
 					emitter.FileOk(ack.Record.Pathname, ack.Record.FileInfo)
@@ -121,6 +125,8 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)
+			} else if e.FileInfo.Mode()&os.ModeSymlink != 0 {
+				emitter.Symlink(entrypath)
 			} else if e.FileInfo.Mode().IsRegular() {
 				// This is a shortcut, but it's safe, integrated plugins are
 				// controlled by us and consume everything, and external plugins
