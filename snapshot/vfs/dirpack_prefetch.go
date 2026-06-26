@@ -26,8 +26,15 @@ type dirpackPrefetcher struct {
 	feederWg sync.WaitGroup
 	workerWg sync.WaitGroup
 
+	// seen dedups consume signals to one per directory. It is bounded (FIFO):
+	// it only needs to remember directories that may still have in-flight walk
+	// records, and the importer emits each directory contiguously and never
+	// revisits, so the in-flight span is ~walk concurrency. Sizing it to the
+	// look-ahead window leaves a large margin while keeping memory flat on huge
+	// sources (hundreds of millions of directories). A rare premature eviction
+	// only costs one duplicate consume signal (one extra dir prefetched).
 	seenMu sync.Mutex
-	seen   map[string]struct{}
+	seen   *lru.Cache[string, struct{}]
 }
 
 type prefetchJob struct {
@@ -54,7 +61,7 @@ func (fsc *Filesystem) StartDirpackPrefetch(window, workers int) {
 		jobs:     make(chan prefetchJob, workers),
 		consumed: make(chan struct{}, window),
 		quit:     make(chan struct{}),
-		seen:     make(map[string]struct{}),
+		seen:     lru.New[string, struct{}](window, nil),
 	}
 
 	// The dirpack cache is plain FIFO: a prefetched-but-not-yet-consumed
@@ -117,7 +124,7 @@ func (p *dirpackPrefetcher) feed(cursor iterator.Iterator[string, objects.MAC]) 
 	}
 
 	// Now as consummer advance the cursor replenish the cache (since it's the
-	// fifo older one gets excluded.
+	// fifo older one gets eviced).
 	// Note even when exhausted we keep looping to drain the channel.
 	for {
 		select {
@@ -148,11 +155,11 @@ func (p *dirpackPrefetcher) worker() {
 // the same directory are ignored.
 func (p *dirpackPrefetcher) onConsume(dir string) {
 	p.seenMu.Lock()
-	if _, ok := p.seen[dir]; ok {
+	if _, ok := p.seen.Get(dir); ok {
 		p.seenMu.Unlock()
 		return
 	}
-	p.seen[dir] = struct{}{}
+	_ = p.seen.Put(dir, struct{}{})
 	p.seenMu.Unlock()
 
 	select {

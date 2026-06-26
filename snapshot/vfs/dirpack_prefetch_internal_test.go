@@ -50,7 +50,7 @@ func TestDirpackFeederDeliversAllDirsInOrder(t *testing.T) {
 		jobs:     make(chan prefetchJob, len(dirs)),
 		consumed: make(chan struct{}, len(dirs)),
 		quit:     make(chan struct{}),
-		seen:     make(map[string]struct{}),
+		// seen is unused by feed(); these tests don't call onConsume.
 	}
 	// Pre-load one consume signal per directory: priming covers `window`, the
 	// remaining directories are pulled in by these signals until the cursor is
@@ -87,7 +87,7 @@ func TestDirpackFeederRespectsWindow(t *testing.T) {
 		jobs:     make(chan prefetchJob, len(dirs)),
 		consumed: make(chan struct{}, len(dirs)),
 		quit:     make(chan struct{}),
-		seen:     make(map[string]struct{}),
+		// seen is unused by feed(); these tests don't call onConsume.
 	}
 
 	p.feederWg.Add(1)
