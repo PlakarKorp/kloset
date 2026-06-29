@@ -55,6 +55,10 @@ type Filesystem struct {
 	repo         *repository.Repository
 	dirpackCache *lru.Cache[string, map[string]*Entry]
 	dirpackSF    singleflight.Group
+
+	dirpackCacheSize int
+
+	prefetcher *dirpackPrefetcher
 }
 
 func PathCmp(a, b string) int {
@@ -137,7 +141,8 @@ func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors ob
 	if err != nil {
 		return nil, err
 	}
-	fs.dirpackCache = lru.New[string, map[string]*Entry](256, nil)
+	fs.dirpackCacheSize = 256
+	fs.dirpackCache = lru.New[string, map[string]*Entry](fs.dirpackCacheSize, nil)
 
 	return fs, nil
 }
@@ -385,14 +390,18 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
 
-	/*
-		if m, exists := fsc.dirpackCache.Get(parentPath); exists {
-			if entry, ok := m[base]; ok {
-				return entry, nil
-			}
-			return nil, fs.ErrNotExist
+	if prefetcher := fsc.prefetcher; prefetcher != nil {
+		prefetcher.onConsume(parentPath)
+	}
+
+	// Fast path: if the prefetcher (or an earlier lookup) already warmed this
+	// directory, serve from cache without entering the singleflight group.
+	if m, exists := fsc.dirpackCache.Get(parentPath); exists {
+		if entry, ok := m[base]; ok {
+			return entry, nil
 		}
-	*/
+		return nil, fs.ErrNotExist
+	}
 
 	v, err, _ := fsc.dirpackSF.Do(parentPath, func() (any, error) {
 		if m, exists := fsc.dirpackCache.Get(parentPath); exists {
@@ -504,6 +513,13 @@ func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, err
 		return nil, fs.ErrNotExist
 	}
 
+	return fsc.loadDirpackMapByMAC(parentPath, objectMac)
+}
+
+// loadDirpackMapByMAC is loadDirpackMap with the dirpack object MAC already
+// resolved; the prefetcher uses it to skip the redundant dirpack.Find since
+// its cursor already yields the MAC alongside the path.
+func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.MAC) (map[string]*Entry, error) {
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
 		return nil, err

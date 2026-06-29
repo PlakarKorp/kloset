@@ -210,6 +210,14 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 }
 
 func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
+	if sourceCtx.vfsCache != nil {
+		// Memory wise the cache has a small footprint so we can safely go a bit
+		// big here. The 64 figure was chosen empirically after various tests.
+		window := snap.AppContext().MaxConcurrency * 64
+		sourceCtx.vfsCache.StartDirpackPrefetch(window, 64)
+		defer sourceCtx.vfsCache.StopDirpackPrefetch()
+	}
+
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
