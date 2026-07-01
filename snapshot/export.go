@@ -10,9 +10,33 @@ import (
 
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/exporter"
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
+
+// countingReadCloser accounts the bytes the exporter reads against a write
+// span, so throughput reflects what is actually exported.
+type countingReadCloser struct {
+	rd   io.ReadCloser
+	span *iostat.Span
+}
+
+func newCountingReadCloser(rd io.ReadCloser, span *iostat.Span) *countingReadCloser {
+	return &countingReadCloser{rd: rd, span: span}
+}
+
+func (c *countingReadCloser) Read(p []byte) (int, error) {
+	n, err := c.rd.Read(p)
+	if n > 0 {
+		c.span.Add(int64(n))
+	}
+	return n, err
+}
+
+func (c *countingReadCloser) Close() error {
+	return c.rd.Close()
+}
 
 type ExportOptions struct {
 	Strip           string
@@ -23,6 +47,14 @@ type ExportOptions struct {
 func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *ExportOptions) error {
 	emitter := snap.Emitter("export")
 	defer emitter.Close()
+
+	snap.repository.ExportStats = iostat.New()
+	sampler := iostat.NewSampler(emitter, snap.AppContext().IOStatsInterval,
+		iostat.ScopedTracker{Name: "destination", T: snap.repository.ExportStats},
+		iostat.ScopedTracker{Name: "storage", T: snap.repository.IOStats()},
+	)
+	sampler.Start(snap.AppContext())
+	defer sampler.Stop()
 
 	// these are wrong and need to be actually computed from the
 	// entry that we're about to walk.  keeping for now for
@@ -121,20 +153,26 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				return fmt.Errorf("snapshot entry has non-absolute path %q", entrypath)
 			}
 
+			isRegular := false
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)
 			} else if e.FileInfo.Mode()&os.ModeSymlink != 0 {
 				emitter.Symlink(entrypath)
 			} else if e.FileInfo.Mode().IsRegular() {
-				// This is a shortcut, but it's safe, integrated plugins are
-				// controlled by us and consume everything, and external plugins
-				// go over grpc which consumes everything.
-				snap.repository.ExportStats.GetWriteSpan().Add(e.FileInfo.Size())
+				isRegular = true
 				emitter.File(entrypath)
 			}
 			records <- connectors.NewRecord(entrypath, e.SymlinkTarget, e.FileInfo, e.ExtendedAttributes,
 				func() (io.ReadCloser, error) {
-					return e.Open(pvfs)
+					f, err := e.Open(pvfs)
+					if err != nil {
+						return nil, err
+					}
+					var rd io.ReadCloser = f
+					if isRegular {
+						rd = newCountingReadCloser(rd, snap.repository.ExportStats.GetWriteSpan())
+					}
+					return rd, nil
 				})
 			return nil
 		})

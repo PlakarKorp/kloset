@@ -42,6 +42,10 @@ type KContext struct {
 	CWD            string
 	MaxConcurrency int
 
+	// IOStatsInterval is the sampler cadence for "iostats" events; zero uses
+	// the sampler default.
+	IOStatsInterval time.Duration
+
 	Identity uuid.UUID
 	Keypair  *keypair.KeyPair
 }

@@ -357,6 +357,13 @@ func (snap *Builder) Backup(source *Source) error {
 	/* phase 0: setup - prepare source context and indexes */
 	snap.repository.ImportStats = iostat.New()
 
+	sampler := iostat.NewSampler(snap.emitter, snap.AppContext().IOStatsInterval,
+		iostat.ScopedTracker{Name: "source", T: snap.repository.ImportStats},
+		iostat.ScopedTracker{Name: "storage", T: snap.repository.IOStats()},
+	)
+	sampler.Start(snap.AppContext())
+	defer sampler.Stop()
+
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
