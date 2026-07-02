@@ -357,6 +357,13 @@ func (snap *Builder) Backup(source *Source) error {
 	/* phase 0: setup - prepare source context and indexes */
 	snap.repository.ImportStats = iostat.New()
 
+	sampler := iostat.NewSampler(snap.emitter, snap.AppContext().IOStatsInterval,
+		iostat.ScopedTracker{Name: "source", T: snap.repository.ImportStats},
+		iostat.ScopedTracker{Name: "storage", T: snap.repository.IOStats()},
+	)
+	sampler.Start(snap.AppContext())
+	defer sampler.Stop()
+
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -552,6 +559,10 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 
 	chk.Reset(rd)
 	ctx := snap.AppContext()
+	// One span for the whole file so the gap between chunk reads is accounted as
+	// active read time; a fresh span per chunk would measure ~0 and record no
+	// throughput samples.
+	readSpan := snap.repository.ImportStats.GetReadSpan()
 	for i := 0; ; i++ {
 		if i%1024 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -564,7 +575,7 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 			return nil, objects.MAC{}, -1, err
 		}
 
-		snap.repository.ImportStats.GetReadSpan().Add(int64(len(cdcChunk)))
+		readSpan.Add(int64(len(cdcChunk)))
 
 		if cdcChunk != nil {
 			chunkCopy := make([]byte, len(cdcChunk))
