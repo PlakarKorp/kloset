@@ -520,6 +520,14 @@ func TestXattrToPath(t *testing.T) {
 			},
 			expected: "/etc/passwdstream@",
 		},
+		{
+			xattr: vfs.Xattr{
+				Path: "/etc/passwd",
+				Name: "Metadata",
+				Type: objects.AttributeCustom,
+			},
+			expected: "/etc/passwdMetadata%",
+		},
 	}
 
 	for _, tc := range cases {
