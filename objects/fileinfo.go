@@ -38,6 +38,7 @@ type Attribute uint8
 const (
 	AttributeExtended Attribute = 0
 	AttributeADS      Attribute = 1
+	AttributeCustom   Attribute = 2
 )
 
 func (f FileInfo) Name() string {
