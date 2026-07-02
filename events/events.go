@@ -344,19 +344,21 @@ func (e *Emitter) FilesystemSummary(fileCount uint64, dirCount uint64, symlinkCo
 
 func ioStatsToMap(s iostat.IOStats) map[string]any {
 	return map[string]any{
-		"total":   s.TotalBytes,
-		"dt":      s.Duration,
-		"overall": s.Overall,
-		"min":     s.Min,
-		"avg":     s.Avg,
-		"median":  s.Median,
-		"p50":     s.P50,
-		"p75":     s.P75,
-		"p80":     s.P80,
-		"p90":     s.P90,
-		"p95":     s.P95,
-		"p99":     s.P99,
-		"max":     s.Max,
+		"total":        s.TotalBytes,
+		"dt":           s.Duration,
+		"wall_dt":      s.WallDuration,
+		"overall":      s.Overall,
+		"overall_wall": s.OverallWall,
+		"min":          s.Min,
+		"avg":          s.Avg,
+		"median":       s.Median,
+		"p50":          s.P50,
+		"p75":          s.P75,
+		"p80":          s.P80,
+		"p90":          s.P90,
+		"p95":          s.P95,
+		"p99":          s.P99,
+		"max":          s.Max,
 	}
 }
 
