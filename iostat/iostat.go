@@ -13,15 +13,27 @@ import (
 const sampleWindow = 50 * time.Millisecond
 
 // represents I/O statistics collected over a period of time.
+//
+// Two notions of throughput are reported and answer different questions:
+//   - the active-time figures (Overall and the Min/Avg/Median/Max/Pxx
+//     distribution) divide bytes by the time actually spent inside read/write
+//     calls. They characterise how fast the medium is *when working*, ignoring
+//     idle/blocked time — the right metric for benchmarking the storage layer.
+//   - OverallWall divides bytes by wall-clock elapsed (first to last operation),
+//     so it includes stalls and waits. It is the throughput a user actually
+//     experiences and the right basis for progress/ETA.
 type IOStats struct {
-	Duration   time.Duration
-	TotalBytes int64
+	Duration     time.Duration // active time spent in I/O
+	WallDuration time.Duration // wall-clock span first→last operation
+	TotalBytes   int64
 
-	Min     float64 // bytes/sec
-	Avg     float64 // bytes/sec
-	Median  float64 // bytes/sec
-	Max     float64 // bytes/sec
-	Overall float64 // overall throughput (bytes/sec)
+	Min     float64 // bytes/sec (active)
+	Avg     float64 // bytes/sec (active)
+	Median  float64 // bytes/sec (active)
+	Max     float64 // bytes/sec (active)
+	Overall float64 // overall active throughput (bytes/sec)
+
+	OverallWall float64 // overall wall-clock throughput (bytes/sec)
 
 	P50 float64
 	P75 float64
@@ -36,18 +48,25 @@ type tracker struct {
 	activeDuration time.Duration
 	totalBytes     int64
 
+	// wall-clock span of activity: the time of the first and most recent
+	// accounted operation. wallDuration = lastAt - firstAt.
+	firstAt time.Time
+	lastAt  time.Time
+
+	// active-time bucketing: emits a sample once bucketDuration (summed active
+	// I/O time) reaches sampleWindow.
 	bucketBytes    int64
 	bucketDuration time.Duration
-
-	samples []float64
+	samples        []float64
 }
 
 func newTracker() *tracker {
 	return &tracker{}
 }
 
-// add accounts for n bytes processed over dt of *active* time.
-func (t *tracker) add(n int64, dt time.Duration) {
+// add accounts for n bytes processed over dt of *active* time, completing at
+// wall-clock time now (used to measure the wall-clock span of activity).
+func (t *tracker) add(n int64, dt time.Duration, now time.Time) {
 	if n == 0 {
 		return
 	}
@@ -57,8 +76,16 @@ func (t *tracker) add(n int64, dt time.Duration) {
 
 	t.totalBytes += n
 
+	// Track the wall-clock span (first → last operation) for OverallWall.
+	if !now.IsZero() {
+		if t.firstAt.IsZero() {
+			t.firstAt = now
+		}
+		t.lastAt = now
+	}
+
 	if dt <= 0 {
-		// count the bytes, but don't create a throughput sample
+		// count the bytes, but don't create an active-throughput sample
 		return
 	}
 
@@ -88,6 +115,8 @@ func (t *tracker) Reset() {
 
 	t.activeDuration = 0
 	t.totalBytes = 0
+	t.firstAt = time.Time{}
+	t.lastAt = time.Time{}
 	t.samples = nil
 	t.bucketBytes = 0
 	t.bucketDuration = 0
@@ -115,11 +144,21 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[lower]*(1-weight) + sorted[upper]*weight
 }
 
+// TotalBytes returns the cumulative bytes accounted so far. Unlike Stats() it
+// has no side effects (it does not flush the partial sampling bucket), so it is
+// safe to poll at a high rate — e.g. from a UI render loop — without perturbing
+// the throughput samples.
+func (t *tracker) TotalBytes() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.totalBytes
+}
+
 func (t *tracker) Stats() IOStats {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	// flush any partially-filled bucket as one last sample
+	// flush any partially-filled active bucket as one last sample
 	if t.bucketDuration > 0 && t.bucketBytes > 0 {
 		throughput := float64(t.bucketBytes) / t.bucketDuration.Seconds()
 		t.samples = append(t.samples, throughput)
@@ -128,14 +167,19 @@ func (t *tracker) Stats() IOStats {
 	}
 
 	duration := t.activeDuration
+	wall := t.lastAt.Sub(t.firstAt)
 
 	stats := IOStats{
-		Duration:   duration,
-		TotalBytes: t.totalBytes,
+		Duration:     duration,
+		WallDuration: wall,
+		TotalBytes:   t.totalBytes,
 	}
 
 	if duration > 0 && t.totalBytes > 0 {
 		stats.Overall = float64(t.totalBytes) / duration.Seconds()
+	}
+	if wall > 0 && t.totalBytes > 0 {
+		stats.OverallWall = float64(t.totalBytes) / wall.Seconds()
 	}
 
 	if len(t.samples) == 0 {
@@ -220,7 +264,7 @@ func (s *Span) Add(n int64) {
 	now := time.Now()
 	dt := now.Sub(s.last)
 	s.last = now
-	s.t.add(n, dt)
+	s.t.add(n, dt, now)
 }
 
 func formatBytes(b int64) string {
@@ -244,8 +288,10 @@ func (ioT *IOTracker) SummaryString() string {
 	return fmt.Sprintf(
 		"r:"+
 			" dt=%s,"+
+			" wall=%s,"+
 			" bytes=%s (%d),"+
 			" overall=%s,"+
+			" overall_wall=%s,"+
 			" min=%s,"+
 			" avg=%s,"+
 			" median=%s,"+
@@ -257,8 +303,10 @@ func (ioT *IOTracker) SummaryString() string {
 			" max=%s\n"+
 			"w:"+
 			" dt=%s,"+
+			" wall=%s,"+
 			" bytes=%s (%d),"+
 			" overall=%s,"+
+			" overall_wall=%s,"+
 			" min=%s,"+
 			" avg=%s,"+
 			" median=%s,"+
@@ -268,8 +316,9 @@ func (ioT *IOTracker) SummaryString() string {
 			" p95=%s,"+
 			" p99=%s,"+
 			" max=%s\n",
-		r.Duration, formatBytes(r.TotalBytes), r.TotalBytes,
+		r.Duration, r.WallDuration, formatBytes(r.TotalBytes), r.TotalBytes,
 		formatThroughput(r.Overall),
+		formatThroughput(r.OverallWall),
 		formatThroughput(r.Min),
 		formatThroughput(r.Avg),
 		formatThroughput(r.Median),
@@ -280,8 +329,9 @@ func (ioT *IOTracker) SummaryString() string {
 		formatThroughput(r.P99),
 		formatThroughput(r.Max),
 
-		w.Duration, formatBytes(w.TotalBytes), w.TotalBytes,
+		w.Duration, w.WallDuration, formatBytes(w.TotalBytes), w.TotalBytes,
 		formatThroughput(w.Overall),
+		formatThroughput(w.OverallWall),
 		formatThroughput(w.Min),
 		formatThroughput(w.Avg),
 		formatThroughput(w.Median),
