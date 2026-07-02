@@ -115,6 +115,16 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[lower]*(1-weight) + sorted[upper]*weight
 }
 
+// TotalBytes returns the cumulative bytes accounted so far. Unlike Stats() it
+// has no side effects (it does not flush the partial sampling bucket), so it is
+// safe to poll at a high rate — e.g. from a UI render loop — without perturbing
+// the throughput samples.
+func (t *tracker) TotalBytes() int64 {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.totalBytes
+}
+
 func (t *tracker) Stats() IOStats {
 	t.mu.Lock()
 	defer t.mu.Unlock()
