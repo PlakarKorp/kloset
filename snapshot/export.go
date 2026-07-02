@@ -10,31 +10,26 @@ import (
 
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/exporter"
-	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
 
 // countingReadCloser accounts the bytes the exporter reads against a write
-// span, so throughput reflects what is actually exported. It also reports the
-// bytes as they flow via emitter.ChunkBytes, letting consumers advance progress
-// *within* a large file rather than only when the whole file completes.
+// span, so throughput reflects what is actually exported.
 type countingReadCloser struct {
-	rd      io.ReadCloser
-	span    *iostat.Span
-	emitter *events.Emitter
+	rd   io.ReadCloser
+	span *iostat.Span
 }
 
-func newCountingReadCloser(rd io.ReadCloser, span *iostat.Span, emitter *events.Emitter) *countingReadCloser {
-	return &countingReadCloser{rd: rd, span: span, emitter: emitter}
+func newCountingReadCloser(rd io.ReadCloser, span *iostat.Span) *countingReadCloser {
+	return &countingReadCloser{rd: rd, span: span}
 }
 
 func (c *countingReadCloser) Read(p []byte) (int, error) {
 	n, err := c.rd.Read(p)
 	if n > 0 {
 		c.span.Add(int64(n))
-		c.emitter.ChunkBytes(int64(n))
 	}
 	return n, err
 }
@@ -175,7 +170,7 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 					}
 					var rd io.ReadCloser = f
 					if isRegular {
-						rd = newCountingReadCloser(rd, snap.repository.ExportStats.GetWriteSpan(), emitter)
+						rd = newCountingReadCloser(rd, snap.repository.ExportStats.GetWriteSpan())
 					}
 					return rd, nil
 				})

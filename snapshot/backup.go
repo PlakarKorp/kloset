@@ -578,8 +578,6 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 		readSpan.Add(int64(len(cdcChunk)))
 
 		if cdcChunk != nil {
-			snap.emitter.ChunkBytes(int64(len(cdcChunk)))
-
 			chunkCopy := make([]byte, len(cdcChunk))
 			copy(chunkCopy, cdcChunk)
 

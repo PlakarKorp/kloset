@@ -149,15 +149,6 @@ func (e *Emitter) Symlink(path string) {
 	})
 }
 
-// ChunkBytes reports that n payload bytes of the current file have been read
-// and processed. Unlike FileOk (emitted once per whole file), it lets
-// consumers advance progress *within* a large file at chunk granularity.
-func (e *Emitter) ChunkBytes(n int64) {
-	e.emit("chunk.bytes", Info, map[string]any{
-		"bytes": n,
-	})
-}
-
 func (e *Emitter) Object(object objects.MAC) {
 	e.emit("object", Info, map[string]any{
 		"mac": object,
