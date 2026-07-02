@@ -49,6 +49,8 @@ func (x *Xattr) ToPath() string {
 		sep = ":"
 	case objects.AttributeADS:
 		sep = "@"
+	case objects.AttributeCustom:
+		sep = "%"
 	default:
 		sep = "#"
 	}
