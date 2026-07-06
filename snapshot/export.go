@@ -11,6 +11,7 @@ import (
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/exporter"
 	"github.com/PlakarKorp/kloset/iostat"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
@@ -176,6 +177,33 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				})
 			return nil
 		})
+
+		if (exp.Flags() & location.FLAG_WANTXATTR) != 0 {
+			_, _, xattrtree := pvfs.BTrees()
+			xattriter, err := xattrtree.ScanFrom(pathname)
+			if err == nil {
+				i := 0
+				for xattriter.Next() {
+					if i%1024 == 0 {
+						if err := snap.AppContext().Err(); err != nil {
+							continue
+						}
+					}
+					i++
+
+					_, xattrmac := xattriter.Current()
+					xattr, err := pvfs.ResolveXattr(xattrmac)
+					if err != nil {
+						continue
+					}
+					records <- connectors.NewXattr(xattr.Path, xattr.Name, xattr.Type,
+						func() (io.ReadCloser, error) {
+							return io.NopCloser(vfs.NewObjectReader(snap.repository, xattr.ResolvedObject, xattr.Size, -1)), nil
+						})
+				}
+			}
+		}
+
 		close(records)
 	}()
 
