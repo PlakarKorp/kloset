@@ -11,6 +11,7 @@ import (
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/exporter"
 	"github.com/PlakarKorp/kloset/iostat"
+	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 )
@@ -113,6 +114,8 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	}()
 
 	go func() {
+		defer close(records)
+
 		// We are a single file, let's emit the root dir to create the parent
 		// dir if any.
 		if !entry.IsDir() {
@@ -176,7 +179,37 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				})
 			return nil
 		})
-		close(records)
+
+		if (exp.Flags() & location.FLAG_EXPORTXATTR) != 0 {
+			_, _, xattrtree := pvfs.BTrees()
+			xattriter, err := xattrtree.ScanFrom(pathname)
+			if err != nil {
+				/*
+				 * Fail silently, for now. We do not have a good
+				 * way of returning errors from here.
+				 */
+				return
+			}
+			i := 0
+			for xattriter.Next() {
+				if i%1024 == 0 {
+					if err := snap.AppContext().Err(); err != nil {
+						break
+					}
+				}
+				i++
+
+				_, xattrmac := xattriter.Current()
+				xattr, err := pvfs.ResolveXattr(xattrmac)
+				if err != nil {
+					break
+				}
+				records <- connectors.NewXattr(xattr.Path, xattr.Name, xattr.Type,
+					func() (io.ReadCloser, error) {
+						return io.NopCloser(vfs.NewObjectReader(snap.repository, xattr.ResolvedObject, xattr.Size, -1)), nil
+					})
+			}
+		}
 	}()
 
 	return exp.Export(snap.AppContext(), records, results)
