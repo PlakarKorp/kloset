@@ -253,13 +253,13 @@ func WithPerWeekCap(n int) Option   { return func(p *LocateOptions) { p.Periods.
 func WithPerMonthCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Month.Cap = n } }
 func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Year.Cap = n } }
 
-func WithPerMondayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Monday.Cap = n } }
-func WithPerTuesdayCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Tuesday.Cap = n } }
+func WithPerMondayCap(n int) Option    { return func(p *LocateOptions) { p.Periods.Monday.Cap = n } }
+func WithPerTuesdayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Tuesday.Cap = n } }
 func WithPerWednesdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Cap = n } }
-func WithPerThursdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Thursday.Cap = n } }
-func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Friday.Cap = n } }
-func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Saturday.Cap = n } }
-func WithPerSundaysCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Sunday.Cap = n } }
+func WithPerThursdayCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Thursday.Cap = n } }
+func WithPerFridayCap(n int) Option    { return func(p *LocateOptions) { p.Periods.Friday.Cap = n } }
+func WithPerSaturdayCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Saturday.Cap = n } }
+func WithPerSundaysCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Sunday.Cap = n } }
 
 func WithBefore(t time.Time) Option {
 	return func(p *LocateOptions) { p.Filters.Before = t }

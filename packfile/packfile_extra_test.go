@@ -17,12 +17,12 @@ import (
 // NewInMemoryFooterFromBytes can parse: Timestamp(8) + Count(4) + IndexOffset(8) + IndexMAC(32) + Flags(4) = 56 bytes.
 func buildValidFooterBytes() []byte {
 	buf := &bytes.Buffer{}
-	_ = binary.Write(buf, binary.LittleEndian, int64(123456789))  // Timestamp
-	_ = binary.Write(buf, binary.LittleEndian, uint32(3))         // Count
-	_ = binary.Write(buf, binary.LittleEndian, uint64(512))       // IndexOffset
+	_ = binary.Write(buf, binary.LittleEndian, int64(123456789)) // Timestamp
+	_ = binary.Write(buf, binary.LittleEndian, uint32(3))        // Count
+	_ = binary.Write(buf, binary.LittleEndian, uint64(512))      // IndexOffset
 	mac := objects.MAC{1, 2, 3, 4}
-	_ = binary.Write(buf, binary.LittleEndian, mac)               // IndexMAC
-	_ = binary.Write(buf, binary.LittleEndian, uint32(0))         // Flags
+	_ = binary.Write(buf, binary.LittleEndian, mac)       // IndexMAC
+	_ = binary.Write(buf, binary.LittleEndian, uint32(0)) // Flags
 	return buf.Bytes()
 }
 
@@ -68,7 +68,8 @@ func TestNewInMemoryFooterFromBytesMissingCount(t *testing.T) {
 // NewPackfileInMemoryFromBytes expects: blobs | raw_index | raw_footer.
 //
 // The Serialize output layout is:
-//   blobs | encoded_index | encoded_footer | uint32(encoded_footer_len)
+//
+//	blobs | encoded_index | encoded_footer | uint32(encoded_footer_len)
 //
 // With an identity encoder "encoded" == "raw", so we just strip the trailing 4 bytes
 // that hold the footer length, then strip the footer bytes, then strip the index bytes.

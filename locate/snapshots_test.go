@@ -12,10 +12,10 @@ import (
 // TestParseSnapshotPath tests the pure string-parsing helper.
 func TestParseSnapshotPath(t *testing.T) {
 	tests := []struct {
-		name          string
-		input         string
-		wantPrefix    string
-		wantPattern   string
+		name        string
+		input       string
+		wantPrefix  string
+		wantPattern string
 	}{
 		{
 			name:        "absolute path — no prefix",

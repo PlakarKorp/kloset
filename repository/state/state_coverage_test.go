@@ -314,9 +314,9 @@ func TestDeserializeFromStreamV100AllEntryTypes(t *testing.T) {
 
 	// METADATA terminator + fields
 	buf.WriteByte(byte(ET_METADATA))
-	writeUint32LE(buf, 0)            // version
-	writeUint64LE(buf, uint64(0))    // timestamp
-	buf.Write(make([]byte, 16))      // serial
+	writeUint32LE(buf, 0)         // version
+	writeUint64LE(buf, uint64(0)) // timestamp
+	buf.Write(make([]byte, 16))   // serial
 
 	cache := newMockStateCache()
 	st, err := NewLocalState(cache)

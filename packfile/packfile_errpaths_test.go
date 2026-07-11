@@ -236,11 +236,11 @@ func TestNewPackfileInMemoryFromBytesBlobOffsetOverflow(t *testing.T) {
 	_ = binary.Write(idxBuf, binary.LittleEndian, uint32(0))
 
 	footerBuf := &bytes.Buffer{}
-	_ = binary.Write(footerBuf, binary.LittleEndian, int64(0))    // Timestamp
-	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(1))   // Count
-	_ = binary.Write(footerBuf, binary.LittleEndian, indexOff)    // IndexOffset
+	_ = binary.Write(footerBuf, binary.LittleEndian, int64(0))      // Timestamp
+	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(1))     // Count
+	_ = binary.Write(footerBuf, binary.LittleEndian, indexOff)      // IndexOffset
 	_ = binary.Write(footerBuf, binary.LittleEndian, objects.MAC{}) // IndexMAC (won't be reached)
-	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(0))   // Flags
+	_ = binary.Write(footerBuf, binary.LittleEndian, uint32(0))     // Flags
 
 	all := append([]byte{}, blobData...)
 	all = append(all, idxBuf.Bytes()...)

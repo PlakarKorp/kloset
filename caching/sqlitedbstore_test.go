@@ -68,4 +68,3 @@ func TestSQLiteDBStoreClose(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, store.Close())
 }
-

@@ -82,13 +82,13 @@ func TestRuleSetNegationLastRuleWins(t *testing.T) {
 	// After negation, important.log should NOT be excluded (ignore=false).
 	ignore, rule, err := rs.Match("important.log", false)
 	require.NoError(t, err)
-	require.False(t, ignore)  // last rule is negation → not excluded
-	require.NotNil(t, rule)   // but the rule did match
+	require.False(t, ignore) // last rule is negation → not excluded
+	require.NotNil(t, rule)  // but the rule did match
 
 	// Other .log files are still excluded (ignore=true).
 	ignore, rule, err = rs.Match("debug.log", false)
 	require.NoError(t, err)
-	require.True(t, ignore)  // matched by "*.log" and not negated
+	require.True(t, ignore) // matched by "*.log" and not negated
 	require.NotNil(t, rule)
 }
 

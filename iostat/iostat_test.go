@@ -123,7 +123,6 @@ func TestWallClockThroughput(t *testing.T) {
 	}
 }
 
-
 func TestSpanAddNil(t *testing.T) {
 	var s *Span
 	// should not panic
