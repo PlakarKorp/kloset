@@ -5,9 +5,10 @@ import (
 	"sync/atomic"
 )
 
-type node[K comparable] struct {
+type node[K comparable, V any] struct {
 	key  K
-	next *node[K]
+	val  V
+	next *node[K, V]
 }
 
 type Cache[K comparable, V any] struct {
@@ -18,9 +19,9 @@ type Cache[K comparable, V any] struct {
 
 	onevict func(K, V) error
 
-	items map[K]V
-	head  *node[K]
-	tail  *node[K]
+	items map[K]*node[K, V]
+	head  *node[K, V]
+	tail  *node[K, V]
 
 	hits   atomic.Uint64
 	misses atomic.Uint64
@@ -30,15 +31,13 @@ func New[K comparable, V any](target int, onevict func(K, V) error) *Cache[K, V]
 	return &Cache[K, V]{
 		target:  target,
 		onevict: onevict,
-		items:   make(map[K]V, target),
+		items:   make(map[K]*node[K, V], target),
 	}
 }
 
 func (c *Cache[K, V]) put(key K, val V) {
 	c.size++
-	c.items[key] = val
-
-	n := &node[K]{key: key}
+	n := &node[K, V]{key: key, val: val}
 	if c.head == nil {
 		c.head = n
 		c.tail = n
@@ -46,13 +45,15 @@ func (c *Cache[K, V]) put(key K, val V) {
 		c.tail.next = n
 		c.tail = n
 	}
+
+	c.items[key] = n
 }
 
 // assume that the item was just removed from the linked list
 func (c *Cache[K, V]) flush(key K) error {
-	val := c.items[key]
+	n := c.items[key]
 	if c.onevict != nil {
-		if err := c.onevict(key, val); err != nil {
+		if err := c.onevict(key, n.val); err != nil {
 			return err
 		}
 	}
@@ -64,16 +65,17 @@ func (c *Cache[K, V]) flush(key K) error {
 
 func (c *Cache[K, V]) Get(key K) (V, bool) {
 	c.mtx.RLock()
-	val, ok := c.items[key]
+	n, ok := c.items[key]
 	c.mtx.RUnlock()
 
 	if ok {
 		c.hits.Add(1)
+		return n.val, true
 	} else {
 		c.misses.Add(1)
+		var zero V
+		return zero, false
 	}
-
-	return val, ok
 }
 
 // Put adds or overrides an element in the cache.
@@ -81,7 +83,7 @@ func (c *Cache[K, V]) Put(key K, val V) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
 	if _, ok := c.items[key]; ok {
-		c.items[key] = val
+		c.items[key].val = val
 		return nil
 	}
 

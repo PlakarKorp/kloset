@@ -81,14 +81,14 @@ func TestCache(t *testing.T) {
 				require.False(t, ok, "key %d should have been evicted", i-2)
 			}
 
-			val, ok := cache.items[i]
+			n, ok := cache.items[i]
 			require.True(t, ok)
-			require.Equal(t, fmt.Sprintf("val-%d", i), val)
+			require.Equal(t, fmt.Sprintf("val-%d", i), n.val)
 
 			if i > 1 {
-				val, ok := cache.items[i-1]
+				n, ok := cache.items[i-1]
 				require.True(t, ok)
-				require.Equal(t, fmt.Sprintf("val-%d", i-1), val)
+				require.Equal(t, fmt.Sprintf("val-%d", i-1), n.val)
 			}
 		}
 
