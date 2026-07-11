@@ -9,6 +9,7 @@ type node[K comparable, V any] struct {
 	key  K
 	val  V
 	next *node[K, V]
+	prev *node[K, V]
 }
 
 type Cache[K comparable, V any] struct {
@@ -42,8 +43,9 @@ func (c *Cache[K, V]) put(key K, val V) {
 		c.head = n
 		c.tail = n
 	} else {
-		c.tail.next = n
-		c.tail = n
+		n.next = c.head
+		c.head.prev = n
+		c.head = n
 	}
 
 	c.items[key] = n
@@ -88,10 +90,14 @@ func (c *Cache[K, V]) Put(key K, val V) error {
 	}
 
 	if c.size == c.target {
-		if err := c.flush(c.head.key); err != nil {
+		if err := c.flush(c.tail.key); err != nil {
 			return err
 		}
-		c.head = c.head.next
+		c.tail = c.tail.prev
+		if c.tail != nil {
+			c.tail.next.prev = nil
+			c.tail.next = nil
+		}
 	}
 
 	c.put(key, val)
