@@ -28,7 +28,12 @@ type Cache[K comparable, V any] struct {
 	misses atomic.Uint64
 }
 
+// New constructs a cache of maximum size target.  The minimum size is
+// two, and any value minor than that will silently be bumped to at
+// least 2.  onevict is an optional callback that is called when
+// evicting an item from the cache.
 func New[K comparable, V any](target int, onevict func(K, V) error) *Cache[K, V] {
+	target = max(target, 2)
 	return &Cache[K, V]{
 		target:  target,
 		onevict: onevict,
