@@ -68,28 +68,35 @@ func TestCache(t *testing.T) {
 		cache := New[int, string](2, nil)
 		defer cache.Close()
 
-		// Push far more items through the cache than its capacity so
-		// several evictions happen in sequence, checking at every step
-		// that the two most recent keys survive and anything older is
-		// gone.
-		for i := 1; i <= 10; i++ {
+		err := cache.Put(1, "one")
+		require.NoError(t, err)
+		err = cache.Put(2, "two")
+		require.NoError(t, err)
+
+		// Repeatedly touch key 1 so it stays the most-recently-used
+		// entry, while a stream of new keys cycles through the other
+		// slot.
+		for i := 3; i <= 10; i++ {
+			_, ok := cache.Get(1)
+			require.True(t, ok)
+
 			err := cache.Put(i, fmt.Sprintf("val-%d", i))
 			require.NoError(t, err)
 
-			if i > 2 {
-				_, ok := cache.Get(i - 2)
-				require.False(t, ok, "key %d should have been evicted", i-2)
-			}
+			// the key from the previous round, never touched again
+			// after it was inserted, must now be gone
+			_, ok = cache.Get(i - 1)
+			require.False(t, ok, "key %d should have been evicted", i-1)
 
-			n, ok := cache.items[i]
+			// key 1 and the newly inserted key must both still be
+			// present
+			val, ok := cache.Get(1)
 			require.True(t, ok)
-			require.Equal(t, fmt.Sprintf("val-%d", i), n.val)
+			require.Equal(t, "one", val)
 
-			if i > 1 {
-				n, ok := cache.items[i-1]
-				require.True(t, ok)
-				require.Equal(t, fmt.Sprintf("val-%d", i-1), n.val)
-			}
+			val, ok = cache.Get(i)
+			require.True(t, ok)
+			require.Equal(t, fmt.Sprintf("val-%d", i), val)
 		}
 
 		_, _, size := cache.Stats()
