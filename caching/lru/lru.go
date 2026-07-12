@@ -12,6 +12,8 @@ type node[K comparable, V any] struct {
 	prev *node[K, V]
 }
 
+// Cache implements a LRU caching strategy.  All methods beside Close
+// are safe for concurrent use.
 type Cache[K comparable, V any] struct {
 	mtx sync.Mutex
 
@@ -33,6 +35,9 @@ type Cache[K comparable, V any] struct {
 // least 2.  onevict is an optional callback that is called when
 // evicting an item from the cache.
 func New[K comparable, V any](target int, onevict func(K, V) error) *Cache[K, V] {
+	// it's simpler to assume that we'll always have something in
+	// the linked list, rather than trying to cope with
+	// patological cases like zero or one.
 	target = max(target, 2)
 	return &Cache[K, V]{
 		target:  target,
@@ -56,6 +61,8 @@ func (c *Cache[K, V]) put(key K, val V) {
 	c.items[key] = n
 }
 
+// evictItem removes an item from the `items' map, without touching
+// the list.
 func (c *Cache[K, V]) evictItem(key K) error {
 	n := c.items[key]
 	if c.onevict != nil {
@@ -69,6 +76,9 @@ func (c *Cache[K, V]) evictItem(key K) error {
 	return nil
 }
 
+// Get retrieves a key from the cache, returning the value and true,
+// or the zero value and false if not found.  It also bumps the
+// "recent-ness" of the key.
 func (c *Cache[K, V]) Get(key K) (V, bool) {
 	c.mtx.Lock()
 	n, ok := c.items[key]
@@ -103,7 +113,9 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 	}
 }
 
-// Put adds or overrides an element in the cache.
+// Put adds or overrides an element in the cache, eventually evicting
+// the less recent item in the cache.  It can only fail if the
+// `onevict` callback fails, in which case it aborts the operation.
 func (c *Cache[K, V]) Put(key K, val V) error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -127,6 +139,11 @@ func (c *Cache[K, V]) Put(key K, val V) error {
 	return nil
 }
 
+// Close flushes all the items in the cache using the `onevict`
+// callback, if provided.  It is safe to reuse a cache after it has
+// been closed, provided that the size and `onevict` callback are
+// still fine: this method behaves like a reset.  It can only fail if
+// `onevict` fails, in which case it returns the last error.
 func (c *Cache[K, V]) Close() error {
 	c.mtx.Lock()
 	defer c.mtx.Unlock()
@@ -142,6 +159,8 @@ func (c *Cache[K, V]) Close() error {
 	return err
 }
 
+// Stats return the number of cache hit, misses and the size of the
+// cache.  It does *not* reset them.
 func (c *Cache[K, V]) Stats() (hit, miss, size uint64) {
 	return c.hits.Load(), c.misses.Load(), uint64(c.size)
 }
