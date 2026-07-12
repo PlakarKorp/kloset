@@ -56,8 +56,7 @@ func (c *Cache[K, V]) put(key K, val V) {
 	c.items[key] = n
 }
 
-// assume that the item was just removed from the linked list
-func (c *Cache[K, V]) flush(key K) error {
+func (c *Cache[K, V]) evictItem(key K) error {
 	n := c.items[key]
 	if c.onevict != nil {
 		if err := c.onevict(key, n.val); err != nil {
@@ -114,7 +113,7 @@ func (c *Cache[K, V]) Put(key K, val V) error {
 	}
 
 	if c.size == c.target {
-		if err := c.flush(c.tail.key); err != nil {
+		if err := c.evictItem(c.tail.key); err != nil {
 			return err
 		}
 		c.tail = c.tail.prev
@@ -134,7 +133,7 @@ func (c *Cache[K, V]) Close() error {
 
 	var err error
 	for n := c.head; n != nil; n = n.next {
-		if e := c.flush(n.key); e != nil {
+		if e := c.evictItem(n.key); e != nil {
 			err = e
 		}
 	}
