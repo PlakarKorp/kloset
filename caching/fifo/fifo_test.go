@@ -2,6 +2,7 @@ package fifo
 
 import (
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -200,4 +201,81 @@ func TestStats(t *testing.T) {
 	require.Equal(t, uint64(1), hits)
 	require.Equal(t, uint64(1), misses)
 	require.Equal(t, uint64(2), size)
+}
+
+func TestDisjointKeySpaceConcurrentPutGet(t *testing.T) {
+	const (
+		capacity     = 64
+		workers      = 16
+		opsPerWorker = 2000
+	)
+
+	cache := New[int, int](capacity, nil)
+	defer cache.Close()
+
+	var wg sync.WaitGroup
+
+	for w := range workers {
+		wg.Go(func() {
+			for i := range opsPerWorker {
+				key := w*opsPerWorker + i
+				err := cache.Put(key, key*2)
+				require.NoError(t, err, "Put(%d)", key)
+
+				val, ok := cache.Get(key)
+				// cannot assert ok being true because
+				// the key could have been evicted by
+				// a concurrenc goroutine.
+				if ok {
+					require.Equal(t, key*2, val, "Get(%d)", key)
+				}
+
+				_, _, size := cache.Stats()
+				require.LessOrEqual(t, size, uint64(capacity))
+			}
+		})
+	}
+
+	wg.Wait()
+
+	hits, misses, size := cache.Stats()
+	require.LessOrEqual(t, size, uint64(capacity))
+	require.Greater(t, hits+misses, uint64(0))
+}
+
+func TestConcurrentSharedKeySpacePutGet(t *testing.T) {
+	const (
+		capacity   = 8
+		keyspace   = 4 // smaller than capacity: contention on the same slots via the update path
+		workers    = 16
+		iterations = 2000
+	)
+
+	cache := New[int, int](capacity, nil)
+	defer cache.Close()
+
+	var wg sync.WaitGroup
+
+	for w := range workers {
+		wg.Go(func() {
+			for i := range iterations {
+				key := i % keyspace
+				err := cache.Put(key, w)
+				require.NoError(t, err, "Put(%d)", key)
+
+				// don't attempt to Get(key) here
+				// since it could either be evicted or
+				// overwritten by another goroutine
+				// concurrently.
+
+				_, _, size := cache.Stats()
+				require.LessOrEqual(t, size, uint64(capacity))
+			}
+		})
+	}
+
+	wg.Wait()
+
+	_, _, size := cache.Stats()
+	require.LessOrEqual(t, size, uint64(capacity))
 }
