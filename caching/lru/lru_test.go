@@ -2,6 +2,7 @@ package lru
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -63,6 +64,38 @@ func TestCache(t *testing.T) {
 		require.Equal(t, "three", val)
 	})
 
+	t.Run("Eviction Beyond One Step", func(t *testing.T) {
+		cache := New[int, string](2, nil)
+		defer cache.Close()
+
+		// Push far more items through the cache than its capacity so
+		// several evictions happen in sequence, checking at every step
+		// that the two most recent keys survive and anything older is
+		// gone.
+		for i := 1; i <= 10; i++ {
+			err := cache.Put(i, fmt.Sprintf("val-%d", i))
+			require.NoError(t, err)
+
+			if i > 2 {
+				_, ok := cache.Get(i - 2)
+				require.False(t, ok, "key %d should have been evicted", i-2)
+			}
+
+			val, ok := cache.items[i]
+			require.True(t, ok)
+			require.Equal(t, fmt.Sprintf("val-%d", i), val)
+
+			if i > 1 {
+				val, ok := cache.items[i-1]
+				require.True(t, ok)
+				require.Equal(t, fmt.Sprintf("val-%d", i-1), val)
+			}
+		}
+
+		_, _, size := cache.Stats()
+		require.Equal(t, uint64(2), size)
+	})
+
 	t.Run("OnEvict Callback", func(t *testing.T) {
 		evicted := make(map[int]string)
 		onEvict := func(key int, val string) error {
@@ -70,7 +103,7 @@ func TestCache(t *testing.T) {
 			return nil
 		}
 
-		cache := New[int, string](2, onEvict)
+		cache := New(2, onEvict)
 		defer cache.Close()
 
 		// Fill the cache
@@ -93,7 +126,7 @@ func TestCache(t *testing.T) {
 			return expectedErr
 		}
 
-		cache := New[int, string](2, onEvict)
+		cache := New(2, onEvict)
 		defer cache.Close()
 
 		// Fill the cache
@@ -133,6 +166,49 @@ func TestCache(t *testing.T) {
 		hits, misses, size = cache.Stats()
 		require.Equal(t, uint64(1), hits)
 		require.Equal(t, uint64(1), misses)
+		require.Equal(t, uint64(2), size)
+	})
+
+	t.Run("Stats After Eviction", func(t *testing.T) {
+		cache := New[int, string](2, nil)
+		defer cache.Close()
+
+		err := cache.Put(1, "one")
+		require.NoError(t, err)
+		err = cache.Put(2, "two")
+		require.NoError(t, err)
+
+		// cache is now full; size must reflect that, with no hits/misses
+		// recorded yet
+		hits, misses, size := cache.Stats()
+		require.Equal(t, uint64(0), hits)
+		require.Equal(t, uint64(0), misses)
+		require.Equal(t, uint64(2), size)
+
+		// this Put evicts key 1, so size must stay at 2, not grow to 3
+		err = cache.Put(3, "three")
+		require.NoError(t, err)
+
+		hits, misses, size = cache.Stats()
+		require.Equal(t, uint64(0), hits)
+		require.Equal(t, uint64(0), misses)
+		require.Equal(t, uint64(2), size)
+
+		// a lookup for the evicted key must count as a miss and must not
+		// change size
+		_, ok := cache.Get(1)
+		require.False(t, ok)
+
+		hits, misses, size = cache.Stats()
+		require.Equal(t, uint64(0), hits)
+		require.Equal(t, uint64(1), misses)
+		require.Equal(t, uint64(2), size)
+
+		// evict once more (key 2) and confirm size still holds at 2
+		err = cache.Put(4, "four")
+		require.NoError(t, err)
+
+		_, _, size = cache.Stats()
 		require.Equal(t, uint64(2), size)
 	})
 
