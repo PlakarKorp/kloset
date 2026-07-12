@@ -18,15 +18,31 @@ func Test_Get(t *testing.T) {
 			Keys:     []rune{'b'},
 			Pointers: []int{2},
 		}
+		n3 := Node[rune, int, int]{
+			Keys:     []rune{'c'},
+			Pointers: []int{3},
+		}
+		n4 := Node[rune, int, int]{
+			Keys:     []rune{'d'},
+			Pointers: []int{4},
+		}
 		ptr1, err := st.Put(&n1)
 		require.NoError(t, err)
 		ptr2, err := st.Put(&n2)
 		require.NoError(t, err)
-
-		c := cachefor[rune, int, int](&st, 1)
-		n, err := st.Get(ptr1)
+		ptr3, err := st.Put(&n3)
 		require.NoError(t, err)
-		require.NoError(t, c.Update(ptr1, n))
+		ptr4, err := st.Put(&n4)
+		require.NoError(t, err)
+
+		c := cachefor[rune, int, int](&st, 2)
+
+		// warm up the cache
+		for _, ptrn := range []int{ptr1, ptr2, ptr3, ptr4} {
+			n, err := st.Get(ptrn)
+			require.NoError(t, err)
+			require.NoError(t, c.Update(ptrn, n))
+		}
 
 		flushErr := errors.New("Store.Update() failed")
 		st.UpdateFn = func(ptr int, n *Node[rune, int, int]) error { return flushErr }
