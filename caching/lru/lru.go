@@ -13,7 +13,7 @@ type node[K comparable, V any] struct {
 }
 
 type Cache[K comparable, V any] struct {
-	mtx sync.RWMutex
+	mtx sync.Mutex
 
 	size   int
 	target int
@@ -66,9 +66,28 @@ func (c *Cache[K, V]) flush(key K) error {
 }
 
 func (c *Cache[K, V]) Get(key K) (V, bool) {
-	c.mtx.RLock()
+	c.mtx.Lock()
 	n, ok := c.items[key]
-	c.mtx.RUnlock()
+	if ok && n != c.head {
+		// move it as the first item in the list
+		prev := n.prev
+		next := n.next
+		prev.next = next
+		if next != nil {
+			next.prev = prev
+		}
+
+		if c.tail == n {
+			c.tail = n.prev
+			c.tail.next = nil
+		}
+
+		n.next = c.head
+		c.head.prev = n
+		c.head = n
+		n.prev = nil
+	}
+	c.mtx.Unlock()
 
 	if ok {
 		c.hits.Add(1)
