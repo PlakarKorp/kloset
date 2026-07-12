@@ -149,11 +149,15 @@ func (c *Cache[K, V]) Close() error {
 	defer c.mtx.Unlock()
 
 	var err error
-	for n := c.head; n != nil; n = n.next {
-		if e := c.evictItem(n.key); e != nil {
-			err = e
+	if c.onevict != nil {
+		for key, n := range c.items {
+			if e := c.onevict(key, n.val); e != nil {
+				err = e
+			}
 		}
 	}
+	clear(c.items)
+	c.size = 0
 	c.head = nil
 	c.tail = nil
 	return err
