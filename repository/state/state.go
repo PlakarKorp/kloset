@@ -32,7 +32,7 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-const VERSION = "1.1.0"
+const VERSION = "1.2.0"
 
 func init() {
 	versioning.Register(resources.RT_STATE, versioning.FromString(VERSION))
@@ -92,9 +92,11 @@ type PackfileEntry struct {
 	Packfile  objects.MAC
 	StateID   objects.MAC
 	Timestamp time.Time
+	Size      uint64
 }
 
-const PackfileEntrySerializedSize = 32 + 32 + 8
+const PackfileEntrySerializedSizeV1 = 32 + 32 + 8
+const PackfileEntrySerializedSizeV2 = 32 + 32 + 8 + 8
 
 type ConfigurationEntry struct {
 	Key       string
@@ -257,10 +259,10 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 	// This implicitely sets the parent, see the note about refactoring, and
 	// since we Derive() to construct Delta streams this will set the correct
 	// parent. This is all way too intricated and will be fixed by a refacto.
-	if ver.Equals(versioning.FromString("1.1.0")) {
-		err = ls.deserializeFromStream(rd)
-	} else {
+	if ver.Equals(versioning.FromString("1.0.0")) {
 		err = ls.deserializeFromStreamv100(rd)
+	} else {
+		err = ls.deserializeFromStream(rd)
 	}
 	if err != nil {
 		return err
@@ -379,7 +381,7 @@ func (ls *LocalState) SerializeToStream(w io.Writer) error {
 			return fmt.Errorf("failed to write packfile entry type: %w", err)
 		}
 
-		if err := writeUint32(PackfileEntrySerializedSize); err != nil {
+		if err := writeUint32(PackfileEntrySerializedSizeV2); err != nil {
 			return fmt.Errorf("failed to write packfile entry length: %w", err)
 		}
 
@@ -563,6 +565,10 @@ func PackfileEntryFromBytes(buf []byte) (pe PackfileEntry, err error) {
 	timestamp := binary.LittleEndian.Uint64(bbuf.Next(8))
 	pe.Timestamp = time.Unix(0, int64(timestamp))
 
+	if len(buf) == PackfileEntrySerializedSizeV2 {
+		pe.Size = binary.LittleEndian.Uint64(bbuf.Next(8))
+	}
+
 	return
 }
 
@@ -571,10 +577,12 @@ func (pe *PackfileEntry) _toBytes(buf []byte) {
 	pos += copy(buf[pos:], pe.Packfile[:])
 	pos += copy(buf[pos:], pe.StateID[:])
 	binary.LittleEndian.PutUint64(buf[pos:], uint64(pe.Timestamp.UnixNano()))
+	pos += 8
+	binary.LittleEndian.PutUint64(buf[pos:], uint64(pe.Size))
 }
 
 func (pe *PackfileEntry) ToBytes() (ret []byte) {
-	ret = make([]byte, PackfileEntrySerializedSize)
+	ret = make([]byte, PackfileEntrySerializedSizeV2)
 	pe._toBytes(ret)
 	return
 }
@@ -694,7 +702,6 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 	de_buf := make([]byte, DeltaEntrySerializedSize)
 	del_buf := make([]byte, DeleteEntrySerializedSize)
 	coloured_buf := make([]byte, ColouredEntrySerializedSize)
-	pe_buf := make([]byte, PackfileEntrySerializedSize)
 	for {
 		n, err := r.Read(et_buf)
 		if err != nil || n != len(et_buf) {
@@ -775,10 +782,11 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return err
 			}
 		case ET_PACKFILE:
-			if length != PackfileEntrySerializedSize {
-				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d)", length, PackfileEntrySerializedSize)
+			if length != PackfileEntrySerializedSizeV1 && length != PackfileEntrySerializedSizeV2 {
+				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d or %d)", length, PackfileEntrySerializedSizeV1, PackfileEntrySerializedSizeV2)
 			}
 
+			pe_buf := make([]byte, length)
 			if n, err := io.ReadFull(r, pe_buf); err != nil {
 				return fmt.Errorf("failed to read packfile entry %w, read(%d)/expected(%d)", err, n, length)
 			}
@@ -788,7 +796,9 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			// We have to re-encode here to force normalize in-db to have the V2
+			// version.
+			if err := ls.cache.PutPackfile(pe.Packfile, pe.ToBytes()); err != nil {
 				return err
 			}
 
@@ -857,7 +867,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 	et_buf := make([]byte, 1)
 	de_buf := make([]byte, DeltaEntrySerializedSize)
 	coloured_buf := make([]byte, ColouredEntrySerializedSize)
-	pe_buf := make([]byte, PackfileEntrySerializedSize)
+	pe_buf := make([]byte, PackfileEntrySerializedSizeV1)
 	for {
 		n, err := r.Read(et_buf)
 		if err != nil || n != len(et_buf) {
@@ -914,8 +924,8 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return err
 			}
 		case ET_PACKFILE:
-			if length != PackfileEntrySerializedSize {
-				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d)", length, PackfileEntrySerializedSize)
+			if length != PackfileEntrySerializedSizeV1 {
+				return fmt.Errorf("failed to read packfile entry wrong length got(%d)/expected(%d)", length, PackfileEntrySerializedSizeV1)
 			}
 
 			if n, err := io.ReadFull(r, pe_buf); err != nil {
@@ -927,7 +937,9 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			// We have to re-encode here to force normalize in-db to have the V2
+			// version.
+			if err := ls.cache.PutPackfile(pe.Packfile, pe.ToBytes()); err != nil {
 				return err
 			}
 
@@ -1100,11 +1112,12 @@ func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC
 	}
 }
 
-func (ls *LocalState) PutPackfile(stateId, packfile objects.MAC) error {
+func (ls *LocalState) PutPackfile(stateId, packfile objects.MAC, size uint64) error {
 	pe := PackfileEntry{
 		StateID:   stateId,
 		Packfile:  packfile,
 		Timestamp: time.Now(),
+		Size:      size,
 	}
 
 	return ls.cache.PutPackfile(pe.Packfile, pe.ToBytes())
