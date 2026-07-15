@@ -59,7 +59,7 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 			"&_pragma=synchronous(OFF)" +
 			"&_pragma=temp_store(MEMORY)" +
 			"&_pragma=mmap_size(0)" +
-			"&_pragma=cache_size(-20000)" +
+			"&_pragma=cache_size(-2000)" +
 			"&_pragma=busy_timeout(5000)"
 
 		// If ro and the file does not exist, we need to open the db rw close it
