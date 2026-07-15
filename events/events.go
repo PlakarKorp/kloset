@@ -46,6 +46,29 @@ func (eb *EventsBUS) Listen() <-chan *Event {
 	return eb.c
 }
 
+// Publish injects an event onto the bus (no-op if nobody is listening). It lets
+// one bus forward events onto another; see Forward.
+func (eb *EventsBUS) Publish(e *Event) {
+	if eb == nil || eb.c == nil {
+		return
+	}
+	eb.c <- e
+}
+
+// Forward pumps every event this bus emits onto dst until this bus is closed.
+// It lets a derived context (e.g. a sync peer, which owns a separate bus so its
+// lifecycle stays isolated) surface its progress on the primary bus that the UI
+// listens on. Run it in its own goroutine before work begins; it returns when
+// this bus's channel is closed.
+func (eb *EventsBUS) Forward(dst *EventsBUS) {
+	if eb == nil || dst == nil {
+		return
+	}
+	for e := range eb.Listen() {
+		dst.Publish(e)
+	}
+}
+
 const (
 	Info  = "info"
 	Warn  = "warn"

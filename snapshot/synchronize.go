@@ -139,6 +139,10 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		src:    src,
 	}
 
+	// Capture the source totals before the header is aliased onto dst below
+	// (dst.Header is a pointer to the same Header, and Sources gets nil'd).
+	srcSummary := src.Header.GetSource(0).Summary
+
 	dst.Header = src.Header
 	dst.Header.Sources = nil
 
@@ -159,11 +163,32 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
+	// Import runs the backup code path and emits its events (file/chunk/…)
+	// through dst.emitter, which is labelled "backup" by default. Relabel it
+	// "synchronize" so consumers see the operation for what it is; the source
+	// sampler below shares the same emitter so all sync events line up.
+	syncEmitter := dst.Emitter("synchronize")
+	dst.emitter = syncEmitter
+	defer syncEmitter.Close()
+
+	// The total is known up front from the source snapshot's header (captured
+	// above), so emit a filesystem summary (as backup/export do) to drive the
+	// progress bar and the tree/items counts.
+	dst.emitter.FilesystemSummary(
+		srcSummary.Directory.Files+srcSummary.Below.Files,
+		srcSummary.Directory.Directories+srcSummary.Below.Directories,
+		srcSummary.Directory.Symlinks+srcSummary.Below.Symlinks,
+		0,
+		srcSummary.Directory.Size+srcSummary.Below.Size,
+	)
+
 	// dst.Import samples the destination side; the source repository's reads
 	// live on a separate tracker, so sample those here to cover both stores.
-	syncEmitter := dst.Emitter("synchronize")
-	defer syncEmitter.Close()
+	// Reset both per snapshot so the two sides stay in step — each snapshot is
+	// its own workflow (and its own progress view) — otherwise the source read
+	// restarts from zero while the destination write keeps accumulating.
 	src.repository.IOStats().Reset()
+	dst.repository.IOStats().Reset()
 	srcSampler := iostat.NewSampler(syncEmitter, dst.AppContext().IOStatsInterval,
 		iostat.ScopedTracker{Name: "source-storage", T: src.repository.IOStats()},
 	)
