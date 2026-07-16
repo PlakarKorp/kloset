@@ -22,22 +22,16 @@ import (
 	"time"
 )
 
-// a token bucket implementation in bytes:
-// tokens is time-driven spendable credit: refills at rate, drops as we spend,
-// and gates wether a spend needs to wait for a refill.
-// consumed is byte-driven and monotonic: counts what was actually spent and
-// so we can control a centralized throttler from multiple buckets.
-
 type bucket struct {
 	mu       sync.Mutex
-	rate     float64 // bytes per second, 0 == unlimited
-	burst    float64 // maximum accumulated bytes
-	tokens   float64
-	consumed int64
+	rate     int64 // bytes per second, 0 == unlimited
+	burst    int64 // maximum accumulated bytes
+	tokens   int64 // available credit in bytes, can be negative if we overspent and need to wait for refill
+	consumed int64 // total bytes spent, monotonic, can be drained to control a centralized throttler
 	last     time.Time
 }
 
-func newBucket(rate, burst float64) *bucket {
+func newBucket(rate, burst int64) *bucket {
 	return &bucket{
 		rate:   rate,
 		burst:  burst,
@@ -55,7 +49,7 @@ func (b *bucket) drain() int64 {
 }
 
 // SetRate updates the bucket rate live.
-func (b *bucket) SetRate(rate float64) {
+func (b *bucket) SetRate(rate int64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
@@ -86,13 +80,13 @@ func (b *bucket) wait(ctx context.Context, n int) error {
 	}
 
 	now := time.Now()
-	b.tokens += b.rate * now.Sub(b.last).Seconds()
+	b.tokens += b.rate * now.Sub(b.last).Nanoseconds() / int64(time.Second)
 	if b.tokens > b.burst {
 		b.tokens = b.burst
 	}
 	b.last = now
 
-	b.tokens -= float64(n)
+	b.tokens -= int64(n)
 
 	// Nothing owed: enough credit was banked to cover this spend.
 	if b.tokens >= 0 {
@@ -101,7 +95,7 @@ func (b *bucket) wait(ctx context.Context, n int) error {
 	}
 
 	// Sleep long enough for the deficit to be repaid at rate.
-	delay := time.Duration(-b.tokens / b.rate * float64(time.Second))
+	delay := time.Duration(-b.tokens * int64(time.Second) / b.rate)
 	b.mu.Unlock()
 
 	if delay <= 0 {

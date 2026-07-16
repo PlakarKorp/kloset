@@ -77,130 +77,89 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 }
 
 // ----------------------------------------------------------------------------
-// Limiter / New
+// NewThrottledReader / NewThrottledReadCloser (constructors)
 // ----------------------------------------------------------------------------
 
-func TestNewReturnsNilForNonPositiveRates(t *testing.T) {
-	cases := []struct {
-		name        string
-		read, write int64
-	}{
-		{"both zero", 0, 0},
-		{"read zero", 0, 100},
-		{"write zero", 100, 0},
-		{"read negative", -1, 100},
-		{"write negative", 100, -1},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if l := New(tc.read, tc.write); l != nil {
-				t.Fatalf("New(%d, %d) = %v, want nil", tc.read, tc.write, l)
-			}
-		})
+func TestNewThrottledReaderNil(t *testing.T) {
+	if got := NewThrottledReader(context.Background(), nil, 1000); got != nil {
+		t.Errorf("NewThrottledReader(nil) = %v, want nil", got)
 	}
 }
 
-func TestNewValid(t *testing.T) {
-	l := New(1024, 2048)
-	if l == nil {
-		t.Fatal("New returned nil for valid rates")
-	}
-	if l.read == nil || l.write == nil {
-		t.Fatal("New left read/write bucket nil")
-	}
-	if l.read.rate != 1024 || l.read.burst != 1024 {
-		t.Errorf("read bucket rate/burst = %v/%v, want 1024/1024", l.read.rate, l.read.burst)
-	}
-	if l.write.rate != 2048 || l.write.burst != 2048 {
-		t.Errorf("write bucket rate/burst = %v/%v, want 2048/2048", l.write.rate, l.write.burst)
-	}
-	// Fresh buckets start with a full burst of tokens.
-	if l.read.tokens != 1024 || l.write.tokens != 2048 {
-		t.Errorf("tokens = %v/%v, want 1024/2048", l.read.tokens, l.write.tokens)
-	}
-}
-
-func TestNoLimitConstant(t *testing.T) {
-	if NOLIMIT != 0 {
-		t.Errorf("NOLIMIT = %d, want 0", NOLIMIT)
-	}
-}
-
-func TestLimiterSetRate(t *testing.T) {
-	l := New(1000, 1000)
-	l.SetRate(500, 2000)
-	if l.read.rate != 500 {
-		t.Errorf("read rate = %v, want 500", l.read.rate)
-	}
-	if l.write.rate != 2000 {
-		t.Errorf("write rate = %v, want 2000", l.write.rate)
-	}
-}
-
-// ----------------------------------------------------------------------------
-// Limiter wrappers (nil passthrough + wrapping)
-// ----------------------------------------------------------------------------
-
-func TestLimiterReaderNil(t *testing.T) {
-	l := New(100, 100)
-	if got := l.Reader(context.Background(), nil); got != nil {
-		t.Errorf("Reader(nil) = %v, want nil", got)
-	}
-}
-
-func TestLimiterReadCloserNil(t *testing.T) {
-	l := New(100, 100)
-	if got := l.ReadCloser(context.Background(), nil); got != nil {
-		t.Errorf("ReadCloser(nil) = %v, want nil", got)
-	}
-}
-
-func TestLimiterWriterNil(t *testing.T) {
-	l := New(100, 100)
-	if got := l.Writer(context.Background(), nil); got != nil {
-		t.Errorf("Writer(nil) = %v, want nil", got)
-	}
-}
-
-func TestLimiterReaderWraps(t *testing.T) {
-	l := New(1<<20, 1<<20) // 1 MiB/s, effectively no delay for a tiny payload
+func TestNewThrottledReaderConstructs(t *testing.T) {
 	src := strings.NewReader("hello world")
-	r := l.Reader(context.Background(), src)
-	tr, ok := r.(*throttledReader)
-	if !ok {
-		t.Fatalf("Reader returned %T, want *throttledReader", r)
+	tr := NewThrottledReader(context.Background(), src, 1<<20) // 1 MiB/s, no delay for a tiny payload
+	if tr == nil {
+		t.Fatal("NewThrottledReader returned nil for a valid reader")
 	}
-	if tr.b != l.read {
-		t.Error("throttledReader not bound to the read bucket")
+	if tr.rd != src {
+		t.Error("reader not bound to the supplied source")
 	}
-	got, err := io.ReadAll(r)
+	if tr.b == nil {
+		t.Fatal("reader left with a nil bucket")
+	}
+	if tr.b.rate != 1<<20 || tr.b.burst != 1<<20 {
+		t.Errorf("bucket rate/burst = %v/%v, want %v/%v", tr.b.rate, tr.b.burst, 1<<20, 1<<20)
+	}
+	got, err := io.ReadAll(tr)
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
 	}
 	if string(got) != "hello world" {
 		t.Errorf("read %q, want %q", got, "hello world")
 	}
+	if tr.b.consumed != int64(len("hello world")) {
+		t.Errorf("consumed = %d, want %d", tr.b.consumed, len("hello world"))
+	}
 }
 
-func TestLimiterReadCloserWrapsAndCloses(t *testing.T) {
-	l := New(1<<20, 1<<20)
-	rc := &recordingCloser{Reader: strings.NewReader("payload")}
-	wrapped := l.ReadCloser(context.Background(), rc)
-	trc, ok := wrapped.(*throttledReadCloser)
-	if !ok {
-		t.Fatalf("ReadCloser returned %T, want *throttledReadCloser", wrapped)
+func TestNewThrottledReaderUnlimited(t *testing.T) {
+	// A zero rate constructs an unlimited bucket: no blocking regardless of spend.
+	tr := NewThrottledReader(context.Background(), strings.NewReader("payload"), 0)
+	if tr == nil {
+		t.Fatal("NewThrottledReader returned nil for a valid reader")
 	}
-	if trc.b != l.read {
-		t.Error("throttledReadCloser not bound to the read bucket")
+	if tr.b.rate != 0 {
+		t.Errorf("rate = %v, want 0 (unlimited)", tr.b.rate)
 	}
-	got, err := io.ReadAll(wrapped)
+	got, err := io.ReadAll(tr)
 	if err != nil {
 		t.Fatalf("ReadAll: %v", err)
 	}
 	if string(got) != "payload" {
 		t.Errorf("read %q, want %q", got, "payload")
 	}
-	if err := wrapped.Close(); err != nil {
+}
+
+func TestNewThrottledReadCloserNil(t *testing.T) {
+	if got := NewThrottledReadCloser(context.Background(), nil, 1000); got != nil {
+		t.Errorf("NewThrottledReadCloser(nil) = %v, want nil", got)
+	}
+}
+
+func TestNewThrottledReadCloserConstructsAndCloses(t *testing.T) {
+	rc := &recordingCloser{Reader: strings.NewReader("payload")}
+	trc := NewThrottledReadCloser(context.Background(), rc, 1<<20)
+	if trc == nil {
+		t.Fatal("NewThrottledReadCloser returned nil for a valid reader")
+	}
+	if trc.rd != rc {
+		t.Error("read closer not bound to the supplied source")
+	}
+	if trc.closer != rc {
+		t.Error("closer not bound to the supplied source")
+	}
+	if trc.b == nil || trc.b.rate != 1<<20 {
+		t.Fatalf("bucket rate = %v, want %v", trc.b.rate, 1<<20)
+	}
+	got, err := io.ReadAll(trc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != "payload" {
+		t.Errorf("read %q, want %q", got, "payload")
+	}
+	if err := trc.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 	if !rc.closed {
@@ -208,18 +167,29 @@ func TestLimiterReadCloserWrapsAndCloses(t *testing.T) {
 	}
 }
 
-func TestLimiterWriterWraps(t *testing.T) {
-	l := New(1<<20, 1<<20)
+// ----------------------------------------------------------------------------
+// NewThrottledWriter (constructor)
+// ----------------------------------------------------------------------------
+
+func TestNewThrottledWriterNil(t *testing.T) {
+	if got := NewThrottledWriter(context.Background(), nil, 1000); got != nil {
+		t.Errorf("NewThrottledWriter(nil) = %v, want nil", got)
+	}
+}
+
+func TestNewThrottledWriterConstructs(t *testing.T) {
 	var sink countingWriter
-	w := l.Writer(context.Background(), &sink)
-	tw, ok := w.(*throttledWriter)
-	if !ok {
-		t.Fatalf("Writer returned %T, want *throttledWriter", w)
+	tw := NewThrottledWriter(context.Background(), &sink, 1<<20)
+	if tw == nil {
+		t.Fatal("NewThrottledWriter returned nil for a valid writer")
 	}
-	if tw.b != l.write {
-		t.Error("throttledWriter not bound to the write bucket")
+	if tw.wr != &sink {
+		t.Error("writer not bound to the supplied sink")
 	}
-	n, err := w.Write([]byte("data"))
+	if tw.b == nil || tw.b.rate != 1<<20 || tw.b.burst != 1<<20 {
+		t.Fatalf("bucket rate/burst = %v/%v, want %v/%v", tw.b.rate, tw.b.burst, 1<<20, 1<<20)
+	}
+	n, err := tw.Write([]byte("data"))
 	if err != nil {
 		t.Fatalf("Write: %v", err)
 	}
@@ -228,6 +198,9 @@ func TestLimiterWriterWraps(t *testing.T) {
 	}
 	if sink.buf.String() != "data" {
 		t.Errorf("sink got %q, want %q", sink.buf.String(), "data")
+	}
+	if tw.b.consumed != 4 {
+		t.Errorf("consumed = %d, want 4", tw.b.consumed)
 	}
 }
 
@@ -455,7 +428,7 @@ func TestSetRateToUnlimited(t *testing.T) {
 
 func TestThrottledReaderChargesBytesRead(t *testing.T) {
 	b := newBucket(0, 0) // unlimited: focus on accounting, not timing
-	tr := &throttledReader{ctx: context.Background(), rd: strings.NewReader("abcdef"), b: b}
+	tr := &ThrottledReader{ctx: context.Background(), rd: strings.NewReader("abcdef"), b: b}
 	buf := make([]byte, 4)
 	n, err := tr.Read(buf)
 	if err != nil {
@@ -475,7 +448,7 @@ func TestThrottledReaderChargesBytesRead(t *testing.T) {
 func TestThrottledReaderZeroBytesNotCharged(t *testing.T) {
 	b := newBucket(0, 0)
 	// Reader that immediately hits EOF with 0 bytes.
-	tr := &throttledReader{ctx: context.Background(), rd: strings.NewReader(""), b: b}
+	tr := &ThrottledReader{ctx: context.Background(), rd: strings.NewReader(""), b: b}
 	n, err := tr.Read(make([]byte, 4))
 	if n != 0 {
 		t.Errorf("n = %d, want 0", n)
@@ -491,7 +464,7 @@ func TestThrottledReaderZeroBytesNotCharged(t *testing.T) {
 func TestThrottledReaderPropagatesUnderlyingError(t *testing.T) {
 	b := newBucket(0, 0)
 	sentinel := errors.New("boom")
-	tr := &throttledReader{
+	tr := &ThrottledReader{
 		ctx: context.Background(),
 		rd:  &errReader{data: []byte("xy"), err: sentinel},
 		b:   b,
@@ -514,7 +487,7 @@ func TestThrottledReaderWaitErrorTakesPrecedence(t *testing.T) {
 	b := newBucket(1, 1)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	tr := &throttledReader{ctx: ctx, rd: strings.NewReader("hello"), b: b}
+	tr := &ThrottledReader{ctx: ctx, rd: strings.NewReader("hello"), b: b}
 	n, err := tr.Read(make([]byte, 5))
 	if n != 5 {
 		t.Errorf("n = %d, want 5 (bytes were read)", n)
@@ -528,8 +501,8 @@ func TestThrottledReadCloserClosePropagatesError(t *testing.T) {
 	b := newBucket(0, 0)
 	sentinel := errors.New("close failed")
 	rc := &recordingCloser{Reader: strings.NewReader(""), closeErr: sentinel}
-	trc := &throttledReadCloser{
-		throttledReader: throttledReader{ctx: context.Background(), rd: rc, b: b},
+	trc := &ThrottledReadCloser{
+		ThrottledReader: ThrottledReader{ctx: context.Background(), rd: rc, b: b},
 		closer:          rc,
 	}
 	if err := trc.Close(); !errors.Is(err, sentinel) {
@@ -547,7 +520,7 @@ func TestThrottledReadCloserClosePropagatesError(t *testing.T) {
 func TestThrottledWriterWritesThrough(t *testing.T) {
 	b := newBucket(0, 0)
 	var sink countingWriter
-	tw := &throttledWriter{ctx: context.Background(), wr: &sink, b: b}
+	tw := &ThrottledWriter{ctx: context.Background(), wr: &sink, b: b}
 	n, err := tw.Write([]byte("hello"))
 	if err != nil {
 		t.Fatalf("Write: %v", err)
@@ -568,7 +541,7 @@ func TestThrottledWriterWaitErrorSkipsUnderlyingWrite(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var sink countingWriter
-	tw := &throttledWriter{ctx: ctx, wr: &sink, b: b}
+	tw := &ThrottledWriter{ctx: ctx, wr: &sink, b: b}
 	n, err := tw.Write([]byte("hello"))
 	if n != 0 {
 		t.Errorf("n = %d, want 0 on wait error", n)
@@ -585,7 +558,7 @@ func TestThrottledWriterPropagatesUnderlyingError(t *testing.T) {
 	b := newBucket(0, 0)
 	sentinel := errors.New("disk full")
 	sink := &countingWriter{writeErr: sentinel}
-	tw := &throttledWriter{ctx: context.Background(), wr: sink, b: b}
+	tw := &ThrottledWriter{ctx: context.Background(), wr: sink, b: b}
 	n, err := tw.Write([]byte("data"))
 	if !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want sentinel", err)

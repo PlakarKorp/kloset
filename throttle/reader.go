@@ -21,13 +21,21 @@ import (
 	"io"
 )
 
-type throttledReader struct {
+type ThrottledReader struct {
 	ctx context.Context
 	rd  io.Reader
 	b   *bucket
 }
 
-func (t *throttledReader) Read(p []byte) (int, error) {
+func NewThrottledReader(ctx context.Context, rd io.Reader, readBytesPerSec int64) *ThrottledReader {
+	if rd == nil {
+		return nil
+	}
+	b := newBucket(readBytesPerSec, readBytesPerSec)
+	return &ThrottledReader{ctx: ctx, rd: rd, b: b}
+}
+
+func (t *ThrottledReader) Read(p []byte) (int, error) {
 	n, err := t.rd.Read(p)
 	if n > 0 {
 		// charge for the bytes actually read, not the buffer size
@@ -38,11 +46,22 @@ func (t *throttledReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-type throttledReadCloser struct {
-	throttledReader
+type ThrottledReadCloser struct {
+	ThrottledReader
 	closer io.Closer
 }
 
-func (t *throttledReadCloser) Close() error {
+func NewThrottledReadCloser(ctx context.Context, rd io.Reader, readBytesPerSec int64) *ThrottledReadCloser {
+	if rd == nil {
+		return nil
+	}
+	b := newBucket(readBytesPerSec, readBytesPerSec)
+	return &ThrottledReadCloser{
+		ThrottledReader: ThrottledReader{ctx: ctx, rd: rd, b: b},
+		closer:          rd.(io.Closer),
+	}
+}
+
+func (t *ThrottledReadCloser) Close() error {
 	return t.closer.Close()
 }

@@ -21,13 +21,21 @@ import (
 	"io"
 )
 
-type throttledWriter struct {
+type ThrottledWriter struct {
 	ctx context.Context
 	wr  io.Writer
 	b   *bucket
 }
 
-func (t *throttledWriter) Write(p []byte) (int, error) {
+func NewThrottledWriter(ctx context.Context, wr io.Writer, writeBytesPerSec int64) *ThrottledWriter {
+	if wr == nil {
+		return nil
+	}
+	b := newBucket(writeBytesPerSec, writeBytesPerSec)
+	return &ThrottledWriter{ctx: ctx, wr: wr, b: b}
+}
+
+func (t *ThrottledWriter) Write(p []byte) (int, error) {
 	if err := t.b.wait(t.ctx, len(p)); err != nil {
 		return 0, err
 	}
