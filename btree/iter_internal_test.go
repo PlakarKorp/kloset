@@ -504,6 +504,9 @@ func TestBackwardIter(t *testing.T) {
 			return &st.store[ptr], nil
 		}
 
+		// flush the cache
+		it.b.cache.lru.Close()
+
 		require.False(t, it.Next())
 		require.ErrorIs(t, it.Err(), getErr)
 	})
