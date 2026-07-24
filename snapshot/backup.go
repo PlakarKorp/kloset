@@ -212,8 +212,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		// Memory wise the cache has a small footprint so we can safely go a bit
 		// big here. The 64 figure was chosen empirically after various tests.
 		window := snap.AppContext().MaxConcurrency * 64
-		sourceCtx.vfsCache.StartDirpackPrefetch(window, 64)
-		defer sourceCtx.vfsCache.StopDirpackPrefetch()
+		_ = window
 	}
 
 	var ckers []*chunkers.Chunker
