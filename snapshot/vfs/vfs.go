@@ -55,10 +55,6 @@ type Filesystem struct {
 	repo         *repository.Repository
 	dirpackCache *lru.Cache[string, map[string]*Entry]
 	dirpackSF    singleflight.Group
-
-	dirpackCacheSize int
-
-	prefetcher *dirpackPrefetcher
 }
 
 func PathCmp(a, b string) int {
@@ -141,8 +137,7 @@ func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors ob
 	if err != nil {
 		return nil, err
 	}
-	fs.dirpackCacheSize = 256
-	fs.dirpackCache = lru.New[string, map[string]*Entry](fs.dirpackCacheSize, nil)
+	fs.dirpackCache = lru.New[string, map[string]*Entry](256, nil)
 
 	return fs, nil
 }
@@ -389,10 +384,6 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
-
-	if prefetcher := fsc.prefetcher; prefetcher != nil {
-		prefetcher.onConsume(parentPath)
-	}
 
 	// Fast path: if the prefetcher (or an earlier lookup) already warmed this
 	// directory, serve from cache without entering the singleflight group.
