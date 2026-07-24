@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -207,15 +208,67 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 	return nil
 }
 
-func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
-	if sourceCtx.vfsCache != nil {
-		// Memory wise the cache has a small footprint so we can safely go a bit
-		// big here. The 64 figure was chosen empirically after various tests.
-		window := snap.AppContext().MaxConcurrency * 64
-		sourceCtx.vfsCache.StartDirpackPrefetch(window, 64)
-		defer sourceCtx.vfsCache.StopDirpackPrefetch()
-	}
+func (snap *Builder) warmVFSStage(ctx context.Context, pvfs *vfs.Filesystem, in <-chan *connectors.Record, out chan<- *connectors.Record, window int) {
+	defer close(out)
+	ready := make(chan []*connectors.Record, 1)
 
+	go func() {
+		defer close(ready)
+
+		warm := func(batch []*connectors.Record) bool {
+			dirs := make([]string, 0, len(batch))
+			seen := make(map[string]struct{}, len(batch))
+			for _, r := range batch {
+				if r.Err != nil {
+					continue
+				}
+				parent := path.Dir(r.Pathname)
+				if _, ok := seen[parent]; !ok {
+					seen[parent] = struct{}{}
+					dirs = append(dirs, parent)
+				}
+			}
+
+			pvfs.PrefetchDirs(ctx, dirs)
+
+			select {
+			case ready <- batch:
+				return true
+			case <-ctx.Done():
+				return false
+			}
+		}
+
+		batch := make([]*connectors.Record, 0, window)
+		for rec := range in {
+			batch = append(batch, rec)
+			if len(batch) == window {
+				if !warm(batch) {
+					return
+				}
+
+				batch = make([]*connectors.Record, 0, window)
+			}
+		}
+
+		// flush last batch
+		if len(batch) > 0 {
+			warm(batch)
+		}
+	}()
+
+	for batch := range ready {
+		for _, r := range batch {
+			select {
+			case out <- r:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -238,6 +291,12 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 	var results chan *connectors.Result
 	if (imp.Flags() & location.FLAG_NEEDACK) != 0 {
 		results = make(chan *connectors.Result, size)
+	}
+
+	scanned := records
+	if sourceCtx.vfsCache != nil {
+		scanned = make(chan *connectors.Record, size)
+		go snap.warmVFSStage(ctx, sourceCtx.vfsCache, scanned, records, 8192)
 	}
 
 	for i, cker := range ckers {
@@ -299,7 +358,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		}
 	}()
 
-	importerErr := imp.Import(ctx, records, results)
+	importerErr := imp.Import(ctx, scanned, results)
 	if results != nil {
 		for range results {
 			// drain the results channel so that we unblock the

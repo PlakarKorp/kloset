@@ -55,10 +55,6 @@ type Filesystem struct {
 	repo         *repository.Repository
 	dirpackCache *lru.Cache[string, map[string]*Entry]
 	dirpackSF    singleflight.Group
-
-	dirpackCacheSize int
-
-	prefetcher *dirpackPrefetcher
 }
 
 func PathCmp(a, b string) int {
@@ -141,8 +137,7 @@ func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors ob
 	if err != nil {
 		return nil, err
 	}
-	fs.dirpackCacheSize = 256
-	fs.dirpackCache = lru.New[string, map[string]*Entry](fs.dirpackCacheSize, nil)
+	fs.dirpackCache = lru.New[string, map[string]*Entry](4096*2, nil)
 
 	return fs, nil
 }
@@ -390,10 +385,6 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
 
-	if prefetcher := fsc.prefetcher; prefetcher != nil {
-		prefetcher.onConsume(parentPath)
-	}
-
 	// Fast path: if the prefetcher (or an earlier lookup) already warmed this
 	// directory, serve from cache without entering the singleflight group.
 	if m, exists := fsc.dirpackCache.Get(parentPath); exists {
@@ -538,6 +529,17 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 	//rd := NewObjectReader(fsc.repo, obj, size, -1)
 	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
 
+	m, err := fsc.decodeDirpackMap(rd)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = fsc.dirpackCache.Put(parentPath, m)
+
+	return m, nil
+}
+
+func (fsc *Filesystem) decodeDirpackMap(rd io.Reader) (map[string]*Entry, error) {
 	cache := make(map[string]*Entry)
 	for {
 		_, siz, err := readDirPackHdr(rd)
@@ -581,8 +583,6 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 
 		cache[entry.Name()] = &entry
 	}
-
-	_ = fsc.dirpackCache.Put(parentPath, cache)
 
 	return cache, nil
 }

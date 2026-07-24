@@ -1,169 +1,164 @@
 package vfs
 
 import (
+	"bytes"
+	"context"
+	"maps"
+	"slices"
 	"sync"
+	"time"
 
-	"github.com/PlakarKorp/kloset/caching/lru"
-	"github.com/PlakarKorp/kloset/iterator"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/resources"
 )
 
-// dirpackPrefetcher warms fsc.dirpackCache ahead of the backup walk.
-// The feeder keeps at most `window` directories in flight: it primes the
-// window, then advances the cursor by one each time the walk reports a fresh
-// directory consumed (via onConsume). Loads route through the same
-// dirpackSF singleflight group the walk uses, so a prefetch and an on-demand
-// load of the same directory never both hit the backend.
-type dirpackPrefetcher struct {
-	fsc     *Filesystem
-	window  int
-	workers int
-
-	jobs     chan prefetchJob
-	consumed chan struct{}
-	quit     chan struct{}
-
-	feederWg sync.WaitGroup
-	workerWg sync.WaitGroup
-
-	// seen dedups consume signals to one per directory. It is bounded (FIFO):
-	// it only needs to remember directories that may still have in-flight walk
-	// records, and the importer emits each directory contiguously and never
-	// revisits, so the in-flight span is ~walk concurrency. Sizing it to the
-	// look-ahead window leaves a large margin while keeping memory flat on huge
-	// sources (hundreds of millions of directories). A rare premature eviction
-	// only costs one duplicate consume signal (one extra dir prefetched).
-	seenMu sync.Mutex
-	seen   *lru.Cache[string, struct{}]
-}
-
-type prefetchJob struct {
-	path string
-	mac  objects.MAC
-}
-
-// window is the maximum number of directories kept in flight
-func (fsc *Filesystem) StartDirpackPrefetch(window, workers int) {
-	if fsc.dirpack == nil || fsc.dirpackCache == nil || fsc.prefetcher != nil {
-		return
+func (fsc *Filesystem) PrefetchDirs(ctx context.Context, dirs []string) error {
+	if fsc.dirpack == nil || fsc.dirpackCache == nil {
+		return nil
 	}
 
-	cursor, err := fsc.dirpack.ScanFrom("/")
-	if err != nil {
-		// Not a fatal error, we just run without prefetching!
-		return
-	}
+	t0 := time.Now()
+	warmed := 0
+	var findsDuration time.Duration
+	defer func() {
+		fsc.repo.Logger().Trace("vfs", "PrefetchDirs(%d dirs): %d warmed: finds %s, total %s",
+			len(dirs), warmed, findsDuration, time.Since(t0))
+	}()
 
-	fsc.prefetcher = &dirpackPrefetcher{
-		fsc:      fsc,
-		window:   window,
-		workers:  workers,
-		jobs:     make(chan prefetchJob, workers),
-		consumed: make(chan struct{}, window),
-		quit:     make(chan struct{}),
-		seen:     lru.New[string, struct{}](window, nil),
-	}
-
-	// The dirpack cache is plain FIFO: a prefetched-but-not-yet-consumed
-	// entry must not be evicted before the walk reaches it, so the cache
-	// must hold at least window+workers entries. The cache is empty at this
-	// point (the walk has not started), so resizing it here is safe.
-	if need := 2 * (window + workers); need > fsc.dirpackCacheSize {
-		fsc.dirpackCacheSize = need
-		fsc.dirpackCache = lru.New[string, map[string]*Entry](need, nil)
-	}
-
-	fsc.prefetcher.workerWg.Add(workers)
-	for range workers {
-		go fsc.prefetcher.worker()
-	}
-
-	fsc.prefetcher.feederWg.Add(1)
-	go fsc.prefetcher.feed(cursor)
-}
-
-func (fsc *Filesystem) StopDirpackPrefetch() {
-	if fsc.prefetcher == nil {
-		return
-	}
-
-	close(fsc.prefetcher.quit)
-	fsc.prefetcher.feederWg.Wait()
-	close(fsc.prefetcher.jobs)
-	fsc.prefetcher.workerWg.Wait()
-
-	fsc.prefetcher = nil
-}
-
-func (p *dirpackPrefetcher) feed(cursor iterator.Iterator[string, objects.MAC]) {
-	defer p.feederWg.Done()
-
-	// enqueue advances the cursor by one directory and dispatches it to a
-	// worker. Returns false when the cursor is exhausted/errored or we are
-	// shutting down.
-	enqueue := func() bool {
-		if !cursor.Next() {
-			return false
+	// Phase 1 dirs -> object MAC, parallelized
+	cached := 0
+	reqs := map[string]repository.BlobReq{}
+	reqsMtx := sync.Mutex{}
+	toFind := make([]string, 0, len(dirs))
+	for _, dir := range dirs {
+		if _, ok := fsc.dirpackCache.Get(dir); ok {
+			cached++
+			continue
 		}
-		dir, mac := cursor.Current()
-		select {
-		case p.jobs <- prefetchJob{path: dir, mac: mac}:
-			return true
-		case <-p.quit:
-			return false
-		}
+		toFind = append(toFind, dir)
 	}
 
-	exhausted := false
-	// Fill the cache first.
-	for range p.window {
-		if !enqueue() {
-			exhausted = true
-			break
-		}
-	}
+	/*
+		var eg errgroup.Group
+		eg.SetLimit(16)
 
-	// Now as consummer advance the cursor replenish the cache (since it's the
-	// fifo older one gets eviced).
-	// Note even when exhausted we keep looping to drain the channel.
-	for {
-		select {
-		case <-p.quit:
-			return
-		case <-p.consumed:
-			if !exhausted && !enqueue() {
-				exhausted = true
+
+		for _, dir := range dirs {
+			if _, ok := fsc.dirpackCache.Get(dir); ok {
+				cached++
+				continue
 			}
-		}
-	}
-}
 
-func (p *dirpackPrefetcher) worker() {
-	defer p.workerWg.Done()
-	for job := range p.jobs {
-		_, _, _ = p.fsc.dirpackSF.Do(job.path, func() (any, error) {
-			if m, exists := p.fsc.dirpackCache.Get(job.path); exists {
-				return m, nil
+			eg.Go(func() error {
+				mac, found, err := fsc.dirpack.Find(dir)
+				if err != nil || !found {
+					return nil
+				}
+
+				reqsMtx.Lock()
+				reqs[dir] = repository.BlobReq{
+					Type: resources.RT_OBJECT,
+					MAC:  mac,
+				}
+				reqsMtx.Unlock()
+
+				return nil
+			})
+		}
+
+		eg.Wait()
+	*/
+
+	const shards = 32
+	var wg sync.WaitGroup
+	per := (len(toFind) + shards - 1) / shards
+	for start := 0; start < len(toFind); start += per {
+		chunk := toFind[start:min(start+per, len(toFind))]
+		wg.Go(func() {
+			for _, dir := range chunk {
+				mac, found, err := fsc.dirpack.Find(dir)
+				if err != nil || !found {
+					continue
+				}
+				reqsMtx.Lock()
+				reqs[dir] = repository.BlobReq{Type: resources.RT_OBJECT, MAC: mac}
+				reqsMtx.Unlock()
 			}
-			return p.fsc.loadDirpackMapByMAC(job.path, job.mac)
 		})
 	}
-}
+	wg.Wait()
 
-// onConsume reports that the walk has reached directory dir. The first report
-// for a directory advances the prefetch window by one; subsequent reports for
-// the same directory are ignored.
-func (p *dirpackPrefetcher) onConsume(dir string) {
-	p.seenMu.Lock()
-	if _, ok := p.seen.Get(dir); ok {
-		p.seenMu.Unlock()
-		return
-	}
-	_ = p.seen.Put(dir, struct{}{})
-	p.seenMu.Unlock()
+	findsDuration = time.Since(t0)
+	warmed = cached // already-warm dirs count as warmed for the trace
 
-	select {
-	case p.consumed <- struct{}{}:
-	case <-p.quit:
+	if len(reqs) == 0 {
+		return nil
 	}
+
+	// Phase 2 batch resolve RT_OBJECT->dirpack
+	objs := map[objects.MAC]*objects.Object{}
+	chunksReq := []repository.BlobReq{}
+	for b, err := range fsc.repo.GetBlobs(ctx, slices.Collect(maps.Values(reqs)), &repository.GetBlobsOpts{Concurrency: 32}) {
+		if err != nil {
+			// Soft error
+			continue
+		}
+
+		if obj, err := objects.NewObjectFromBytes(b.Data); err == nil {
+			objs[b.MAC] = obj
+
+			for _, c := range obj.Chunks {
+				chunksReq = append(chunksReq, repository.BlobReq{
+					Type: resources.RT_CHUNK,
+					MAC:  c.ContentMAC,
+				})
+			}
+		}
+	}
+
+	// Phase 3 batch resolve the Content of dirpacks
+	chunks := map[objects.MAC][]byte{}
+	for b, err := range fsc.repo.GetBlobs(ctx, chunksReq, &repository.GetBlobsOpts{Concurrency: 32}) {
+		if err != nil {
+			// Soft error
+			continue
+		}
+
+		chunks[b.MAC] = b.Data
+	}
+
+	// Phase 4 assemble everything, we have to go through reqs to tie everything
+	// together because GetBlobs only return mac->[]byte and we are lacking the
+	// original string.
+Outer:
+	for path, req := range reqs {
+		if obj, ok := objs[req.MAC]; ok {
+			dirpackData := []byte{}
+
+			for _, c := range obj.Chunks {
+				if cData, ok := chunks[c.ContentMAC]; ok {
+					dirpackData = append(dirpackData, cData...)
+				} else {
+					continue Outer
+				}
+			}
+
+			if _, err, _ := fsc.dirpackSF.Do(path, func() (any, error) {
+				if m, ok := fsc.dirpackCache.Get(path); ok {
+					return m, nil
+				}
+				m, err := fsc.decodeDirpackMap(bytes.NewReader(dirpackData))
+				if err == nil {
+					fsc.dirpackCache.Put(path, m)
+				}
+
+				return m, err
+			}); err == nil {
+				warmed++
+			}
+		}
+	}
+
+	return nil
 }

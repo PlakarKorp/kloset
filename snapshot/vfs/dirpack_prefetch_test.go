@@ -1,6 +1,7 @@
 package vfs_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -32,39 +33,47 @@ func fileRec(p, content string) *connectors.Record {
 	})
 }
 
-// prefetchTree emits a multi-directory tree (10 dirs of 3 files each) so the
-// dirpack spans more directories than a small prefetch window, exercising the
-// feeder's consume-driven advance rather than just the initial priming.
+// warmTree emits a multi-directory tree (10 dirs of 3 files each) so a
+// PrefetchDirs batch spans several dirpack directories.
 const (
-	prefetchTreeDirs      = 10
-	prefetchTreeFiles     = 3
-	prefetchTreeFileSlots = prefetchTreeDirs * prefetchTreeFiles
+	warmTreeDirs  = 10
+	warmTreeFiles = 3
 )
 
-func prefetchTree(ch chan<- *connectors.Record) {
+func warmTree(ch chan<- *connectors.Record) {
 	ch <- dirRec("/")
-	for d := 0; d < prefetchTreeDirs; d++ {
+	for d := range warmTreeDirs {
 		dir := fmt.Sprintf("/dir%02d", d)
 		ch <- dirRec(dir)
-		for f := 0; f < prefetchTreeFiles; f++ {
+		for f := range warmTreeFiles {
 			p := fmt.Sprintf("%s/file%02d.txt", dir, f)
 			ch <- fileRec(p, fmt.Sprintf("content of %s", p))
 		}
 	}
 }
 
-func prefetchTreeFilePaths() []string {
-	files := make([]string, 0, prefetchTreeFileSlots)
-	for d := 0; d < prefetchTreeDirs; d++ {
-		for f := 0; f < prefetchTreeFiles; f++ {
+func warmTreeFilePaths() []string {
+	files := make([]string, 0, warmTreeDirs*warmTreeFiles)
+	for d := range warmTreeDirs {
+		for f := range warmTreeFiles {
 			files = append(files, fmt.Sprintf("/dir%02d/file%02d.txt", d, f))
 		}
 	}
 	return files
 }
 
+// warmTreeParentDirs is what the backup's warm stage would extract from a
+// batch covering the whole tree: every distinct parent directory.
+func warmTreeParentDirs() []string {
+	dirs := []string{"/"}
+	for d := range warmTreeDirs {
+		dirs = append(dirs, fmt.Sprintf("/dir%02d", d))
+	}
+	return dirs
+}
+
 // freshCacheFS loads the snapshot anew and returns a cache-backed filesystem,
-// so each caller gets an independent (cold) dirpack cache and prefetcher slot.
+// so each caller gets an independent (cold) dirpack cache.
 func freshCacheFS(t *testing.T, repo *repository.Repository, id objects.MAC) *vfs.Filesystem {
 	t.Helper()
 	snap, err := snapshot.Load(repo, id)
@@ -86,25 +95,23 @@ func walkForBackup(t *testing.T, fs *vfs.Filesystem, files []string) map[string]
 	return out
 }
 
-// TestDirpackPrefetchSameResultAsCold is the core safety net: resolving every
-// entry through GetEntryForBackup with the prefetcher running must produce the
-// exact same entries as resolving them on a cold cache with no prefetcher. This
-// guards the loadDirpackMap/loadDirpackMapByMAC split, the restored pre-
-// singleflight cache fast-path, and the prefetch/on-demand singleflight
-// coalescing.
-func TestDirpackPrefetchSameResultAsCold(t *testing.T) {
+// TestPrefetchDirsSameResultAsCold is the core safety net: entries resolved
+// through a PrefetchDirs-warmed cache must be identical to entries resolved
+// on-demand on a cold cache. This guards the whole warm pipeline — Find,
+// the GetBlobs rounds, chunk assembly, and decodeDirpackMap — against the
+// on-demand loadDirpackMap path.
+func TestPrefetchDirsSameResultAsCold(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(prefetchTree))
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(warmTree))
 	defer base.Close()
 	id := base.Header.Identifier
-	files := prefetchTreeFilePaths()
+	files := warmTreeFilePaths()
 
 	coldFS := freshCacheFS(t, repo, id)
 	cold := walkForBackup(t, coldFS, files)
 
 	warmFS := freshCacheFS(t, repo, id)
-	warmFS.StartDirpackPrefetch(8, 4)
-	defer warmFS.StopDirpackPrefetch()
+	require.NoError(t, warmFS.PrefetchDirs(context.Background(), warmTreeParentDirs()))
 	warm := walkForBackup(t, warmFS, files)
 
 	for _, p := range files {
@@ -118,50 +125,106 @@ func TestDirpackPrefetchSameResultAsCold(t *testing.T) {
 	}
 }
 
-// TestDirpackPrefetchLifecycle exercises the start/stop contract: stopping with
-// nothing running, starting twice (second is a no-op), and restarting after stop.
-func TestDirpackPrefetchLifecycle(t *testing.T) {
+// TestPrefetchDirsActuallyWarms proves warming is not a silent no-op, with no
+// reach into internals: warm the cache, then destroy the backend entirely —
+// every lookup must still resolve from the warmed cache alone. A regression
+// that quietly stops warming (say, an inverted error check) fails this
+// immediately.
+func TestPrefetchDirsActuallyWarms(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(prefetchTree))
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(warmTree))
 	defer base.Close()
-	files := prefetchTreeFilePaths()
+
+	fs := freshCacheFS(t, repo, base.Header.Identifier)
+	require.NoError(t, fs.PrefetchDirs(context.Background(), warmTreeParentDirs()))
+
+	for mac := range repo.ListPackfiles() {
+		require.NoError(t, repo.DeletePackfile(mac))
+	}
+
+	got := walkForBackup(t, fs, warmTreeFilePaths())
+	require.Len(t, got, warmTreeDirs*warmTreeFiles)
+}
+
+// TestPrefetchDirsUnknownDirsAreSoft: directories that do not exist in the
+// snapshot (new dirs, from the backup's perspective) are silently skipped,
+// and known dirs in the same batch still warm.
+func TestPrefetchDirsUnknownDirsAreSoft(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(warmTree))
+	defer base.Close()
 
 	fs := freshCacheFS(t, repo, base.Header.Identifier)
 
-	// Stop without start must be a safe no-op.
-	require.NotPanics(t, func() { fs.StopDirpackPrefetch() })
+	dirs := append(warmTreeParentDirs(), "/does/not/exist", "/neither/does/this")
+	require.NoError(t, fs.PrefetchDirs(context.Background(), dirs))
 
-	// Double start: the second call must be a no-op, not leak a prefetcher.
-	fs.StartDirpackPrefetch(8, 4)
-	fs.StartDirpackPrefetch(8, 4)
-	walkForBackup(t, fs, files)
-	fs.StopDirpackPrefetch()
-
-	// Restart on the same filesystem must work and still resolve entries.
-	fs2 := freshCacheFS(t, repo, base.Header.Identifier)
-	fs2.StartDirpackPrefetch(4, 2)
-	fs2.StopDirpackPrefetch()
-	fs2.StartDirpackPrefetch(4, 2)
-	defer fs2.StopDirpackPrefetch()
-	got := walkForBackup(t, fs2, files)
-	require.Len(t, got, len(files))
+	// The known dirs must have warmed regardless: destroy the backend and walk.
+	for mac := range repo.ListPackfiles() {
+		require.NoError(t, repo.DeletePackfile(mac))
+	}
+	walkForBackup(t, fs, warmTreeFilePaths())
 }
 
-// TestDirpackPrefetchNoCacheNoop verifies the prefetcher is inert on a
-// filesystem built without a dirpack cache (the non-backup NewFilesystem path):
-// Start is a no-op and GetEntryForBackup still resolves via the fallback path.
-func TestDirpackPrefetchNoCacheNoop(t *testing.T) {
+// TestPrefetchDirsBackendGoneIsSoft: if the store reads fail, PrefetchDirs
+// must not error or panic — dirs stay cold and the (walk-side) on-demand
+// load is the one that reports the problem.
+func TestPrefetchDirsBackendGoneIsSoft(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(prefetchTree))
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(warmTree))
 	defer base.Close()
 
-	// Snapshot.Filesystem() uses NewFilesystem (no dirpack cache).
+	fs := freshCacheFS(t, repo, base.Header.Identifier)
+
+	for mac := range repo.ListPackfiles() {
+		require.NoError(t, repo.DeletePackfile(mac))
+	}
+
+	require.NotPanics(t, func() {
+		require.NoError(t, fs.PrefetchDirs(context.Background(), warmTreeParentDirs()))
+	})
+
+	// Cold dir + dead backend: the on-demand path is the one that errors.
+	_, err := fs.GetEntryForBackup(warmTreeFilePaths()[0])
+	require.Error(t, err)
+}
+
+// TestPrefetchDirsAlreadyWarm: warming the same dirs twice is a cheap no-op
+// (the already-cached skip) and never disturbs previously warmed entries.
+func TestPrefetchDirsAlreadyWarm(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(warmTree))
+	defer base.Close()
+
+	fs := freshCacheFS(t, repo, base.Header.Identifier)
+	dirs := warmTreeParentDirs()
+	require.NoError(t, fs.PrefetchDirs(context.Background(), dirs))
+
+	// Second warm runs against a dead backend: it must not need it (all
+	// dirs cached) and must not damage the cache.
+	for mac := range repo.ListPackfiles() {
+		require.NoError(t, repo.DeletePackfile(mac))
+	}
+	require.NoError(t, fs.PrefetchDirs(context.Background(), dirs))
+
+	walkForBackup(t, fs, warmTreeFilePaths())
+}
+
+// TestPrefetchDirsNoCacheNoop: inert on a filesystem built without a dirpack
+// cache (the non-backup Filesystem() path) — no panic, lookups unaffected.
+func TestPrefetchDirsNoCacheNoop(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(warmTree))
+	defer base.Close()
+
 	fs, err := base.Filesystem()
 	require.NoError(t, err)
 
-	require.NotPanics(t, func() { fs.StartDirpackPrefetch(8, 4) })
+	require.NotPanics(t, func() {
+		require.NoError(t, fs.PrefetchDirs(context.Background(), warmTreeParentDirs()))
+	})
 
-	for _, p := range prefetchTreeFilePaths() {
+	for _, p := range warmTreeFilePaths() {
 		e, err := fs.GetEntryForBackup(p)
 		require.NoError(t, err, p)
 		require.Equal(t, path.Base(p), e.FileInfo.Lname, p)
