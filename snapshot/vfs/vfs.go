@@ -137,7 +137,7 @@ func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors ob
 	if err != nil {
 		return nil, err
 	}
-	fs.dirpackCache = lru.New[string, map[string]*Entry](256, nil)
+	fs.dirpackCache = lru.New[string, map[string]*Entry](4096*2, nil)
 
 	return fs, nil
 }
@@ -529,6 +529,17 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 	//rd := NewObjectReader(fsc.repo, obj, size, -1)
 	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
 
+	m, err := fsc.decodeDirpackMap(rd)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = fsc.dirpackCache.Put(parentPath, m)
+
+	return m, nil
+}
+
+func (fsc *Filesystem) decodeDirpackMap(rd io.Reader) (map[string]*Entry, error) {
 	cache := make(map[string]*Entry)
 	for {
 		_, siz, err := readDirPackHdr(rd)
@@ -572,8 +583,6 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 
 		cache[entry.Name()] = &entry
 	}
-
-	_ = fsc.dirpackCache.Put(parentPath, cache)
 
 	return cache, nil
 }
