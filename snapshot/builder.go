@@ -279,10 +279,9 @@ func (snap *Builder) Lock() (chan bool, error) {
 
 		/* Kick out stale locks */
 		if lock.IsStale() {
-			err := snap.repository.DeleteLock(lockID)
-			if err != nil {
-				snap.repository.DeleteLock(snap.Header.Identifier)
-				return nil, err
+			if err := snap.repository.DeleteLock(lockID); err != nil {
+				// Stale lock cleanup is opportunistic: stores may allow read
+				// and write operations without granting delete permission.
 			}
 
 			continue
