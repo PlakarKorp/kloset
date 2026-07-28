@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math"
 	"mime"
 	"os"
@@ -813,7 +814,8 @@ type contentMeta struct {
 }
 
 func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *connectors.Record) (*contentMeta, error) {
-	if !record.FileInfo.Mode().IsRegular() {
+	if !record.FileInfo.Mode().IsRegular() && (record.FileInfo.Mode().Type()&os.ModeDevice == 0) {
+		log.Println("XXXXX skipping, mode is", record.FileInfo.Mode().Type())
 		return &contentMeta{
 			ContentType: "application/x-not-regular-file",
 		}, nil
@@ -889,7 +891,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	}
 
 	fileEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
-	if record.FileInfo.Mode().IsRegular() && meta.ObjectMAC != (objects.MAC{}) {
+	if /*record.FileInfo.Mode().IsRegular() && */ meta.ObjectMAC != (objects.MAC{}) {
 		fileEntry.Object = meta.ObjectMAC
 	}
 
