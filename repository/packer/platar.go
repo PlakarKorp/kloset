@@ -129,6 +129,12 @@ func (mgr *platarPackerManager) Wait() {
 }
 
 func (mgr *platarPackerManager) InsertIfNotPresent(Type resources.Type, mac objects.MAC) (bool, error) {
+	select {
+	case <-mgr.closing:
+		return false, ErrShutdown
+	default:
+	}
+
 	// XXX: This is not atomic, as such it leaves a possibility of missed dedup (unlikely though). Needs to be fixed by using a batch.
 	has, err := mgr.packingCache.HasBlob(Type, mac)
 	if err != nil {
@@ -163,5 +169,11 @@ func (mgr *platarPackerManager) Put(_ int, Type resources.Type, mac objects.MAC,
 }
 
 func (mgr *platarPackerManager) Exists(Type resources.Type, mac objects.MAC) (bool, error) {
+	select {
+	case <-mgr.closing:
+		return false, ErrShutdown
+	default:
+	}
+
 	return mgr.packingCache.HasBlob(Type, mac)
 }
