@@ -34,9 +34,8 @@ jobs:
       run: |
         set -o pipefail
         set +e # disable errexit
-        go install github.com/jstemmer/go-junit-report/v2@latest && \
-            (go test -v -coverprofile=coverage.out -covermode=atomic -timeout 1m -json ./... \
-            | "$(go env GOPATH)/bin/go-junit-report" -parser gojson -set-exit-code > junit.xml)
+        go test -v -coverprofile=coverage.out -covermode=atomic -timeout 1m -json ./... \
+            | go tool go-junit-report -parser gojson -set-exit-code > junit.xml
         status=$?
         echo "test_exit=$status" >> "$GITHUB_OUTPUT"
         exit $status
