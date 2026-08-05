@@ -254,7 +254,7 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 		return nil
 	}
 
-	// This implicitely sets the parent, see the note about refactoring, and
+	// This implicitly sets the parent, see the note about refactoring, and
 	// since we Derive() to construct Delta streams this will set the correct
 	// parent. This is all way too intricated and will be fixed by a refacto.
 	if ver.Equals(versioning.FromString("1.1.0")) {
