@@ -167,7 +167,7 @@ func Test_insertInternal(t *testing.T) {
 	})
 }
 
-// The unreacheable code will be tested later with cache tests (cache.Put cache.Update)
+// The unreachable code will be tested later with cache tests (cache.Put cache.Update)
 func Test_insertUpwards(t *testing.T) {
 	newTree := func(
 		t *testing.T,

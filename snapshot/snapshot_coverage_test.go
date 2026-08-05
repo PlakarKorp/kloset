@@ -276,7 +276,7 @@ func TestGetSnapshotPresent(t *testing.T) {
 // trivial Close on a SnapshotStore. Since SnapshotStore is unexported we go
 // through Persist indirectly — but the simpler approach is via the
 // public-but-trivial Close() method on any tree we can fetch. Instead, exercise
-// SnapshotStore by re-using the existing snapshot's filesystem tree which goes
+// SnapshotStore by reusing the existing snapshot's filesystem tree which goes
 // through Get; this naturally drives the SnapshotStore.Get path. The other
 // methods are reached when the snapshot is built.
 //
