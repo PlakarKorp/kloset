@@ -6,6 +6,7 @@ import (
 	"context"
 	"iter"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -27,6 +28,13 @@ type BlobResp struct {
 }
 
 type GetBlobsOpts struct {
+	Concurrency uint32 // default=1.
+}
+
+func makeDefaultGetBlobsOpts() *GetBlobsOpts {
+	return &GetBlobsOpts{
+		Concurrency: 1,
+	}
 }
 
 const (
@@ -45,6 +53,14 @@ type rangeRead struct {
 }
 
 func (r *Repository) GetBlobs(ctx context.Context, blobs []BlobReq, opts *GetBlobsOpts) iter.Seq2[BlobResp, error] {
+	if opts == nil {
+		opts = makeDefaultGetBlobsOpts()
+	}
+
+	if opts.Concurrency == 0 {
+		opts.Concurrency = 1
+	}
+
 	return func(yield func(BlobResp, error) bool) {
 		t0 := time.Now()
 
@@ -80,32 +96,70 @@ func (r *Repository) GetBlobs(ctx context.Context, blobs []BlobReq, opts *GetBlo
 				len(blobs), len(plan), time.Since(t0))
 		}()
 
-		for _, g := range plan {
-			data, err := r.GetPackfileRange(g.loc)
+		// Derived context to handle cancellation from the iterator loop,
+		// otherwise an early exit will leak all goroutines.
+		innerCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
 
-			for _, b := range g.blobs {
-				if err != nil {
-					if !yield(BlobResp{b.BlobReq, nil}, err) {
-						return
-					}
+		// Feed the read plans to the workers.
+		readsChannel := make(chan *rangeRead)
+		go func() {
+			defer close(readsChannel)
 
-					continue
-				}
-
-				blobStart := b.Offset - g.loc.Offset
-				blobBytes := data[blobStart : blobStart+uint64(b.Length)]
-				blobData, err := r.decodeBuffer(blobBytes)
-				if err != nil {
-					if !yield(BlobResp{b.BlobReq, nil}, err) {
-						return
-					}
-
-					continue
-				}
-
-				if !yield(BlobResp{b.BlobReq, blobData}, nil) {
+			for _, p := range plan {
+				select {
+				case readsChannel <- p:
+				case <-innerCtx.Done():
 					return
 				}
+
+			}
+		}()
+
+		type iterItem struct {
+			b   BlobResp
+			err error
+		}
+
+		// Workers read the plan in input and stack them on a return channel to
+		// be delivered.
+		returnChannel := make(chan iterItem, opts.Concurrency)
+		var wg sync.WaitGroup
+		for range opts.Concurrency {
+			wg.Go(func() {
+				for rp := range readsChannel {
+					data, err := r.GetPackfileRange(rp.loc)
+
+					for _, b := range rp.blobs {
+						it := iterItem{b: BlobResp{b.BlobReq, nil}}
+						if err != nil {
+							it.err = err
+						} else {
+							blobStart := b.Offset - rp.loc.Offset
+							blobBytes := data[blobStart : blobStart+uint64(b.Length)]
+							it.b.Data, it.err = r.decodeBuffer(blobBytes)
+						}
+
+						select {
+						case returnChannel <- it:
+						case <-innerCtx.Done():
+							return
+						}
+					}
+				}
+			})
+		}
+
+		go func() {
+			wg.Wait()
+
+			close(returnChannel)
+		}()
+
+		// Finally yield the results to the caller.
+		for ret := range returnChannel {
+			if !yield(ret.b, ret.err) {
+				return
 			}
 		}
 	}
