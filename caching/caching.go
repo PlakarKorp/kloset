@@ -39,7 +39,7 @@ type Cache interface {
 	// Must support Delete during Scan
 	Delete([]byte) error
 
-	// reverse is only to accomodate EnumerateKeysWithPrefix, once
+	// reverse is only to accommodate EnumerateKeysWithPrefix, once
 	// that doesn't need it anymore this can become simpler again.
 	// key returned by an iteration might get invalidated on
 	// subsequent iterations.

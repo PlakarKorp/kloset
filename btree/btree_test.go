@@ -640,7 +640,7 @@ func TestStats(t *testing.T) {
 		require.NotZero(t, m5, "flushing the cache should not reset the cache miss value")
 		require.Zero(t, s5, "flushing the cache should generate an empty cache")
 
-		// Trigger no access, a cache miss, one iten in cache
+		// Trigger no access, a cache miss, one item in cache
 		require.NoError(t, tree.Update('a', 2))
 		h6, m6, s6 := tree.Stats()
 		require.Equal(t, h6, h5, "expected no hit on an update after a flush")

@@ -123,7 +123,7 @@ func (p *dirpackPrefetcher) feed(cursor iterator.Iterator[string, objects.MAC]) 
 		}
 	}
 
-	// Now as consummer advance the cursor replenish the cache (since it's the
+	// Now as consumer advance the cursor replenish the cache (since it's the
 	// fifo older one gets eviced).
 	// Note even when exhausted we keep looping to drain the channel.
 	for {

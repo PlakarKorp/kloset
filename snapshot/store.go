@@ -58,7 +58,7 @@ func (s *SnapshotStore[K, V]) Put(node *btree.Node[K, objects.MAC, V]) (objects.
 }
 
 func (s *SnapshotStore[K, V]) Close() error {
-	// We do not own the snapshot so it's not our responsability to close it.
+	// We do not own the snapshot so it's not our responsibility to close it.
 	return nil
 }
 
