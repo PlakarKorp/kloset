@@ -2,10 +2,33 @@ package lru
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+// requireConsistentList walks the cache's internal linked list from
+// head to tail and checks that it forms a single well-formed chain of
+// exactly c.size nodes with correctly paired prev/next pointers, no
+// cycles, and a tail that matches where the walk actually ends.
+func requireConsistentList[K comparable, V any](t *testing.T, c *Cache[K, V]) {
+	t.Helper()
+
+	seen := make(map[K]bool, c.size)
+	var prev *node[K, V]
+	count := 0
+	for n := c.head; n != nil; n = n.next {
+		count++
+		require.LessOrEqualf(t, count, c.size, "list has more nodes than size=%d (cycle?)", c.size)
+		require.Falsef(t, seen[n.key], "key %v visited twice walking from head (cycle)", n.key)
+		seen[n.key] = true
+		require.Equal(t, prev, n.prev, "node %v has a mismatched prev pointer", n.key)
+		prev = n
+	}
+	require.Equal(t, c.size, count, "list length does not match c.size")
+	require.Equal(t, c.tail, prev, "c.tail does not match the last node reached from head")
+}
 
 func TestCache(t *testing.T) {
 	t.Run("New Cache", func(t *testing.T) {
@@ -63,6 +86,100 @@ func TestCache(t *testing.T) {
 		require.Equal(t, "three", val)
 	})
 
+	t.Run("Eviction Beyond One Step", func(t *testing.T) {
+		cache := New[int, string](2, nil)
+		defer cache.Close()
+
+		err := cache.Put(1, "one")
+		require.NoError(t, err)
+		err = cache.Put(2, "two")
+		require.NoError(t, err)
+
+		// Repeatedly touch key 1 so it stays the most-recently-used
+		// entry, while a stream of new keys cycles through the other
+		// slot.
+		for i := 3; i <= 10; i++ {
+			_, ok := cache.Get(1)
+			require.True(t, ok)
+
+			err := cache.Put(i, fmt.Sprintf("val-%d", i))
+			require.NoError(t, err)
+
+			// the key from the previous round, never touched again
+			// after it was inserted, must now be gone
+			_, ok = cache.Get(i - 1)
+			require.False(t, ok, "key %d should have been evicted", i-1)
+
+			// key 1 and the newly inserted key must both still be
+			// present
+			val, ok := cache.Get(1)
+			require.True(t, ok)
+			require.Equal(t, "one", val)
+
+			val, ok = cache.Get(i)
+			require.True(t, ok)
+			require.Equal(t, fmt.Sprintf("val-%d", i), val)
+		}
+
+		_, _, size := cache.Stats()
+		require.Equal(t, uint64(2), size)
+	})
+
+	t.Run("Promote Middle Node", func(t *testing.T) {
+		cache := New[int, string](3, nil)
+		defer cache.Close()
+
+		// With 3 resident keys, key 2 sits strictly between head and
+		// tail.
+		err := cache.Put(1, "one")
+		require.NoError(t, err)
+		err = cache.Put(2, "two")
+		require.NoError(t, err)
+		err = cache.Put(3, "three")
+		require.NoError(t, err)
+		requireConsistentList(t, cache)
+
+		val, ok := cache.Get(2)
+		require.True(t, ok)
+		require.Equal(t, "two", val)
+		requireConsistentList(t, cache)
+
+		// nothing should have been evicted by a Get; 1 and 3 must still
+		// be reachable even though 2 was spliced out from between them
+		val, ok = cache.Get(1)
+		require.True(t, ok)
+		require.Equal(t, "one", val)
+		requireConsistentList(t, cache)
+
+		val, ok = cache.Get(3)
+		require.True(t, ok)
+		require.Equal(t, "three", val)
+		requireConsistentList(t, cache)
+
+		// recency order is now (MRU -> LRU): 3, 1, 2.
+		// Filling the cache once more must evict 2, the one
+		// entry not touched since being spliced out.
+		err = cache.Put(4, "four")
+		require.NoError(t, err)
+		requireConsistentList(t, cache)
+
+		_, ok = cache.Get(2)
+		require.False(t, ok, "key 2 should have been evicted")
+
+		val, ok = cache.Get(1)
+		require.True(t, ok)
+		require.Equal(t, "one", val)
+
+		val, ok = cache.Get(3)
+		require.True(t, ok)
+		require.Equal(t, "three", val)
+
+		val, ok = cache.Get(4)
+		require.True(t, ok)
+		require.Equal(t, "four", val)
+		requireConsistentList(t, cache)
+	})
+
 	t.Run("OnEvict Callback", func(t *testing.T) {
 		evicted := make(map[int]string)
 		onEvict := func(key int, val string) error {
@@ -70,7 +187,7 @@ func TestCache(t *testing.T) {
 			return nil
 		}
 
-		cache := New[int, string](2, onEvict)
+		cache := New(2, onEvict)
 		defer cache.Close()
 
 		// Fill the cache
@@ -93,7 +210,7 @@ func TestCache(t *testing.T) {
 			return expectedErr
 		}
 
-		cache := New[int, string](2, onEvict)
+		cache := New(2, onEvict)
 		defer cache.Close()
 
 		// Fill the cache
@@ -133,6 +250,49 @@ func TestCache(t *testing.T) {
 		hits, misses, size = cache.Stats()
 		require.Equal(t, uint64(1), hits)
 		require.Equal(t, uint64(1), misses)
+		require.Equal(t, uint64(2), size)
+	})
+
+	t.Run("Stats After Eviction", func(t *testing.T) {
+		cache := New[int, string](2, nil)
+		defer cache.Close()
+
+		err := cache.Put(1, "one")
+		require.NoError(t, err)
+		err = cache.Put(2, "two")
+		require.NoError(t, err)
+
+		// cache is now full; size must reflect that, with no hits/misses
+		// recorded yet
+		hits, misses, size := cache.Stats()
+		require.Equal(t, uint64(0), hits)
+		require.Equal(t, uint64(0), misses)
+		require.Equal(t, uint64(2), size)
+
+		// this Put evicts key 1, so size must stay at 2, not grow to 3
+		err = cache.Put(3, "three")
+		require.NoError(t, err)
+
+		hits, misses, size = cache.Stats()
+		require.Equal(t, uint64(0), hits)
+		require.Equal(t, uint64(0), misses)
+		require.Equal(t, uint64(2), size)
+
+		// a lookup for the evicted key must count as a miss and must not
+		// change size
+		_, ok := cache.Get(1)
+		require.False(t, ok)
+
+		hits, misses, size = cache.Stats()
+		require.Equal(t, uint64(0), hits)
+		require.Equal(t, uint64(1), misses)
+		require.Equal(t, uint64(2), size)
+
+		// evict once more (key 2) and confirm size still holds at 2
+		err = cache.Put(4, "four")
+		require.NoError(t, err)
+
+		_, _, size = cache.Stats()
 		require.Equal(t, uint64(2), size)
 	})
 
