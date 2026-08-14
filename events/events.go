@@ -46,6 +46,21 @@ func (eb *EventsBUS) Listen() <-chan *Event {
 	return eb.c
 }
 
+// Publish injects an event onto the bus, dropping it if nobody listens.
+func (eb *EventsBUS) Publish(e *Event) {
+	if eb.c == nil {
+		return
+	}
+	eb.c <- e
+}
+
+// Forward republishes every event from this bus onto dst until this bus closes.
+func (eb *EventsBUS) Forward(dst *EventsBUS) {
+	for e := range eb.Listen() {
+		dst.Publish(e)
+	}
+}
+
 const (
 	Info  = "info"
 	Warn  = "warn"
