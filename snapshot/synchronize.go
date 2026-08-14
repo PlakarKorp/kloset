@@ -139,6 +139,9 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		src:    src,
 	}
 
+	// grab the summary before dst.Header aliases it and nils Sources.
+	srcSummary := src.Header.GetSource(0).Summary
+
 	dst.Header = src.Header
 	dst.Header.Sources = nil
 
@@ -159,11 +162,25 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
+	// Import labels its events "backup"; relabel to "synchronize".
+	syncEmitter := dst.Emitter("synchronize")
+	dst.emitter = syncEmitter
+	defer syncEmitter.Close()
+
+	// the total is known up front, so publish it like backup/export do.
+	dst.emitter.FilesystemSummary(
+		srcSummary.Directory.Files+srcSummary.Below.Files,
+		srcSummary.Directory.Directories+srcSummary.Below.Directories,
+		srcSummary.Directory.Symlinks+srcSummary.Below.Symlinks,
+		0,
+		srcSummary.Directory.Size+srcSummary.Below.Size,
+	)
+
 	// dst.Import samples the destination side; the source repository's reads
 	// live on a separate tracker, so sample those here to cover both stores.
-	syncEmitter := dst.Emitter("synchronize")
-	defer syncEmitter.Close()
+	// Reset both per snapshot so they stay in step across snapshots.
 	src.repository.IOStats().Reset()
+	dst.repository.IOStats().Reset()
 	srcSampler := iostat.NewSampler(syncEmitter, dst.AppContext().IOStatsInterval,
 		iostat.ScopedTracker{Name: "source-storage", T: src.repository.IOStats()},
 	)
