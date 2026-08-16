@@ -355,9 +355,9 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 	defer func() {
 		snap.emitter.Info("snapshot.import.done", map[string]any{
-			"nfiles": stats.nfiles,
-			"ndirs":  stats.ndirs,
-			"size":   stats.size,
+			"nfiles": atomic.LoadUint64(&stats.nfiles),
+			"ndirs":  atomic.LoadUint64(&stats.ndirs),
+			"size":   atomic.LoadUint64(&stats.size),
 		})
 	}()
 
