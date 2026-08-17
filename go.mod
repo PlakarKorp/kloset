@@ -17,7 +17,7 @@ require (
 	github.com/tink-crypto/tink-go/v2 v2.7.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/blake3 v0.2.4
-	golang.org/x/crypto v0.54.0
+	golang.org/x/crypto v0.55.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/sync v0.22.0
 	modernc.org/sqlite v1.56.0
@@ -61,9 +61,9 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	golang.org/x/exp v0.0.0-20260410095643-746e56fc9e2f // indirect
-	golang.org/x/net v0.56.0 // indirect
+	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.40.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	google.golang.org/protobuf v1.36.8 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
