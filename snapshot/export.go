@@ -3,6 +3,7 @@ package snapshot
 import (
 	"fmt"
 	"io"
+	iofs "io/fs"
 	"os"
 	"path"
 	"strings"
@@ -37,6 +38,20 @@ func (c *countingReadCloser) Read(p []byte) (int, error) {
 
 func (c *countingReadCloser) Close() error {
 	return c.rd.Close()
+}
+
+// symlinkAncestor returns the closest ancestor of entrypath present in
+// symlinks. Keys and entrypath must be clean absolute paths.
+func symlinkAncestor(symlinks map[string]struct{}, entrypath string) (string, bool) {
+	if len(symlinks) == 0 {
+		return "", false
+	}
+	for parent := path.Dir(entrypath); parent != "/" && parent != "."; parent = path.Dir(parent) {
+		if _, ok := symlinks[parent]; ok {
+			return parent, true
+		}
+	}
+	return "", false
 }
 
 type ExportOptions struct {
@@ -125,6 +140,11 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				})
 		}
 
+		// emitted symlinks, to skip entries below them: an exporter can't tell
+		// from the record stream that a path component is a symlink. WalkDir
+		// yields parents before children, so a symlink is seen first.
+		symlinks := make(map[string]struct{})
+
 		i := 0
 		pvfs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 			if i%1000 == 0 {
@@ -133,6 +153,12 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				}
 			}
 			i++
+
+			// a rejected entry arrives as (nil, err); skip it before deref.
+			if err != nil {
+				emitter.PathError(entrypath, err)
+				return nil
+			}
 
 			// path.Clean will not remove ".." elements if the path is not
 			// absolute.  so, let's make it absolute, clean it for good
@@ -156,10 +182,20 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				return fmt.Errorf("snapshot entry has non-absolute path %q", entrypath)
 			}
 
+			if parent, ok := symlinkAncestor(symlinks, entrypath); ok {
+				err := fmt.Errorf("snapshot entry %q lies below symlink %q", entrypath, parent)
+				emitter.PathError(entrypath, err)
+				if e.FileInfo.IsDir() {
+					return iofs.SkipDir // skip the whole subtree
+				}
+				return nil
+			}
+
 			isRegular := false
 			if e.FileInfo.IsDir() {
 				emitter.Directory(entrypath)
 			} else if e.FileInfo.Mode()&os.ModeSymlink != 0 {
+				symlinks[entrypath] = struct{}{}
 				emitter.Symlink(entrypath)
 			} else if e.FileInfo.Mode().IsRegular() {
 				isRegular = true
