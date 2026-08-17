@@ -134,6 +134,12 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			}
 			i++
 
+			// a rejected entry arrives as (nil, err); skip it before deref.
+			if err != nil {
+				emitter.PathError(entrypath, err)
+				return nil
+			}
+
 			// path.Clean will not remove ".." elements if the path is not
 			// absolute.  so, let's make it absolute, clean it for good
 			// hygiene, then strip prefix and make sure it's still absolute.
