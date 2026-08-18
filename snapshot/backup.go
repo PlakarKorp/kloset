@@ -82,6 +82,8 @@ var (
 	ErrOutOfRange = errors.New("out of range")
 )
 
+const ignoreDisabledWarning = "ignoring exclude rules for importer %q"
+
 func (sourceCtx *sourceContext) batchRecordEntry(kind scanlog.EntryKind, pathname string, ctype string, mac objects.MAC, serializedEntry []byte, serializedSummary []byte) error {
 	sourceCtx.vfsEntLock.Lock()
 	defer sourceCtx.vfsEntLock.Unlock()
@@ -208,6 +210,11 @@ func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *co
 }
 
 func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
+	applyExcludes := imp.Flags()&location.FLAG_NOIGNORE == 0
+	if !applyExcludes && len(sourceCtx.source.excludes.Rules) != 0 {
+		snap.Logger().Warn(ignoreDisabledWarning, imp.Type())
+	}
+
 	if sourceCtx.vfsCache != nil {
 		// Memory wise the cache has a small footprint so we can safely go a bit
 		// big here. The 64 figure was chosen empirically after various tests.
@@ -260,7 +267,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 							snap.emitter.PathError(record.Pathname, record.Err)
 							sourceCtx.recordError(idx, record.Pathname, record.Err)
 
-						} else if !snap.skipExcludedPathname(sourceCtx, record) {
+						} else if !applyExcludes || !snap.skipExcludedPathname(sourceCtx, record) {
 							snap.emitter.Path(record.Pathname)
 							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
 								sourceCtx.recordError(idx, record.Pathname, err)
