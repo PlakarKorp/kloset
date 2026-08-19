@@ -60,7 +60,7 @@ func TestPlatarPackerDrainsBufferOnWait(t *testing.T) {
 		go func(i int) {
 			defer producers.Done()
 			mac := objects.MAC{byte(i), byte(i >> 8)}
-			if err := mgr.Put(0, resources.RT_CONFIG, mac, []byte("payload")); err == nil {
+			if err := mgr.Put(0, resources.RT_CONFIG, mac, []byte("payload"), false); err == nil {
 				landed.Add(1)
 			}
 		}(i)
@@ -134,7 +134,7 @@ func TestPlatarPackerPutAfterWait(t *testing.T) {
 		}
 	}()
 	mac := objects.MAC{99}
-	if err := mgr.Put(0, resources.RT_CHUNK, mac, []byte("x")); err == nil {
+	if err := mgr.Put(0, resources.RT_CHUNK, mac, []byte("x"), false); err == nil {
 		t.Fatalf("expected Put after Wait to return an error, got nil")
 	}
 }
@@ -174,7 +174,7 @@ func TestPlatarPackerPutDuringWait(t *testing.T) {
 			for i := range putsPerProducer {
 				mac := objects.MAC{byte(seed), byte(i), byte(i >> 8)}
 				// After shutdown Put must return an error, not panic.
-				_ = mgr.Put(0, resources.RT_CHUNK, mac, []byte("payload"))
+				_ = mgr.Put(0, resources.RT_CHUNK, mac, []byte("payload"), false)
 			}
 		}(p)
 	}

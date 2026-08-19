@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/iterator"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -193,6 +194,15 @@ func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
 		}
 
 		e.ResolvedObject = obj
+	}
+
+	mode, err := fs.repo.Store().Mode(fs.repo.AppContext())
+	if err != nil {
+		return nil, err
+	}
+
+	if mode&storage.ModeRead == 0 {
+		return nil, repository.ErrNotReadable
 	}
 
 	return &vfile{

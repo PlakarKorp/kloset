@@ -152,7 +152,7 @@ func TestWithCapOptions(t *testing.T) {
 
 		loc.WithPerMondayCap(1)(lo)
 		loc.WithPerTuesdayCap(2)(lo)
-		loc.WithPerWednsdayCap(3)(lo)
+		loc.WithPerWednesdayCap(3)(lo)
 		loc.WithPerThursdayCap(4)(lo)
 		loc.WithPerFridayCap(5)(lo)
 		loc.WithPerSaturdayCap(6)(lo)
@@ -258,7 +258,7 @@ func TestLocateOptionsHasPeriods(t *testing.T) {
 			{name: "Year", apply: loc.WithPerYearCap(1)},
 			{name: "Monday", apply: loc.WithPerMondayCap(1)},
 			{name: "Tuesday", apply: loc.WithPerTuesdayCap(1)},
-			{name: "Wednesday", apply: loc.WithPerWednsdayCap(1)},
+			{name: "Wednesday", apply: loc.WithPerWednesdayCap(1)},
 			{name: "Thursday", apply: loc.WithPerThursdayCap(1)},
 			{name: "Friday", apply: loc.WithPerFridayCap(1)},
 			{name: "Saturday", apply: loc.WithPerSaturdayCap(1)},

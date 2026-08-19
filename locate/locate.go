@@ -255,7 +255,7 @@ func WithPerYearCap(n int) Option   { return func(p *LocateOptions) { p.Periods.
 
 func WithPerMondayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Monday.Cap = n } }
 func WithPerTuesdayCap(n int) Option  { return func(p *LocateOptions) { p.Periods.Tuesday.Cap = n } }
-func WithPerWednsdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Cap = n } }
+func WithPerWednesdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Wednesday.Cap = n } }
 func WithPerThursdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Thursday.Cap = n } }
 func WithPerFridayCap(n int) Option   { return func(p *LocateOptions) { p.Periods.Friday.Cap = n } }
 func WithPerSaturdayCap(n int) Option { return func(p *LocateOptions) { p.Periods.Saturday.Cap = n } }

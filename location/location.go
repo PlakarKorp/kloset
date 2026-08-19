@@ -15,6 +15,7 @@ const (
 	FLAG_STREAM                    // importer: cannot call Import() more than once
 	FLAG_NEEDACK                   // importer: cares about acknowledgments in Import()
 	FLAG_NOMERGE                   // importer: cannot merge those in a single snapshot (multidir support)
+	FLAG_EXPORTXATTR               // exporter: please send extended attributes during Export()
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")
@@ -124,6 +125,8 @@ func ParseFlag(name string) (Flags, error) {
 		return FLAG_NEEDACK, nil
 	case "nomerge":
 		return FLAG_NOMERGE, nil
+	case "exportxattr":
+		return FLAG_EXPORTXATTR, nil
 	default:
 		return 0, ErrUnknownFlag
 	}

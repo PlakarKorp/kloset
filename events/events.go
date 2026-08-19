@@ -3,6 +3,7 @@ package events
 import (
 	"time"
 
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/google/uuid"
 )
@@ -327,5 +328,37 @@ func (e *Emitter) FilesystemSummary(fileCount uint64, dirCount uint64, symlinkCo
 		"symlinks":    symlinkCount,
 		"xattrs":      xattrCount,
 		"size":        totalSize,
+	})
+}
+
+/////
+
+func ioStatsToMap(s iostat.IOStats) map[string]any {
+	return map[string]any{
+		"total":        s.TotalBytes,
+		"dt":           s.Duration,
+		"wall_dt":      s.WallDuration,
+		"overall":      s.Overall,
+		"overall_wall": s.OverallWall,
+		"min":          s.Min,
+		"avg":          s.Avg,
+		"median":       s.Median,
+		"p50":          s.P50,
+		"p75":          s.P75,
+		"p80":          s.P80,
+		"p90":          s.P90,
+		"p95":          s.P95,
+		"p99":          s.P99,
+		"max":          s.Max,
+	}
+}
+
+// ReportIOStats emits an "iostats" event for the given scope; it satisfies
+// iostat.Reporter.
+func (e *Emitter) ReportIOStats(scope string, read, write iostat.IOStats) {
+	e.emit("iostats", Info, map[string]any{
+		"scope": scope,
+		"r":     ioStatsToMap(read),
+		"w":     ioStatsToMap(write),
 	})
 }

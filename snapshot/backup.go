@@ -115,8 +115,7 @@ func (sourceCtx *sourceContext) recordError(idx int, path string, err error) err
 	}
 
 	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
-	err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_ERROR_ENTRY, mac, serialized)
-	if err != nil {
+	if err := sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_ERROR_ENTRY, mac, serialized, true); err != nil {
 		return nil
 	}
 	return sourceCtx.scanLog.PutPathMAC(scanlog.KindError, path, mac)
@@ -130,8 +129,7 @@ func (sourceCtx *sourceContext) recordXattr(idx int, record *connectors.Record, 
 	}
 
 	mac := sourceCtx.builder.repository.ComputeMAC(serialized)
-	err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_XATTR_ENTRY, mac, serialized)
-	if err != nil {
+	if err = sourceCtx.builder.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_XATTR_ENTRY, mac, serialized, true); err != nil {
 		return nil
 	}
 	// Key the index by Xattr.ToPath() ("<path><name><sep>") so it matches the
@@ -359,6 +357,13 @@ func (snap *Builder) Backup(source *Source) error {
 	/* phase 0: setup - prepare source context and indexes */
 	snap.repository.ImportStats = iostat.New()
 
+	sampler := iostat.NewSampler(snap.emitter, snap.AppContext().IOStatsInterval,
+		iostat.ScopedTracker{Name: "source", T: snap.repository.ImportStats},
+		iostat.ScopedTracker{Name: "storage", T: snap.repository.IOStats()},
+	)
+	sampler.Start(snap.AppContext())
+	defer sampler.Stop()
+
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -451,7 +456,7 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Rea
 		// It's safe to pin to 0 here, we are not chunkifying files
 		// concurrently so there will be no interleaving, and that means we get
 		// the dirpack's chunk and Object entries in a sequence.
-		return snap.repository.PutBlobIfNotExistsWithHint(chkId, resources.RT_CHUNK, chunk.ContentMAC, data)
+		return snap.repository.PutBlobIfNotExistsWithHint(chkId, resources.RT_CHUNK, chunk.ContentMAC, data, true)
 	}
 
 	chk.Reset(rd)
@@ -497,7 +502,7 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Rea
 	// chunkify has only PutBlobWithHint() because the Exists() test is done
 	// _beforehand_, in the dirpack case we do not do the caching layer at all
 	// so we need to do the deduplication here.
-	if err := snap.repository.PutBlobIfNotExistsWithHint(chkId, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+	if err := snap.repository.PutBlobIfNotExistsWithHint(chkId, resources.RT_OBJECT, objectMAC, objectSerialized, true); err != nil {
 		return objects.MAC{}, err
 	}
 
@@ -549,11 +554,15 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 		totalEntropy += chunk.Entropy * float64(len(data))
 		totalDataSize += int64(len(data))
 
-		return snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_CHUNK, chunk.ContentMAC, data)
+		return snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_CHUNK, chunk.ContentMAC, data, false)
 	}
 
 	chk.Reset(rd)
 	ctx := snap.AppContext()
+	// One span for the whole file so the gap between chunk reads is accounted as
+	// active read time; a fresh span per chunk would measure ~0 and record no
+	// throughput samples.
+	readSpan := snap.repository.ImportStats.GetReadSpan()
 	for i := 0; ; i++ {
 		if i%1024 == 0 {
 			if err := ctx.Err(); err != nil {
@@ -566,7 +575,7 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 			return nil, objects.MAC{}, -1, err
 		}
 
-		snap.repository.ImportStats.GetReadSpan().Add(int64(len(cdcChunk)))
+		readSpan.Add(int64(len(cdcChunk)))
 
 		if cdcChunk != nil {
 			chunkCopy := make([]byte, len(cdcChunk))
@@ -606,11 +615,11 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	objectMAC := snap.repository.ComputeMAC(objectSerialized)
 
 	if snap.vfsCache == nil || isXattr {
-		if err := snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+		if err := snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized, true); err != nil {
 			return nil, objects.MAC{}, -1, err
 		}
 	} else {
-		if err := snap.repository.PutBlobWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized); err != nil {
+		if err := snap.repository.PutBlobWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized, true); err != nil {
 			return nil, objects.MAC{}, -1, err
 		}
 	}
@@ -862,11 +871,11 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 
 		dirEntryMAC = snap.repository.ComputeMAC(serialized)
 		if snap.vfsCache == nil || record.IsXattr {
-			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized); err != nil {
+			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized, true); err != nil {
 				return err
 			}
 		} else {
-			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized); err != nil {
+			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized, true); err != nil {
 				return err
 			}
 		}
@@ -914,11 +923,11 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 		fileEntryMAC = snap.repository.ComputeMAC(serialized)
 
 		if snap.vfsCache == nil || record.IsXattr {
-			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
+			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized, true); err != nil {
 				return err
 			}
 		} else {
-			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized); err != nil {
+			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized, true); err != nil {
 				return err
 			}
 		}
@@ -1060,7 +1069,7 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 		return nil, err
 	}
 	summaryMAC := builder.repository.ComputeMAC(serializedSummary)
-	if err := builder.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary); err != nil {
+	if err := builder.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary, true); err != nil {
 		return nil, err
 	}
 
@@ -1268,7 +1277,7 @@ func (snap *Builder) relinkNodesRecursive(sourceCtx *sourceContext, pathname str
 			return err
 		}
 
-		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized); err != nil {
+		if err := snap.repository.PutBlobIfNotExists(resources.RT_VFS_ENTRY, mac, serialized, true); err != nil {
 			return err
 		}
 	}

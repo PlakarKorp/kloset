@@ -32,14 +32,14 @@ func TestTrackerAddAndStats(t *testing.T) {
 	}
 
 	// Add bytes with zero duration — counted but no throughput sample
-	tr.add(100, 0)
+	tr.add(100, 0, time.Time{})
 	s = tr.Stats()
 	if s.TotalBytes != 100 {
 		t.Errorf("expected 100 total bytes, got %d", s.TotalBytes)
 	}
 
 	// Add bytes with a duration large enough to emit a sample
-	tr.add(1<<20, 100*time.Millisecond)
+	tr.add(1<<20, 100*time.Millisecond, time.Time{})
 	s = tr.Stats()
 	if s.TotalBytes != 100+1<<20 {
 		t.Errorf("unexpected total bytes %d", s.TotalBytes)
@@ -51,7 +51,7 @@ func TestTrackerAddAndStats(t *testing.T) {
 
 func TestTrackerAddZeroBytes(t *testing.T) {
 	tr := newTracker()
-	tr.add(0, 100*time.Millisecond)
+	tr.add(0, 100*time.Millisecond, time.Time{})
 	s := tr.Stats()
 	if s.TotalBytes != 0 {
 		t.Errorf("expected 0 bytes, got %d", s.TotalBytes)
@@ -63,7 +63,7 @@ func TestTrackerAddZeroBytes(t *testing.T) {
 
 func TestTrackerReset(t *testing.T) {
 	tr := newTracker()
-	tr.add(1<<20, 200*time.Millisecond)
+	tr.add(1<<20, 200*time.Millisecond, time.Time{})
 	tr.Reset()
 
 	s := tr.Stats()
@@ -100,6 +100,30 @@ func TestSpanAdd(t *testing.T) {
 	}
 }
 
+func TestWallClockThroughput(t *testing.T) {
+	tr := newTracker()
+	base := time.Unix(0, 0)
+
+	// 10 MiB total across a 2s wall-clock span, but only 100ms of active time
+	// (a cached burst). Active throughput is high; wall-clock is 5 MiB/s.
+	tr.add(5<<20, 50*time.Millisecond, base)
+	tr.add(5<<20, 50*time.Millisecond, base.Add(2*time.Second))
+
+	s := tr.Stats()
+	if s.WallDuration != 2*time.Second {
+		t.Fatalf("WallDuration = %v, want 2s", s.WallDuration)
+	}
+	wantWall := float64(10<<20) / 2.0 // 5 MiB/s
+	if s.OverallWall < wantWall*0.99 || s.OverallWall > wantWall*1.01 {
+		t.Fatalf("OverallWall = %.0f, want ~%.0f (5 MiB/s)", s.OverallWall, wantWall)
+	}
+	// Active throughput uses the 100ms active time and is far higher.
+	if s.Overall <= s.OverallWall {
+		t.Fatalf("active Overall (%.0f) should exceed wall-clock (%.0f)", s.Overall, s.OverallWall)
+	}
+}
+
+
 func TestSpanAddNil(t *testing.T) {
 	var s *Span
 	// should not panic
@@ -124,7 +148,7 @@ func TestStatsMultipleSamples(t *testing.T) {
 
 	// Add enough data with long durations so we get multiple samples
 	for i := 0; i < 5; i++ {
-		tr.add(1<<20, 200*time.Millisecond)
+		tr.add(1<<20, 200*time.Millisecond, time.Time{})
 	}
 
 	s := tr.Stats()
@@ -245,7 +269,7 @@ func TestBucketAccumulation(t *testing.T) {
 	tr := newTracker()
 
 	// Add bytes with a duration shorter than sampleWindow — no sample yet
-	tr.add(1024, 10*time.Millisecond)
+	tr.add(1024, 10*time.Millisecond, time.Time{})
 	if len(tr.samples) != 0 {
 		t.Errorf("expected 0 samples for short duration, got %d", len(tr.samples))
 	}

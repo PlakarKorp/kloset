@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
@@ -114,7 +115,7 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		newmac := dst.repository.ComputeMAC(data)
 		dst.Header.Identifier = newmac
 		if dst.repository.BlobExists(resources.RT_SIGNATURE, newmac) {
-			err = dst.repository.PutBlob(resources.RT_SIGNATURE, newmac, data)
+			err = dst.repository.PutBlob(resources.RT_SIGNATURE, newmac, data, true)
 			if err != nil {
 				return err
 			}
@@ -158,9 +159,21 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		return err
 	}
 
+	// dst.Import samples the destination side; the source repository's reads
+	// live on a separate tracker, so sample those here to cover both stores.
+	syncEmitter := dst.Emitter("synchronize")
+	defer syncEmitter.Close()
+	src.repository.IOStats().Reset()
+	srcSampler := iostat.NewSampler(syncEmitter, dst.AppContext().IOStatsInterval,
+		iostat.ScopedTracker{Name: "source-storage", T: src.repository.IOStats()},
+	)
+	srcSampler.Start(dst.AppContext())
+
 	if err := dst.Import(source); err != nil {
+		srcSampler.Stop()
 		return err
 	}
+	srcSampler.Stop()
 
 	srcErrors := imp.src.Header.GetSource(0).Summary.Directory.Errors + imp.src.Header.GetSource(0).Summary.Below.Errors
 	nErrors := dst.Header.GetSource(0).Summary.Directory.Errors + dst.Header.GetSource(0).Summary.Below.Errors

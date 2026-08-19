@@ -56,7 +56,7 @@ func TestSeqPackerPutDuringWait(t *testing.T) {
 				mac := objects.MAC{byte(seed), byte(i), byte(i >> 8)}
 				// Ignore the error: after shutdown Put will return one, which
 				// is the contract under test.
-				_ = mgr.Put(-1, resources.RT_CHUNK, mac, []byte("payload"))
+				_ = mgr.Put(-1, resources.RT_CHUNK, mac, []byte("payload"), false)
 			}
 		}(p)
 	}
@@ -98,7 +98,7 @@ func TestSeqPackerPutAfterWait(t *testing.T) {
 		}
 	}()
 	mac := objects.MAC{99}
-	if err := mgr.Put(-1, resources.RT_CHUNK, mac, []byte("x")); err == nil {
+	if err := mgr.Put(-1, resources.RT_CHUNK, mac, []byte("x"), false); err == nil {
 		t.Fatalf("expected Put after Wait to return an error, got nil")
 	}
 }

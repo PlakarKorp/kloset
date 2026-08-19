@@ -181,7 +181,10 @@ func TestNewInMemoryFooterFromBytesPartialFlags(t *testing.T) {
 func TestNewInMemoryIndexFromBytesTruncated(t *testing.T) {
 	// A full Blob record is BLOB_RECORD_SIZE bytes. Truncate to a partial
 	// record so binary.Read fails partway through.
-	for _, n := range []int{1, 5, 12, 30, 50, 55} {
+	// Each size truncates at a different field boundary within a single 56-byte
+	// record: Type(4) Version(4) MAC(32) Offset(8) Length(4) Flags(4).
+	//   1  -> Type, 5 -> Version, 12 -> MAC, 44 -> Offset, 50 -> Length, 55 -> Flags.
+	for _, n := range []int{1, 5, 12, 30, 44, 50, 55} {
 		_, err := NewInMemoryIndexFromBytes(versioning.FromString(VERSION), make([]byte, n))
 		require.Error(t, err)
 	}

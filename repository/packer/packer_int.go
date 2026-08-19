@@ -17,9 +17,15 @@ type PackerManagerInt interface {
 	Run() error
 	Wait()
 	InsertIfNotPresent(Type resources.Type, mac objects.MAC) (bool, error)
-	Put(hint int, Type resources.Type, mac objects.MAC, data []byte) error
+	Put(hint int, Type resources.Type, mac objects.MAC, data []byte, hot bool) error
 	Exists(Type resources.Type, mac objects.MAC) (bool, error)
 }
+
+type PackerMsgFlags uint32
+
+const (
+	PackfileHot PackerMsgFlags = 1 << iota // not to be serialized, this is a runtime information.
+)
 
 type PackerMsg struct {
 	Timestamp time.Time
@@ -27,5 +33,5 @@ type PackerMsg struct {
 	Version   versioning.Version
 	MAC       objects.MAC
 	Data      []byte
-	Flags     uint32
+	Flags     PackerMsgFlags
 }
