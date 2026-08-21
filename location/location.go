@@ -10,12 +10,17 @@ import (
 type Flags uint32
 
 const (
-	FLAG_LOCALFS Flags = 1 << iota // all: dealing with a file (or dir) on the local fs
-	FLAG_FILE                      // storage: kloset is in a single file
-	FLAG_STREAM                    // importer: cannot call Import() more than once
-	FLAG_NEEDACK                   // importer: cares about acknowledgments in Import()
-	FLAG_NOMERGE                   // importer: cannot merge those in a single snapshot (multidir support)
-	FLAG_EXPORTXATTR               // exporter: please send extended attributes during Export()
+	FLAG_LOCALFS     Flags = 1 << iota // all: dealing with a file (or dir) on the local fs
+	FLAG_FILE                          // storage: kloset is in a single file
+	FLAG_SIDEEFFECTS                   // importer: has side effects, don't compute statistics
+	FLAG_NEEDACK                       // importer: cares about acknowledgments in Import()
+	FLAG_NOMERGE                       // importer: cannot merge those in a single snapshot (multidir support)
+	FLAG_EXPORTXATTR                   // exporter: send extended attributes during Export()
+
+	// compat:
+
+	// Deprecated: name for FLAG_SIDEEFFECTS
+	FLAG_STREAM = FLAG_SIDEEFFECTS
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")
@@ -119,8 +124,8 @@ func ParseFlag(name string) (Flags, error) {
 		return FLAG_LOCALFS, nil
 	case "file":
 		return FLAG_FILE, nil
-	case "stream":
-		return FLAG_STREAM, nil
+	case "sideeffects", "stream":
+		return FLAG_SIDEEFFECTS, nil
 	case "needack":
 		return FLAG_NEEDACK, nil
 	case "nomerge":
