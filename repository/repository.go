@@ -738,6 +738,19 @@ func (r *Repository) DeleteSnapshot(snapshotID objects.MAC) error {
 		r.Logger().Trace("repository", "DeleteSnapshot(%x): %s", snapshotID, time.Since(t0))
 	}()
 
+	return r.DeleteSnapshots([]objects.MAC{snapshotID})
+}
+
+func (r *Repository) DeleteSnapshots(snapshotIDs []objects.MAC) error {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "DeleteSnapshots(%d): %s", len(snapshotIDs), time.Since(t0))
+	}()
+
+	if len(snapshotIDs) == 0 {
+		return nil
+	}
+
 	identifier := objects.RandomMAC()
 	sc, err := r.AppContext().GetCache().Scan(identifier)
 	if err != nil {
@@ -745,23 +758,19 @@ func (r *Repository) DeleteSnapshot(snapshotID objects.MAC) error {
 	}
 	deltaState := r.state.Derive(sc)
 
-	ret := deltaState.ColourResource(resources.RT_SNAPSHOT, snapshotID)
-	if ret != nil {
-		return ret
+	for _, snapshotID := range snapshotIDs {
+		if err := deltaState.ColourResource(resources.RT_SNAPSHOT, snapshotID); err != nil {
+			return err
+		}
 	}
 
 	buffer := &bytes.Buffer{}
-	err = deltaState.SerializeToStream(buffer)
-	if err != nil {
+	if err := deltaState.SerializeToStream(buffer); err != nil {
 		return err
 	}
 
 	mac := r.ComputeMAC(buffer.Bytes())
-	if err := r.PutState(mac, buffer); err != nil {
-		return err
-	}
-
-	return nil
+	return r.PutState(mac, buffer)
 }
 
 func (r *Repository) GetStates() ([]objects.MAC, error) {
