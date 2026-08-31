@@ -1,6 +1,7 @@
 package snapshot
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -235,6 +236,13 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		ctx = snap.AppContext()
 	)
 
+	// Scoped to this source so we can unblock our own workers on the way
+	// out without disturbing the rest of the backup. Importers are only
+	// required to close records on success; on the error path we cancel
+	// instead of trusting them to.
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+
 	var results chan *connectors.Result
 	if (imp.Flags() & location.FLAG_NEEDACK) != 0 {
 		results = make(chan *connectors.Result, size)
@@ -246,8 +254,8 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		wg.Go(func() error {
 			for {
 				select {
-				case <-ctx.Done():
-					return ctx.Err()
+				case <-workerCtx.Done():
+					return workerCtx.Err()
 
 				case record, ok := <-records:
 					if !ok {
@@ -288,8 +296,18 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 
 			// we also need to drain records if we were canceled
 			// otherwise importers may hang if they tried to send
-			// before handling cancellation
-			for range records {
+			// before handling cancellation.
+			//
+			// Stop once it's drained rather than once it's closed: a
+			// failing importer may return without ever closing it, and
+			// blocking here would keep errch open forever.
+			for drained := false; !drained; {
+				select {
+				case _, ok := <-records:
+					drained = !ok
+				default:
+					drained = true
+				}
 			}
 		}
 
@@ -306,15 +324,24 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 			// workers.
 		}
 	}
+
+	// Always wait for the workers, even when the importer failed: they
+	// keep writing to stats and to sourceCtx until they stop, and our
+	// caller reads stats as soon as we return.
+	//
+	// On success the importer has closed records, so the workers are
+	// already on their way out. On failure it may not have, so cancel
+	// them rather than wait for a close that may never come.
+	if importerErr != nil {
+		stopWorkers()
+	}
+	workerErr := <-errch
+
 	if importerErr != nil {
 		return importerErr
 	}
 
-	if err := <-errch; err != nil {
-		return err
-	}
-
-	return nil
+	return workerErr
 }
 
 func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
@@ -328,9 +355,9 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 	defer func() {
 		snap.emitter.Info("snapshot.import.done", map[string]any{
-			"nfiles": stats.nfiles,
-			"ndirs":  stats.ndirs,
-			"size":   stats.size,
+			"nfiles": atomic.LoadUint64(&stats.nfiles),
+			"ndirs":  atomic.LoadUint64(&stats.ndirs),
+			"size":   atomic.LoadUint64(&stats.size),
 		})
 	}()
 
