@@ -2,6 +2,7 @@ package events_test
 
 import (
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -371,4 +372,52 @@ func TestListenReturnsConsistentChannel(t *testing.T) {
 	ch2 := bus.Listen()
 	require.Equal(t, ch1, ch2, "Listen should return the same channel")
 	bus.Close()
+}
+
+// Listen, emitters and Close used to race on the lazily created bus
+// channel, and a Close racing an in-flight emit panicked on a closed
+// channel; both only trip with concurrent use, the former under -race.
+func TestEventsBUSConcurrentListenEmitClose(t *testing.T) {
+	bus := events.NewEventsBUS(16)
+
+	listening := make(chan (<-chan *events.Event))
+	go func() {
+		listening <- bus.Listen()
+	}()
+
+	drained := make(chan struct{})
+	go func() {
+		for range <-listening {
+		}
+		close(drained)
+	}()
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			emitter := bus.NewRepositoryEmitter(uuid.New(), "race")
+			<-start
+			for range 64 {
+				emitter.Info("tick", nil)
+				bus.Publish(&events.Event{Version: 1, Type: "published"})
+			}
+			emitter.Close()
+		}()
+	}
+
+	close(start)
+	bus.Close() // races the emitters: late events are dropped, not a panic
+	bus.Close() // closing twice is a no-op
+	wg.Wait()
+	<-drained
+}
+
+func TestEventsBUSListenAfterClose(t *testing.T) {
+	bus := events.NewEventsBUS(16)
+	bus.Close()
+	_, ok := <-bus.Listen()
+	require.False(t, ok, "Listen after Close should return a closed channel")
 }
