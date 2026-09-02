@@ -1,6 +1,7 @@
 package events
 
 import (
+	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/iostat"
@@ -9,7 +10,9 @@ import (
 )
 
 type EventsBUS struct {
+	mu     sync.RWMutex // held shared across sends so Close cannot close mid-send
 	c      chan *Event
+	closed bool
 	buffer int
 }
 
@@ -19,7 +22,15 @@ func NewEventsBUS(buffer int) *EventsBUS {
 	}
 }
 
+// Close waits for in-flight publications, then closes the bus; events
+// published from then on are dropped.
 func (eb *EventsBUS) Close() {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
+	if eb.closed {
+		return
+	}
+	eb.closed = true
 	if eb.c != nil {
 		close(eb.c)
 	}
@@ -40,15 +51,30 @@ func (eb *EventsBUS) NewSnapshotEmitter(repository uuid.UUID, snapshot objects.M
 }
 
 func (eb *EventsBUS) Listen() <-chan *Event {
+	eb.mu.Lock()
+	defer eb.mu.Unlock()
 	if eb.c == nil {
 		eb.c = make(chan *Event, eb.buffer)
+		if eb.closed {
+			close(eb.c)
+		}
 	}
 	return eb.c
 }
 
-// Publish injects an event onto the bus, dropping it if nobody listens.
+// active reports whether publishing would deliver anything.
+func (eb *EventsBUS) active() bool {
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	return eb.c != nil && !eb.closed
+}
+
+// Publish injects an event onto the bus, dropping it if nobody listens
+// or the bus is closed.
 func (eb *EventsBUS) Publish(e *Event) {
-	if eb.c == nil {
+	eb.mu.RLock()
+	defer eb.mu.RUnlock()
+	if eb.c == nil || eb.closed {
 		return
 	}
 	eb.c <- e
@@ -107,13 +133,13 @@ func newEmitter(eb *EventsBUS, repository uuid.UUID, snapshot objects.MAC, job u
 }
 
 func (e *Emitter) emit(typ, level string, kv map[string]any) {
-	if e.bus == nil || e.bus.c == nil {
+	if e.bus == nil || !e.bus.active() {
 		return
 	}
-	e.bus.c <- &Event{
+	e.bus.Publish(&Event{
 		Version: 1, Timestamp: time.Now().UTC(),
 		Level: level, Type: typ, Repository: e.repository, Snapshot: e.snapshot, Workflow: e.workflow, Job: e.job, Data: kv,
-	}
+	})
 }
 
 func (e *Emitter) Info(typ string, kv map[string]any) {
