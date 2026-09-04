@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"slices"
 	"strconv"
 	"sync/atomic"
 	"time"
@@ -271,6 +272,16 @@ func (snap *Builder) Lock() (chan bool, error) {
 	for _, lockID := range locksID {
 		rd, err := snap.repository.GetLock(lockID)
 		if err != nil {
+			// Err can't tell us if it's not found or a transport error, so
+			// relist because it might have been Deleted by another process in
+			// which case it's fine to continue
+			if lockIDs, err := snap.repository.GetLocks(); err == nil {
+				if !slices.Contains(lockIDs, lockID) {
+					continue
+				}
+			}
+
+			// Okay it was an actual error we can't proceed further
 			snap.repository.DeleteLock(snap.Header.Identifier)
 			return nil, err
 		}
@@ -284,10 +295,11 @@ func (snap *Builder) Lock() (chan bool, error) {
 
 		/* Kick out stale locks */
 		if lock.IsStale() {
-			err := snap.repository.DeleteLock(lockID)
-			if err != nil {
-				snap.repository.DeleteLock(snap.Header.Identifier)
-				return nil, err
+			if err := snap.repository.DeleteLock(lockID); err != nil {
+				// Failure to delete is not an hardstop, either it was already
+				// deleted, or there is a real failure to do it, but this lock
+				// is Shared so we can keep going on.
+				snap.Logger().Warn("failed to remove stale lock %x: %s", lockID, err)
 			}
 
 			continue
