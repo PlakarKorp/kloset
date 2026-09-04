@@ -321,23 +321,44 @@ func (snap *Builder) Lock() (chan bool, error) {
 	}
 
 	// The following bit is a "ping" mechanism, Lock() is a bit badly named at this point,
-	// we are just refreshing the existing lock so that the watchdog doesn't removes us.
+	// we are just refreshing the existing lock so that the others don't consider
+	// us stale and kick us out.
 	go func() {
+		lastRefresh := time.Now()
+		refresh := time.After(repository.LOCK_REFRESH_RATE)
+
 		for {
 			select {
 			case <-lockReleaser:
 				snap.lockReleased <- snap.repository.DeleteLock(snap.Header.Identifier)
 				return
-			case <-time.After(repository.LOCK_REFRESH_RATE):
+			case <-refresh:
+
+				// We retried hard to update the lock but failed and it's now
+				// stale, so abort everything before a concurrent operation
+				// thinks it's okay to start.
+				if time.Since(lastRefresh) >= repository.LOCK_TTL {
+					snap.appContext.Cancel(fmt.Errorf("lock refresher: failed to refresh the repository lock for %s", time.Since(lastRefresh)))
+					refresh = nil
+					continue
+				}
+
 				lock := repository.NewSharedLock(snap.appContext.Hostname)
 
 				buffer := &bytes.Buffer{}
 
-				// We ignore errors here on purpose, it's tough to handle them
-				// correctly, and if they happen we will be ripped by the
-				// watchdog anyway.
 				lock.SerializeToStream(buffer)
-				snap.repository.PutLock(snap.Header.Identifier, buffer)
+				if _, err := snap.repository.PutLock(snap.Header.Identifier, buffer); err != nil {
+					// For some storage reason the refresh failed, warn the user
+					// and retry sooner than the normal rate so that we don't
+					// have to abort the backup.
+					snap.Logger().Warn("failed to refresh the repository lock: %s", err)
+					refresh = time.After(repository.LOCK_REFRESH_RATE / 10)
+					continue
+				}
+
+				lastRefresh = time.Now()
+				refresh = time.After(repository.LOCK_REFRESH_RATE)
 			}
 		}
 	}()
