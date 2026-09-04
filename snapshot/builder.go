@@ -42,6 +42,7 @@ type Builder struct {
 	emitter *events.Emitter
 
 	lockReleaser chan bool
+	lockReleased chan error
 
 	beginTime time.Time
 
@@ -218,7 +219,9 @@ func (snap *Builder) Close() error {
 	snap.Logger().Trace("snapshotBuilder", "%x: Close(): %x", snap.Header.Identifier, snap.Header.GetIndexShortID())
 	defer snap.emitter.Close()
 
-	snap.Unlock()
+	if err := snap.Unlock(); err != nil {
+		snap.Logger().Warn("failed to release lock %x (%s), you might need to remove it manually", snap.Header.Identifier, err)
+	}
 
 	if snap.scanCache != nil {
 		return snap.scanCache.Close()
@@ -237,9 +240,11 @@ func (snap *Builder) AppContext() *kcontext.KContext {
 
 func (snap *Builder) Lock() (chan bool, error) {
 	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
-	lockDone := make(chan bool)
+	lockReleaser := make(chan bool)
+	snap.lockReleased = make(chan error, 1)
 	if lockless {
-		return lockDone, nil
+		close(snap.lockReleased)
+		return lockReleaser, nil
 	}
 
 	lock := repository.NewSharedLock(snap.appContext.Hostname)
@@ -304,8 +309,8 @@ func (snap *Builder) Lock() (chan bool, error) {
 	go func() {
 		for {
 			select {
-			case <-lockDone:
-				snap.repository.DeleteLock(snap.Header.Identifier)
+			case <-lockReleaser:
+				snap.lockReleased <- snap.repository.DeleteLock(snap.Header.Identifier)
 				return
 			case <-time.After(repository.LOCK_REFRESH_RATE):
 				lock := repository.NewSharedLock(snap.appContext.Hostname)
@@ -321,11 +326,12 @@ func (snap *Builder) Lock() (chan bool, error) {
 		}
 	}()
 
-	return lockDone, nil
+	return lockReleaser, nil
 }
 
-func (snap *Builder) Unlock() {
+func (snap *Builder) Unlock() error {
 	close(snap.lockReleaser)
+	return <-snap.lockReleased
 }
 
 func (snap *Builder) flushDeltaState() {
