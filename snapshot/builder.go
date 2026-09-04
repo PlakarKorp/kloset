@@ -270,6 +270,10 @@ func (snap *Builder) Lock() (chan bool, error) {
 	}
 
 	for _, lockID := range locksID {
+		if lockID == snap.Header.Identifier {
+			continue
+		}
+
 		rd, err := snap.repository.GetLock(lockID)
 		if err != nil {
 			// Err can't tell us if it's not found or a transport error, so
