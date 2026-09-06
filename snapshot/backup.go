@@ -16,6 +16,7 @@ import (
 
 	chunkers "github.com/PlakarKorp/go-cdc-chunkers"
 	"github.com/PlakarKorp/kloset/btree"
+	"github.com/PlakarKorp/kloset/btree/filestore"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/importer"
@@ -685,32 +686,32 @@ func (snap *Builder) tmpCacheDir() string {
 func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	bi := &sourceIndexes{}
 
-	vfsstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "vfs")
+	vfsstore, err := filestore.New[string, []byte](snap.tmpCacheDir(), "vfs")
 	if err != nil {
 		return nil, err
 	}
 
-	summarystore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "summary")
+	summarystore, err := filestore.New[string, []byte](snap.tmpCacheDir(), "summary")
 	if err != nil {
 		return nil, err
 	}
 
-	errstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "error")
+	errstore, err := filestore.New[string, objects.MAC](snap.tmpCacheDir(), "error")
 	if err != nil {
 		return nil, err
 	}
 
-	xattrstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "xattr")
+	xattrstore, err := filestore.New[string, objects.MAC](snap.tmpCacheDir(), "xattr")
 	if err != nil {
 		return nil, err
 	}
 
-	ctstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "contenttype")
+	ctstore, err := filestore.New[string, objects.MAC](snap.tmpCacheDir(), "contenttype")
 	if err != nil {
 		return nil, err
 	}
 
-	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
+	dirpackstore, err := filestore.New[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
 	if err != nil {
 		return nil, err
 	}
