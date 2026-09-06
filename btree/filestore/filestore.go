@@ -1,8 +1,8 @@
-// Package storage provides an on-disk [btree.Storer] meant for backup
+// Package filestore provides an on-disk [btree.Storer] meant for backup
 // operations (i.e. heavy-write, almost no reads or updates).  It is
 // backed by a file containing only the concatenated msgpack-encoded
 // nodes.  An in-memory indexs maps the IDs to the record on disk.
-package storage
+package filestore
 
 import (
 	"fmt"
