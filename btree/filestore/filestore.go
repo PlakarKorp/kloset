@@ -9,7 +9,6 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
-	"sync/atomic"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/vmihailenco/msgpack/v5"
@@ -26,13 +25,10 @@ type FileStore[K any, V any] struct {
 	file *os.File
 	path string
 
-	// next free byte in the file, bump-allocated so that concurrent
-	// Put/Update calls can write in parallel without serializing on
-	// the mutex below.
-	offset atomic.Uint64
-
-	mu    sync.Mutex
-	index []record
+	mu     sync.Mutex
+	offset uint64
+	index  []record
+	free   []record // holes left behind by Update, reusable by write
 }
 
 // New creates a new FileStore backed by a file named name inside dir.
@@ -75,20 +71,42 @@ func (s *FileStore[K, V]) Get(ptr int) (*btree.Node[K, int, V], error) {
 	return node, nil
 }
 
-// write appends the encoded node to the file at a freshly reserved
-// offset and returns where it landed.
+// alloc does a first-fit scan of the free list for a hole that fits
+// length bytes, otherwise reserves some space at the end of the file.
+func (s *FileStore[K, V]) alloc(length uint32) uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for i, r := range s.free {
+		if r.length >= length {
+			s.free[i] = s.free[len(s.free)-1]
+			s.free = s.free[:len(s.free)-1]
+			return r.offset
+		}
+	}
+
+	// cannot reuse a free block, append to the end of the file.
+	off := s.offset
+	s.offset += uint64(length)
+	return off
+}
+
+// write encodes node and stores it at a reused hole if the free list
+// has one big enough, or else at a freshly reserved offset, and
+// returns where it landed.
 func (s *FileStore[K, V]) write(node *btree.Node[K, int, V]) (record, error) {
 	buf, err := msgpack.Marshal(node)
 	if err != nil {
 		return record{}, err
 	}
+	length := uint32(len(buf))
 
-	off := s.offset.Add(uint64(len(buf))) - uint64(len(buf))
+	off := s.alloc(length)
 	if _, err := s.file.WriteAt(buf, int64(off)); err != nil {
 		return record{}, err
 	}
 
-	return record{offset: off, length: uint32(len(buf))}, nil
+	return record{offset: off, length: length}, nil
 }
 
 func (s *FileStore[K, V]) Update(ptr int, node *btree.Node[K, int, V]) error {
@@ -102,6 +120,7 @@ func (s *FileStore[K, V]) Update(ptr int, node *btree.Node[K, int, V]) error {
 	if ptr < 0 || ptr >= len(s.index) {
 		return fmt.Errorf("storage: no such node %d", ptr)
 	}
+	s.free = append(s.free, s.index[ptr])
 	s.index[ptr] = rec
 	return nil
 }
