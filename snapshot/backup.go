@@ -824,15 +824,13 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}
 
 	if cachedPath != nil && cachedPath.ObjectMAC != (objects.MAC{}) {
-		if snap.repository.BlobExists(resources.RT_OBJECT, cachedPath.ObjectMAC) {
-			return &contentMeta{
-				ObjectMAC:   cachedPath.ObjectMAC,
-				Size:        cachedPath.FileInfo.Size(),
-				Chunks:      cachedPath.Chunks,
-				Entropy:     cachedPath.Entropy,
-				ContentType: cachedPath.ContentType,
-			}, nil
-		}
+		return &contentMeta{
+			ObjectMAC:   cachedPath.ObjectMAC,
+			Size:        cachedPath.FileInfo.Size(),
+			Chunks:      cachedPath.Chunks,
+			Entropy:     cachedPath.Entropy,
+			ContentType: cachedPath.ContentType,
+		}, nil
 	}
 
 	obj, objMAC, dataSize, err := snap.chunkify(idx, chunker, record.Pathname, record.Reader, record.IsXattr)
@@ -856,7 +854,7 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 	dirEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
 	var dirEntryMAC objects.MAC
 
-	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+	if cachedPath != nil {
 		dirEntryMAC = cachedPath.MAC
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
@@ -897,7 +895,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	var serializedFileEntry []byte
 	var err error
 
-	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+	if cachedPath != nil {
 		fileEntryMAC = cachedPath.MAC
 		if fileEntry.Object == (objects.MAC{}) && cachedPath.ObjectMAC != (objects.MAC{}) {
 			fileEntry.Object = cachedPath.ObjectMAC
