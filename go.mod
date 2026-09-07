@@ -1,6 +1,6 @@
 module github.com/PlakarKorp/kloset
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/PlakarKorp/go-cdc-chunkers v1.1.0
@@ -18,7 +18,7 @@ require (
 	github.com/tink-crypto/tink-go/v2 v2.8.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/blake3 v0.2.4
-	golang.org/x/crypto v0.55.0
+	golang.org/x/crypto v0.56.0
 	golang.org/x/mod v0.40.0
 	golang.org/x/sync v0.22.0
 	modernc.org/sqlite v1.58.0
