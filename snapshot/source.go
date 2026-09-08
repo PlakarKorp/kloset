@@ -51,7 +51,7 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 		} else if s.typ != typ {
 			return nil, fmt.Errorf("mismatched type when adding importer %q expected %q", typ, s.typ)
 		} else if s.flags != flags {
-			return nil, fmt.Errorf("mismatched flags when adding importer %q expected %q", flags, s.flags)
+			return nil, fmt.Errorf("mismatched flags when adding importer %d expected %d", flags, s.flags)
 		}
 
 		is = append(is, imp)
