@@ -33,6 +33,7 @@ import (
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/repository/state"
 	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/throttle"
 	"github.com/PlakarKorp/kloset/versioning"
 )
 
@@ -87,6 +88,8 @@ type Repository struct {
 	ImportStats *iostat.IOTracker
 	ExportStats *iostat.IOTracker
 
+	throttler *throttle.Throttler
+
 	storageSize      int64
 	storageSizeDirty bool
 
@@ -116,6 +119,9 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 type RepositoryOpts struct {
 	DoRebuild    bool // Rebuild the state cache.
 	RWStateCache bool // Sets the state cache as writable
+
+	MaxReadRate  int64 // 0 is unlimited
+	MaxWriteRate int64 // 0 is unlimited
 }
 
 // New API to construct a repository, covering all cases rather than having
@@ -168,6 +174,11 @@ func NewRepository(ctx *kcontext.KContext, secret []byte, store storage.Store, c
 		ioStats:          iostat.New(),
 		ImportStats:      iostat.New(),
 		ExportStats:      iostat.New(),
+	}
+
+	if opts.MaxReadRate != 0 || opts.MaxWriteRate != 0 {
+		r.throttler = throttle.NewThrottler(opts.MaxReadRate, opts.MaxWriteRate)
+		r.store = NewThrottledStore(store, r.throttler)
 	}
 
 	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), !opts.RWStateCache)
