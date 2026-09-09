@@ -33,10 +33,15 @@ func (l *Throttler) ReadCloser(ctx context.Context, rd io.ReadCloser) io.ReadClo
 	}
 }
 
+// Charges against the write side of the throttling by consuming from a reader
+// (upload style).
 func (l *Throttler) WriteFromReader(ctx context.Context, rd io.Reader) io.Reader {
 	return &ThrottledReader{ctx: ctx, rd: rd, b: l.write}
 }
 
-func (l *Throttler) Writer(ctx context.Context, wr io.Writer) io.Writer {
-	return &ThrottledWriter{ctx: ctx, wr: wr, b: l.write}
+func (l *Throttler) WriteFromReadCloser(ctx context.Context, rd io.ReadCloser) io.ReadCloser {
+	return &ThrottledReadCloser{
+		ThrottledReader: ThrottledReader{ctx: ctx, rd: rd, b: l.write},
+		closer:          rd,
+	}
 }

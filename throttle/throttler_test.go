@@ -68,25 +68,47 @@ func TestThrottlerReadersShareReadBucket(t *testing.T) {
 	}
 }
 
-func TestThrottlerWriterChargesWriteBucket(t *testing.T) {
+func TestThrottlerWriteFromReaderChargesWriteBucket(t *testing.T) {
 	l := NewThrottler(0, 0)
-	var sink countingWriter
-	wr := l.Writer(context.Background(), &sink)
-	n, err := wr.Write([]byte("hello"))
+	rd := l.WriteFromReader(context.Background(), strings.NewReader("hello"))
+	got, err := io.ReadAll(rd)
 	if err != nil {
-		t.Fatalf("Write: %v", err)
+		t.Fatalf("ReadAll: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("n = %d, want 5", n)
-	}
-	if sink.buf.String() != "hello" {
-		t.Errorf("sink = %q, want %q", sink.buf.String(), "hello")
+	if string(got) != "hello" {
+		t.Errorf("read %q, want %q", got, "hello")
 	}
 	if l.write.consumed != 5 {
 		t.Errorf("write consumed = %d, want 5", l.write.consumed)
 	}
 	if l.read.consumed != 0 {
-		t.Errorf("read consumed = %d, want 0 (writes must not charge reads)", l.read.consumed)
+		t.Errorf("read consumed = %d, want 0 (uploads must not charge reads)", l.read.consumed)
+	}
+}
+
+func TestThrottlerWriteFromReadCloserChargesAndCloses(t *testing.T) {
+	l := NewThrottler(0, 0)
+	rc := &recordingCloser{Reader: strings.NewReader("payload")}
+	trc := l.WriteFromReadCloser(context.Background(), rc)
+
+	got, err := io.ReadAll(trc)
+	if err != nil {
+		t.Fatalf("ReadAll: %v", err)
+	}
+	if string(got) != "payload" {
+		t.Errorf("read %q, want %q", got, "payload")
+	}
+	if err := trc.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if !rc.closed {
+		t.Error("Close did not propagate to the underlying closer")
+	}
+	if l.write.consumed != int64(len("payload")) {
+		t.Errorf("write consumed = %d, want %d", l.write.consumed, len("payload"))
+	}
+	if l.read.consumed != 0 {
+		t.Errorf("read consumed = %d, want 0 (uploads must not charge reads)", l.read.consumed)
 	}
 }
 
