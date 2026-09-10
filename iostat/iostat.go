@@ -41,6 +41,11 @@ type IOStats struct {
 	P90 float64
 	P95 float64
 	P99 float64
+
+	// Latency is the distribution of individual operation durations fed
+	// through ObserveLatency; zero-valued when the tracker's owner does not
+	// observe latency (today only packfile Puts to the storage backend do).
+	Latency LatencyStats
 }
 
 type tracker struct {
@@ -58,6 +63,8 @@ type tracker struct {
 	bucketBytes    int64
 	bucketDuration time.Duration
 	samples        []float64
+
+	lat latencyHistogram
 }
 
 func newTracker() *tracker {
@@ -120,6 +127,15 @@ func (t *tracker) Reset() {
 	t.samples = nil
 	t.bucketBytes = 0
 	t.bucketDuration = 0
+	t.lat.reset()
+}
+
+// ObserveLatency accounts for one operation that took d, independently of the
+// byte/throughput accounting done through spans.
+func (t *tracker) ObserveLatency(d time.Duration) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.lat.observe(d)
 }
 
 func percentile(sorted []float64, p float64) float64 {
@@ -173,6 +189,7 @@ func (t *tracker) Stats() IOStats {
 		Duration:     duration,
 		WallDuration: wall,
 		TotalBytes:   t.totalBytes,
+		Latency:      t.lat.stats(),
 	}
 
 	if duration > 0 && t.totalBytes > 0 {
@@ -281,6 +298,22 @@ func formatThroughput(bps float64) string {
 	return fmt.Sprintf("%s/s", humanize.IBytes(uint64(bps)))
 }
 
+func formatLatency(l LatencyStats) string {
+	if l.Count == 0 {
+		return ""
+	}
+	return fmt.Sprintf(", lat: n=%d, min=%s, avg=%s, p50=%s, p90=%s, p95=%s, p99=%s, max=%s",
+		l.Count,
+		l.Min.Round(time.Microsecond),
+		l.Avg.Round(time.Microsecond),
+		l.P50.Round(time.Microsecond),
+		l.P90.Round(time.Microsecond),
+		l.P95.Round(time.Microsecond),
+		l.P99.Round(time.Microsecond),
+		l.Max.Round(time.Microsecond),
+	)
+}
+
 func (ioT *IOTracker) SummaryString() string {
 	r := ioT.Read.Stats()
 	w := ioT.Write.Stats()
@@ -300,7 +333,7 @@ func (ioT *IOTracker) SummaryString() string {
 			" p90=%s,"+
 			" p95=%s,"+
 			" p99=%s,"+
-			" max=%s\n"+
+			" max=%s%s\n"+
 			"w:"+
 			" dt=%s,"+
 			" wall=%s,"+
@@ -315,7 +348,7 @@ func (ioT *IOTracker) SummaryString() string {
 			" p90=%s,"+
 			" p95=%s,"+
 			" p99=%s,"+
-			" max=%s\n",
+			" max=%s%s\n",
 		r.Duration, r.WallDuration, formatBytes(r.TotalBytes), r.TotalBytes,
 		formatThroughput(r.Overall),
 		formatThroughput(r.OverallWall),
@@ -328,6 +361,7 @@ func (ioT *IOTracker) SummaryString() string {
 		formatThroughput(r.P95),
 		formatThroughput(r.P99),
 		formatThroughput(r.Max),
+		formatLatency(r.Latency),
 
 		w.Duration, w.WallDuration, formatBytes(w.TotalBytes), w.TotalBytes,
 		formatThroughput(w.Overall),
@@ -341,5 +375,6 @@ func (ioT *IOTracker) SummaryString() string {
 		formatThroughput(w.P95),
 		formatThroughput(w.P99),
 		formatThroughput(w.Max),
+		formatLatency(w.Latency),
 	)
 }
