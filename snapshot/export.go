@@ -15,6 +15,7 @@ import (
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/throttle"
 )
 
 // countingReadCloser accounts the bytes the exporter reads against a write
@@ -58,6 +59,7 @@ type ExportOptions struct {
 	Strip           string
 	SkipPermissions bool
 	ForceCompletion bool
+	MaxWriteRate    int64
 }
 
 func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *ExportOptions) error {
@@ -71,6 +73,11 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	)
 	sampler.Start(snap.AppContext())
 	defer sampler.Stop()
+
+	var throttler *throttle.Throttler
+	if opts.MaxWriteRate > 0 {
+		throttler = throttle.NewThrottler(0, opts.MaxWriteRate)
+	}
 
 	// these are wrong and need to be actually computed from the
 	// entry that we're about to walk.  keeping for now for
@@ -210,6 +217,10 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 					var rd io.ReadCloser = f
 					if isRegular {
 						rd = newCountingReadCloser(rd, snap.repository.ExportStats.GetWriteSpan())
+					}
+
+					if throttler != nil {
+						rd = throttler.WriteFromReadCloser(snap.AppContext(), rd)
 					}
 					return rd, nil
 				})

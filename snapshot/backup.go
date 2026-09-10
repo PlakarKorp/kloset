@@ -27,6 +27,7 @@ import (
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/scanlog"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/throttle"
 	"github.com/gabriel-vasile/mimetype"
 	"golang.org/x/sync/errgroup"
 )
@@ -364,6 +365,11 @@ func (snap *Builder) Backup(source *Source) error {
 	sampler.Start(snap.AppContext())
 	defer sampler.Stop()
 
+	snap.throttler = nil
+	if source.MaxReadRate() > 0 {
+		snap.throttler = throttle.NewThrottler(source.MaxReadRate(), 0)
+	}
+
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -521,6 +527,10 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	var totalEntropy float64
 	var totalFreq [256]float64
 	var totalDataSize int64
+
+	if snap.throttler != nil {
+		rd = snap.throttler.Reader(snap.AppContext(), rd)
+	}
 
 	// Helper function to process a chunk
 	processChunk := func(idx int, data []byte) error {

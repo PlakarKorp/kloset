@@ -19,6 +19,7 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/throttle"
 )
 
 type Builder struct {
@@ -48,6 +49,8 @@ type Builder struct {
 	beginTime time.Time
 
 	noSkipSelf bool
+
+	throttler *throttle.Throttler
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
