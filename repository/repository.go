@@ -33,6 +33,7 @@ import (
 	"github.com/PlakarKorp/kloset/packfile"
 	"github.com/PlakarKorp/kloset/repository/state"
 	"github.com/PlakarKorp/kloset/resources"
+	"github.com/PlakarKorp/kloset/throttle"
 	"github.com/PlakarKorp/kloset/versioning"
 )
 
@@ -87,6 +88,8 @@ type Repository struct {
 	ImportStats *iostat.IOTracker
 	ExportStats *iostat.IOTracker
 
+	throttler *throttle.Throttler
+
 	storageSize      int64
 	storageSizeDirty bool
 
@@ -113,11 +116,26 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 	}, nil
 }
 
-func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte) (*Repository, error) {
+type RepositoryOpts struct {
+	DoRebuild    bool // Rebuild the state cache.
+	RWStateCache bool // Sets the state cache as writable
+
+	MaxReadRate  int64 // 0 is unlimited
+	MaxWriteRate int64 // 0 is unlimited
+}
+
+// New API to construct a repository, covering all cases rather than having
+// multiple constructors.
+// A nil opts give you a read-only state cache, no state rebuild.
+func NewRepository(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte, opts *RepositoryOpts) (*Repository, error) {
 	t0 := time.Now()
 	defer func() {
-		ctx.GetLogger().Trace("repository", "New(store=%p): %s", store, time.Since(t0))
+		ctx.GetLogger().Trace("repository", "NewRepository(store=%p): %s", store, time.Since(t0))
 	}()
+
+	if opts == nil {
+		opts = &RepositoryOpts{}
+	}
 
 	var hasher hash.Hash
 	if secret != nil {
@@ -158,7 +176,12 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		ExportStats:      iostat.New(),
 	}
 
-	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), false)
+	if opts.MaxReadRate != 0 || opts.MaxWriteRate != 0 {
+		r.throttler = throttle.NewThrottler(opts.MaxReadRate, opts.MaxWriteRate)
+		r.store = NewThrottledStore(store, r.throttler)
+	}
+
+	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), !opts.RWStateCache)
 	if err != nil {
 		return nil, err
 	}
@@ -174,75 +197,23 @@ func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []by
 		return hasher
 	})
 
-	if err := r.RebuildState(); err != nil {
-		return nil, err
+	if opts.DoRebuild {
+		if err := r.RebuildState(); err != nil {
+			return nil, err
+		}
 	}
 
 	return r, nil
 }
 
+// Deprecated: Use NewRepository.
+func New(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte) (*Repository, error) {
+	return NewRepository(ctx, secret, store, config, &RepositoryOpts{DoRebuild: true, RWStateCache: true})
+}
+
+// Deprecated: Use NewRepository.
 func NewNoRebuild(ctx *kcontext.KContext, secret []byte, store storage.Store, config []byte, readonlyCache bool) (*Repository, error) {
-	t0 := time.Now()
-	defer func() {
-		ctx.GetLogger().Trace("repository", "NewNoRebuild(store=%p): %s", store, time.Since(t0))
-	}()
-
-	var hasher hash.Hash
-	if secret != nil {
-		hasher = hashing.GetMACHasher(storage.DEFAULT_HASHING_ALGORITHM, secret)
-	} else {
-		hasher = hashing.GetHasher(storage.DEFAULT_HASHING_ALGORITHM)
-	}
-
-	version, unwrappedConfigRd, err := storage.Deserialize(hasher, resources.RT_CONFIG, io.NopCloser(bytes.NewReader(config)))
-	if err != nil {
-		return nil, err
-	}
-
-	if !versioning.IsCompatibleWithCurrentVersion(resources.RT_CONFIG, version) {
-		return nil, fmt.Errorf("config version %q is newer than current version %q",
-			version, versioning.GetCurrentVersion(resources.RT_CONFIG))
-	}
-
-	unwrappedConfig, err := io.ReadAll(unwrappedConfigRd)
-	if err != nil {
-		return nil, err
-	}
-
-	configInstance, err := storage.NewConfigurationFromBytes(version, unwrappedConfig)
-	if err != nil {
-		return nil, err
-	}
-
-	r := &Repository{
-		store:            store,
-		configuration:    *configInstance,
-		appContext:       ctx,
-		secret:           secret,
-		storageSize:      -1,
-		storageSizeDirty: true,
-		ioStats:          iostat.New(),
-		ImportStats:      iostat.New(),
-		ExportStats:      iostat.New(),
-	}
-
-	cacheInstance, err := caching.NewSQLState(r.stateCacheDir(), readonlyCache)
-	if err != nil {
-		return nil, err
-	}
-
-	r.state, err = state.NewLocalState(cacheInstance)
-	if err != nil {
-		return nil, err
-	}
-
-	r.macHasherPool = NewHasherPool(func() hash.Hash {
-		hasher := r.GetMACHasher()
-		hasher.Reset()
-		return hasher
-	})
-
-	return r, nil
+	return NewRepository(ctx, secret, store, config, &RepositoryOpts{DoRebuild: false, RWStateCache: !readonlyCache})
 }
 
 func (r *Repository) Emitter(workflow string) *events.Emitter {
