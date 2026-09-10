@@ -357,7 +357,7 @@ func ioStatsToMap(s iostat.IOStats) map[string]any {
 		"overall_wall": s.OverallWall,
 		"min":          s.Min,
 		"avg":          s.Avg,
-		"median":       s.Median,
+		"median":       s.P50, // deprecated wire-compatibility alias of p50
 		"p50":          s.P50,
 		"p75":          s.P75,
 		"p80":          s.P80,
