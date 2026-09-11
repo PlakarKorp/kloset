@@ -5,19 +5,10 @@ import (
 	"time"
 )
 
-// Latency percentiles are computed from a fixed-size geometric histogram:
-// per-operation durations are counted in buckets whose width grows by ~9%
-// per step (8 buckets per power of two), so memory stays constant no matter
-// how many operations are observed. Percentiles are interpolated within
-// their bucket and accurate to one bucket width.
-const (
-	latencyMinBucket        = time.Microsecond
-	latencyBucketsPerOctave = 8
-	latencyNumBuckets       = 256 // covers 1µs .. ~71min, clamps beyond
-)
-
 // LatencyStats describes the distribution of per-operation durations
-// observed so far.
+// observed so far. Count, Total, Min, Avg and Max are exact; the percentiles
+// are estimated from a fixed-size geometric histogram (~9% bucket
+// resolution) and are unreliable below a few dozen observations.
 type LatencyStats struct {
 	Count int64
 	Total time.Duration
@@ -34,95 +25,48 @@ type LatencyStats struct {
 	P99 time.Duration
 }
 
-// latencyHistogram accumulates duration samples. It is not safe for
-// concurrent use: the owning tracker's mutex guards it.
+// latencyHistogram accumulates duration samples in a histogram in
+// nanoseconds (~9% resolution from 1ns up to ~2^60ns, about 36 years). Only
+// the total is tracked separately: float64 loses integer precision as the
+// sum grows, while the min and max round-trip through float64 exactly for
+// any duration below 2^53ns (~104 days).
 type latencyHistogram struct {
-	count   int64
-	total   time.Duration
-	min     time.Duration
-	max     time.Duration
-	buckets [latencyNumBuckets]int64
+	total time.Duration
+	hist  histogram
 }
 
 func (h *latencyHistogram) observe(d time.Duration) {
-	if h.count == 0 || d < h.min {
-		h.min = d
-	}
-	if d > h.max {
-		h.max = d
-	}
-	h.count++
 	h.total += d
-	h.buckets[latencyBucketIndex(d)]++
+	h.hist.observe(float64(d))
 }
 
 func (h *latencyHistogram) reset() {
 	*h = latencyHistogram{}
 }
 
-func latencyBucketIndex(d time.Duration) int {
-	if d <= latencyMinBucket {
-		return 0
-	}
-	idx := int(math.Log2(float64(d)/float64(latencyMinBucket)) * latencyBucketsPerOctave)
-	if idx >= latencyNumBuckets {
-		return latencyNumBuckets - 1
-	}
-	return idx
-}
-
-// latencyBucketLower returns the lower bound of bucket idx in nanoseconds;
-// the formula extends one past the last bucket so it also yields upper
-// bounds.
-func latencyBucketLower(idx int) float64 {
-	return float64(latencyMinBucket) * math.Exp2(float64(idx)/latencyBucketsPerOctave)
-}
-
-func (h *latencyHistogram) percentile(p float64) time.Duration {
-	if h.count == 0 {
-		return 0
-	}
-
-	target := p / 100 * float64(h.count)
-	var cum int64
-	for i, c := range h.buckets {
-		if c == 0 {
-			continue
-		}
-		if float64(cum+c) >= target {
-			lower := latencyBucketLower(i)
-			upper := latencyBucketLower(i + 1)
-			frac := (target - float64(cum)) / float64(c)
-			v := time.Duration(lower + (upper-lower)*frac)
-			// the histogram is approximate; the observed extremes are exact
-			if v < h.min {
-				v = h.min
-			}
-			if v > h.max {
-				v = h.max
-			}
-			return v
-		}
-		cum += c
-	}
-	return h.max
-}
-
 func (h *latencyHistogram) stats() LatencyStats {
-	if h.count == 0 {
+	if h.hist.count == 0 {
 		return LatencyStats{}
 	}
+
+	// nanoseconds are the histogram's base unit, so the estimates only need
+	// rounding to the nearest integer duration; the histogram already keeps
+	// them within the observed extremes
+	toDur := func(p float64) time.Duration {
+		return time.Duration(math.Round(h.hist.percentile(p)))
+	}
+
 	return LatencyStats{
-		Count: h.count,
+		Count: h.hist.count,
 		Total: h.total,
-		Min:   h.min,
-		Avg:   h.total / time.Duration(h.count),
-		Max:   h.max,
-		P50:   h.percentile(50),
-		P75:   h.percentile(75),
-		P80:   h.percentile(80),
-		P90:   h.percentile(90),
-		P95:   h.percentile(95),
-		P99:   h.percentile(99),
+		Min:   time.Duration(h.hist.min),
+		Avg:   h.total / time.Duration(h.hist.count),
+		Max:   time.Duration(h.hist.max),
+		P50:   toDur(50),
+		P75:   toDur(75),
+		P80:   toDur(80),
+		P90:   toDur(90),
+		P95:   toDur(95),
+		P99:   toDur(99),
 	}
 }
