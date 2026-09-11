@@ -365,6 +365,19 @@ func ioStatsToMap(s iostat.IOStats) map[string]any {
 		"p95":          s.P95,
 		"p99":          s.P99,
 		"max":          s.Max,
+		"latency": map[string]any{
+			"count": s.Latency.Count,
+			"total": s.Latency.Total,
+			"min":   s.Latency.Min,
+			"avg":   s.Latency.Avg,
+			"max":   s.Latency.Max,
+			"p50":   s.Latency.P50,
+			"p75":   s.Latency.P75,
+			"p80":   s.Latency.P80,
+			"p90":   s.Latency.P90,
+			"p95":   s.Latency.P95,
+			"p99":   s.Latency.P99,
+		},
 	}
 }
 

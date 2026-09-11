@@ -253,6 +253,9 @@ func TestPutPackfile(t *testing.T) {
 	// Test putting a packfile
 	err = writer.PutPackfile(pfile)
 	require.NoError(t, err)
+
+	// a successful packfile Put is one backend-latency observation
+	require.EqualValues(t, 1, repo.IOStats().Write.Stats().Latency.Count)
 }
 
 func TestPutPtarPackfile(t *testing.T) {
