@@ -23,6 +23,10 @@ type Options struct {
 
 // requests
 type Record struct {
+	// kloset doesn't look at all at this field: it's only needed
+	// for consumers to map [Record]s and [Restult]s together.
+	ID string
+
 	Reader io.ReadCloser
 
 	Pathname string
@@ -36,10 +40,6 @@ type Record struct {
 	FileInfo           objects.FileInfo
 	ExtendedAttributes []string
 	FileAttributes     uint32
-
-	// kloset doesn't look at all at this field: it's only needed
-	// for consumers to map [Record]s and [Restult]s together.
-	Producer string
 }
 
 func (s *Record) Close() error {
