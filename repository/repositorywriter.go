@@ -20,7 +20,7 @@ type RepositoryWriter struct {
 	*Repository
 
 	transactionMtx sync.RWMutex
-	deltaState     map[objects.MAC]*state.LocalState
+	deltaState     map[objects.MAC]*state.State
 
 	PackerManager  packer.PackerManagerInt
 	currentStateID objects.MAC
@@ -44,7 +44,7 @@ func (r *Repository) newRepositoryWriter(cache *caching.ScanCache, id objects.MA
 	rw := RepositoryWriter{
 		Repository: r,
 
-		deltaState:     make(map[objects.MAC]*state.LocalState),
+		deltaState:     make(map[objects.MAC]*state.State),
 		currentStateID: id,
 	}
 	rw.deltaState[rw.currentStateID] = r.state.Derive(cache)
@@ -110,7 +110,7 @@ func (r *RepositoryWriter) MergeLocalStateWith(stateID objects.MAC, oldCache *ca
 	return r.state.MergeStateFromCache(stateID, oldCache)
 }
 
-func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MAC) error {
+func (r *RepositoryWriter) internalCommit(state *state.State, id objects.MAC) error {
 	pr, pw := io.Pipe()
 
 	/* By using a pipe and a goroutine we bound the max size in memory. */
@@ -126,7 +126,7 @@ func (r *RepositoryWriter) internalCommit(state *state.LocalState, id objects.MA
 }
 
 // MUST be called with `r.transactionMtx` at least read locked.
-func (r *RepositoryWriter) currentDeltaState() *state.LocalState {
+func (r *RepositoryWriter) currentDeltaState() *state.State {
 	// XXX: Do we want debug assertions here?
 	return r.deltaState[r.currentStateID]
 }
