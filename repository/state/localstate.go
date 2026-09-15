@@ -52,7 +52,7 @@ type LocalState struct {
 	//  - StateID is there at the end because we don't need to query by it but
 	//    we need it to avoid concurrent insert of the same entry by two
 	//    different backup processes.
-	cache caching.StateCache
+	cache *caching.SQLState
 }
 
 // XXX: Needs a big refactoring to split this into three different concepts:
@@ -60,7 +60,7 @@ type LocalState struct {
 // 2- The local aggregated state (aka the collection of "LocalState")
 // 3- A delta state, which is a special version of the LocalState that is being
 // mutated in order to be serialized.
-func NewLocalState(cache caching.StateCache) (*LocalState, error) {
+func NewLocalState(cache *caching.SQLState) (*LocalState, error) {
 	// Sadly we have to ignore the error here because:
 	// 1- If we are on a new repository, the database schema hasn't been created
 	// yet, leading to an error.
@@ -83,8 +83,8 @@ func NewLocalState(cache caching.StateCache) (*LocalState, error) {
 
 // Derive constructs a new state backed by *cache*, keeping the same serial as previous one.
 // Mainly used to construct Delta states when backing up.
-func (ls *LocalState) Derive(cache caching.StateCache) *LocalState {
-	return &LocalState{
+func (ls *LocalState) Derive(cache *caching.ScanCache) *State {
+	return &State{
 		Metadata: Metadata{
 			Parent:    ls.Metadata.Parent,
 			Version:   versioning.FromString(VERSION),
