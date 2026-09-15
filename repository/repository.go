@@ -407,7 +407,7 @@ func (r *Repository) IngestStateFile(stateID objects.MAC) error {
 
 // Rebuild state with a specified different cache, this will go away in the
 // future.
-func (r *Repository) RebuildStateWithCache(cacheInstance caching.StateCache) error {
+func (r *Repository) RebuildStateWithCache(cacheInstance *caching.SQLState) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "rebuildState(): %s", time.Since(t0))
