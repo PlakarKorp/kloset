@@ -5,7 +5,6 @@ import (
 	"iter"
 	"slices"
 
-	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 )
@@ -147,10 +146,6 @@ func (c *cache) GetConfiguration(key string) ([]byte, error) {
 
 func (c *cache) GetConfigurations() iter.Seq[[]byte] {
 	return nil
-}
-
-func (c *cache) NewBatch() caching.StateBatch {
-	return &batch{cache: c}
 }
 
 func (c *cache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
