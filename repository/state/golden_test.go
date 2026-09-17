@@ -113,7 +113,7 @@ func newScanCache(t *testing.T) *caching.ScanCache {
 	return sc
 }
 
-func newLocalState(t *testing.T) *state.LocalState {
+func newLocalState(t *testing.T) (*state.LocalState, *caching.SQLState) {
 	t.Helper()
 
 	cache, err := caching.NewSQLState(t.TempDir(), false)
@@ -122,7 +122,30 @@ func newLocalState(t *testing.T) *state.LocalState {
 	ls, err := state.NewLocalState(cache)
 	require.NoError(t, err)
 
-	return ls
+	return ls, cache
+}
+
+// listObjectsOfType reproduces the aggregate's removed ListObjectsOfType on
+// top of the public cache API: deltas of a type whose packfile is present.
+// The HasPackfile filtering is part of what the golden fixtures pin
+// (gChunkOrphan must stay excluded).
+func listObjectsOfType(t *testing.T, cache *caching.SQLState, typ resources.Type) []state.DeltaEntry {
+	t.Helper()
+
+	var out []state.DeltaEntry
+	for _, buf := range cache.GetDeltasByType(typ) {
+		de, err := state.DeltaEntryFromBytes(buf)
+		require.NoError(t, err)
+
+		ok, err := cache.HasPackfile(de.Location.Packfile)
+		require.NoError(t, err)
+		if !ok {
+			continue
+		}
+
+		out = append(out, de)
+	}
+	return out
 }
 
 // Backup-like state: delta entries plus their packfiles. gChunkOrphan
@@ -143,7 +166,8 @@ func buildBackupState(t *testing.T, version versioning.Version) []byte {
 	t.Helper()
 
 	sc := newScanCache(t)
-	ds := newLocalState(t).Derive(sc)
+	base, _ := newLocalState(t)
+	ds := base.Derive(sc)
 	ds.Metadata = state.Metadata{
 		Parent:    objects.NilMac,
 		Version:   version,
@@ -170,7 +194,8 @@ func buildRmState(t *testing.T) []byte {
 	t.Helper()
 
 	sc := newScanCache(t)
-	ds := newLocalState(t).Derive(sc)
+	base, _ := newLocalState(t)
+	ds := base.Derive(sc)
 	ds.Metadata = state.Metadata{
 		Parent:    gState1,
 		Version:   gV110,
@@ -195,7 +220,8 @@ func buildMaintenanceState(t *testing.T) []byte {
 	t.Helper()
 
 	sc := newScanCache(t)
-	ds := newLocalState(t).Derive(sc)
+	base, _ := newLocalState(t)
+	ds := base.Derive(sc)
 	ds.Metadata = state.Metadata{
 		Parent:    gState2,
 		Version:   gV110,
@@ -219,7 +245,8 @@ func buildFullState(t *testing.T) []byte {
 	t.Helper()
 
 	sc := newScanCache(t)
-	ds := newLocalState(t).Derive(sc)
+	base, _ := newLocalState(t)
+	ds := base.Derive(sc)
 	ds.Metadata = state.Metadata{
 		Parent:    gState3,
 		Version:   gV110,
@@ -344,10 +371,10 @@ func requireMetadata(t *testing.T, got state.Metadata, parent objects.MAC, versi
 
 // assertBackupMerged checks the aggregate content after ingesting the backup
 // fixture (regardless of the stream version it came from).
-func assertBackupMerged(t *testing.T, ls *state.LocalState) {
+func assertBackupMerged(t *testing.T, ls *state.LocalState, cache *caching.SQLState) {
 	t.Helper()
 
-	has, err := ls.HasState(gState1)
+	has, err := cache.HasState(gState1)
 	require.NoError(t, err)
 	require.True(t, has)
 
@@ -361,7 +388,7 @@ func assertBackupMerged(t *testing.T, ls *state.LocalState) {
 	}
 	require.Equal(t, map[objects.MAC]bool{gPack1: true, gPack2: true, gPack3: true}, seenPacks)
 
-	chunks := collect2(t, ls.ListObjectsOfType(resources.RT_CHUNK))
+	chunks := listObjectsOfType(t, cache, resources.RT_CHUNK)
 	require.ElementsMatch(t,
 		[]objects.MAC{gChunk1, gChunk2},
 		[]objects.MAC{chunks[0].Blob, chunks[1].Blob})
@@ -393,7 +420,7 @@ func assertBackupMerged(t *testing.T, ls *state.LocalState) {
 func TestGoldenMergeBackup(t *testing.T) {
 	data := readFixture(t, "backup-v110.state")
 
-	ls := newLocalState(t)
+	ls, cache := newLocalState(t)
 	require.NoError(t, ls.MergeState(gState1, bytes.NewReader(data), gV110))
 
 	// Merging a state adopts the stream's metadata as the aggregate's.
@@ -407,45 +434,45 @@ func TestGoldenMergeBackup(t *testing.T) {
 	require.NoError(t, err)
 	requireMetadata(t, *mt, objects.NilMac, gV110, gT0, gSerial)
 
-	assertBackupMerged(t, ls)
+	assertBackupMerged(t, ls, cache)
 
 	// Re-merging an already-known state is a no-op, not an error.
 	require.NoError(t, ls.MergeState(gState1, bytes.NewReader(data), gV110))
 	states, err = ls.GetStates()
 	require.NoError(t, err)
 	require.Len(t, states, 1)
-	assertBackupMerged(t, ls)
+	assertBackupMerged(t, ls, cache)
 }
 
 func TestGoldenMergeBackupV100(t *testing.T) {
 	data := readFixture(t, "backup-v100.state")
 
-	ls := newLocalState(t)
+	ls, cache := newLocalState(t)
 	require.NoError(t, ls.MergeState(gState1, bytes.NewReader(data), gV100))
 
 	// v1.0.0 streams carry no parent header: the aggregate's parent is
 	// left untouched (NilMac on a fresh state).
 	requireMetadata(t, ls.Metadata, objects.NilMac, gV100, gT0, gSerial)
 
-	assertBackupMerged(t, ls)
+	assertBackupMerged(t, ls, cache)
 }
 
 func TestGoldenMergeBackupUnknownEntry(t *testing.T) {
 	data := readFixture(t, "backup-unknown-entry-v110.state")
 
-	ls := newLocalState(t)
+	ls, cache := newLocalState(t)
 	require.NoError(t, ls.MergeState(gState1, bytes.NewReader(data), gV110))
 
 	// The unknown entry is skipped; everything else merges as usual.
 	requireMetadata(t, ls.Metadata, objects.NilMac, gV110, gT0, gSerial)
-	assertBackupMerged(t, ls)
+	assertBackupMerged(t, ls, cache)
 }
 
 // TestGoldenMergeLifecycle replays a full backup -> rm -> maintenance chain
 // and pins the aggregate's view after each stage, including the ET_DELETE
 // application and the packfile-deletion cascade over its deltas.
 func TestGoldenMergeLifecycle(t *testing.T) {
-	ls := newLocalState(t)
+	ls, cache := newLocalState(t)
 
 	require.NoError(t, ls.MergeState(gState1, bytes.NewReader(readFixture(t, "backup-v110.state")), gV110))
 	require.NoError(t, ls.MergeState(gState2, bytes.NewReader(readFixture(t, "rm-v110.state")), gV110))
@@ -494,7 +521,7 @@ func TestGoldenMergeLifecycle(t *testing.T) {
 
 	// Deleting a packfile cascades over its remaining deltas: snap2's delta
 	// lived in pack2 and must be gone entirely (not even orphaned).
-	chunks := collect2(t, ls.ListObjectsOfType(resources.RT_CHUNK))
+	chunks := listObjectsOfType(t, cache, resources.RT_CHUNK)
 	require.Len(t, chunks, 1)
 	require.Equal(t, gChunk1, chunks[0].Blob)
 

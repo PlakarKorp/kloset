@@ -132,7 +132,7 @@ func (ls *LocalState) UpdateSerialOr(serial uuid.UUID) error {
 /* Insert the state denotated by stateID and its associated delta entries read
  * from rd into the local aggregated version of the state. */
 func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioning.Version) error {
-	has, err := ls.HasState(stateID)
+	has, err := ls.cache.HasState(stateID)
 	if err != nil {
 		return err
 	}
@@ -158,7 +158,7 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 }
 
 func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from *caching.ScanCache) error {
-	has, err := ls.HasState(stateID)
+	has, err := ls.cache.HasState(stateID)
 	if err != nil {
 		return err
 	}
@@ -193,119 +193,6 @@ func (ls *LocalState) PutState(stateID objects.MAC) error {
 
 func (ls *LocalState) GetStates() (map[objects.MAC][]byte, error) {
 	return ls.cache.GetStates()
-}
-
-/* On disk format is <Header><EntryType><EntryLength><Entry>...N<Metadata>
- * Counting keys would mean iterating twice so we reverse the format and add a
- * type.
- */
-func (ls *LocalState) SerializeToStream(w io.Writer) error {
-	writeUint64 := func(value uint64) error {
-		buf := make([]byte, 8)
-		binary.LittleEndian.PutUint64(buf, value)
-		_, err := w.Write(buf)
-		return err
-	}
-
-	writeUint32 := func(value uint32) error {
-		buf := make([]byte, 4)
-		binary.LittleEndian.PutUint32(buf, value)
-		_, err := w.Write(buf)
-		return err
-	}
-
-	// First put the header
-	if _, err := w.Write(ls.Metadata.Parent[:]); err != nil {
-		return fmt.Errorf("failed to write header parent %w", err)
-	}
-
-	for entry := range ls.cache.GetDeletedEntries() {
-		if _, err := w.Write([]byte{byte(ET_DELETE)}); err != nil {
-			return fmt.Errorf("failed to write delete entry type: %w", err)
-		}
-
-		if err := writeUint32(DeleteEntrySerializedSize); err != nil {
-			return fmt.Errorf("failed to write delete entry length: %w", err)
-		}
-
-		if _, err := w.Write(entry); err != nil {
-			return fmt.Errorf("failed to write delete entry: %w", err)
-		}
-	}
-
-	for _, entry := range ls.cache.GetDeltas() {
-		if _, err := w.Write([]byte{byte(ET_LOCATIONS)}); err != nil {
-			return fmt.Errorf("failed to write delta entry type: %w", err)
-		}
-
-		if err := writeUint32(DeltaEntrySerializedSize); err != nil {
-			return fmt.Errorf("failed to write delta entry length: %w", err)
-		}
-
-		if _, err := w.Write(entry); err != nil {
-			return fmt.Errorf("failed to write delta entry: %w", err)
-		}
-	}
-
-	for _, entry := range ls.cache.GetColouredEntries() {
-		if _, err := w.Write([]byte{byte(ET_COLOURED)}); err != nil {
-			return fmt.Errorf("failed to write coloured entry type: %w", err)
-		}
-
-		if err := writeUint32(ColouredEntrySerializedSize); err != nil {
-			return fmt.Errorf("failed to write coloured entry length: %w", err)
-		}
-
-		if _, err := w.Write(entry); err != nil {
-			return fmt.Errorf("failed to write coloured entry: %w", err)
-		}
-	}
-
-	for _, entry := range ls.cache.GetPackfiles() {
-		if _, err := w.Write([]byte{byte(ET_PACKFILE)}); err != nil {
-			return fmt.Errorf("failed to write packfile entry type: %w", err)
-		}
-
-		if err := writeUint32(PackfileEntrySerializedSize); err != nil {
-			return fmt.Errorf("failed to write packfile entry length: %w", err)
-		}
-
-		if _, err := w.Write(entry); err != nil {
-			return fmt.Errorf("failed to write packfile entry: %w", err)
-		}
-	}
-
-	for entry := range ls.cache.GetConfigurations() {
-		if _, err := w.Write([]byte{byte(ET_CONFIGURATION)}); err != nil {
-			return fmt.Errorf("failed to write configuration entry type: %w", err)
-		}
-
-		if err := writeUint32(uint32(len(entry))); err != nil {
-			return fmt.Errorf("failed to write configuration entry length: %w", err)
-		}
-
-		if _, err := w.Write(entry); err != nil {
-			return fmt.Errorf("failed to write configuration entry: %w", err)
-		}
-	}
-
-	/* Finally we serialize the Metadata */
-	if _, err := w.Write([]byte{byte(ET_METADATA)}); err != nil {
-		return fmt.Errorf("failed to write metadata type %w", err)
-	}
-	if err := writeUint32(uint32(ls.Metadata.Version)); err != nil {
-		return fmt.Errorf("failed to write version: %w", err)
-	}
-	timestamp := ls.Metadata.Timestamp.UnixNano()
-	if err := writeUint64(uint64(timestamp)); err != nil {
-		return fmt.Errorf("failed to write timestamp: %w", err)
-	}
-	if _, err := w.Write(ls.Metadata.Serial[:]); err != nil {
-		return fmt.Errorf("failed to write serial flag: %w", err)
-	}
-
-	return nil
-
 }
 
 func (ls *LocalState) deserializeFromStream(r io.Reader) error {
@@ -665,27 +552,8 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 	return nil
 }
 
-func (ls *LocalState) HasState(stateID objects.MAC) (bool, error) {
-	return ls.cache.HasState(stateID)
-}
-
 func (ls *LocalState) DelState(stateID objects.MAC) error {
 	return ls.cache.DelState(stateID)
-}
-
-func (ls *LocalState) PutDelta(de *DeltaEntry) error {
-	return ls.cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.ToBytes())
-}
-
-func (ls *LocalState) DelDelta(Type resources.Type, blobMAC, packfileMAC objects.MAC) error {
-	del := DeleteEntry{
-		Type:     ET_LOCATIONS,
-		BlobType: Type,
-		Blob:     blobMAC,
-		Packfile: packfileMAC,
-	}
-
-	return ls.cache.PutDeleted(uint8(ET_LOCATIONS), blobMAC, del.ToBytes())
 }
 
 func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool {
@@ -735,27 +603,6 @@ func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC
 	} else {
 		return delta.Location, true, nil
 	}
-}
-
-func (ls *LocalState) PutPackfile(stateId, packfile objects.MAC) error {
-	pe := PackfileEntry{
-		StateID:   stateId,
-		Packfile:  packfile,
-		Timestamp: time.Now(),
-	}
-
-	return ls.cache.PutPackfile(pe.Packfile, pe.ToBytes())
-}
-
-func (ls *LocalState) DelPackfile(packfile objects.MAC) error {
-	del := DeleteEntry{
-		Type:     ET_PACKFILE,
-		BlobType: 0,
-		Blob:     objects.NilMac,
-		Packfile: packfile,
-	}
-
-	return ls.cache.PutDeleted(uint8(ET_PACKFILE), packfile, del.ToBytes())
 }
 
 func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
@@ -816,34 +663,6 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	}
 }
 
-func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntry, error] {
-	return func(yield func(DeltaEntry, error) bool) {
-		for _, buf := range ls.cache.GetDeltasByType(Type) {
-			de, err := DeltaEntryFromBytes(buf)
-			if err != nil {
-				if !yield(DeltaEntry{}, err) {
-					return
-				}
-			}
-
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
-			if err != nil {
-				if !yield(DeltaEntry{}, err) {
-					return
-				}
-			}
-
-			if !ok {
-				continue
-			}
-
-			if !yield(de, err) {
-				return
-			}
-		}
-	}
-}
-
 func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 	return func(yield func(DeltaEntry, error) bool) {
 		for _, buf := range ls.cache.GetDeltas() {
@@ -869,15 +688,6 @@ func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 			}
 		}
 	}
-}
-
-func (ls *LocalState) ColourResource(rtype resources.Type, resource objects.MAC) error {
-	de := ColouredEntry{
-		Type: rtype,
-		Blob: resource,
-		When: time.Now(),
-	}
-	return ls.cache.PutColoured(de.Type, de.Blob, de.ToBytes())
 }
 
 func (ls *LocalState) HasColouredResource(rtype resources.Type, resource objects.MAC) (bool, error) {
@@ -935,15 +745,4 @@ func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[Colo
 			}
 		}
 	}
-}
-
-func (ls *LocalState) DelColouredResource(rtype resources.Type, resourceMAC objects.MAC) error {
-	del := DeleteEntry{
-		Type:     ET_COLOURED,
-		BlobType: rtype,
-		Blob:     resourceMAC,
-		Packfile: objects.NilMac,
-	}
-
-	return ls.cache.PutDeleted(uint8(ET_COLOURED), resourceMAC, del.ToBytes())
 }

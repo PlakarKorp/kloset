@@ -88,25 +88,6 @@ func TestPutLockAndGet(t *testing.T) {
 	require.Equal(t, lock.Exclusive, got.Exclusive)
 }
 
-// TestListPackfileEntriesAfterBackup creates a snapshot (which writes packfiles)
-// then calls ListPackfileEntries and asserts at least one entry is returned.
-func TestListPackfileEntriesAfterBackup(t *testing.T) {
-	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-
-	files := []ptesting.MockFile{
-		ptesting.NewMockDir("/"),
-		ptesting.NewMockFile("/hello.txt", 0644, "hello from packfile entry test"),
-	}
-	_ = ptesting.GenerateSnapshot(t, repo, files)
-
-	var count int
-	for _, err := range repo.ListPackfileEntries() {
-		require.NoError(t, err)
-		count++
-	}
-	require.Greater(t, count, 0, "expected at least one packfile entry after a backup")
-}
-
 // TestRBytesWBytesAfterOps confirms that writing actually increments the I/O
 // counter exposed through WBytes.
 func TestWBytesAfterPutState(t *testing.T) {
@@ -237,9 +218,8 @@ func TestGetPackfileRangeAfterBackup(t *testing.T) {
 	}
 	_ = ptesting.GenerateSnapshot(t, repo, files)
 
-	for entry, err := range repo.ListPackfileEntries() {
-		require.NoError(t, err)
-		pf, pfErr := repo.GetPackfile(entry.Packfile)
+	for packfile := range repo.ListPackfiles() {
+		pf, pfErr := repo.GetPackfile(packfile)
 		if pfErr != nil {
 			continue
 		}
@@ -253,7 +233,7 @@ func TestGetPackfileRangeAfterBackup(t *testing.T) {
 		}
 
 		loc := state.Location{
-			Packfile: entry.Packfile,
+			Packfile: packfile,
 			Offset:   blob.Offset,
 			Length:   blob.Length,
 		}
@@ -273,9 +253,8 @@ func TestGetPackfileBlobAfterBackup(t *testing.T) {
 	}
 	_ = ptesting.GenerateSnapshot(t, repo, files)
 
-	for entry, err := range repo.ListPackfileEntries() {
-		require.NoError(t, err)
-		pf, pfErr := repo.GetPackfile(entry.Packfile)
+	for packfile := range repo.ListPackfiles() {
+		pf, pfErr := repo.GetPackfile(packfile)
 		if pfErr != nil {
 			continue
 		}
@@ -289,7 +268,7 @@ func TestGetPackfileBlobAfterBackup(t *testing.T) {
 		}
 
 		loc := state.Location{
-			Packfile: entry.Packfile,
+			Packfile: packfile,
 			Offset:   blob.Offset,
 			Length:   blob.Length,
 		}
