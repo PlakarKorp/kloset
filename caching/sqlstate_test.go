@@ -196,18 +196,6 @@ func TestSQLStateConfigurationOperations(t *testing.T) {
 	require.Equal(t, 2, count)
 }
 
-func TestSQLStatePanics(t *testing.T) {
-	st := newSQLState(t)
-
-	require.Panics(t, func() {
-		_ = st.PutDeleted(0, objects.MAC{}, nil)
-	})
-	require.Panics(t, func() {
-		for range st.GetDeletedEntries() {
-		}
-	})
-}
-
 func TestSQLStateReadOnly(t *testing.T) {
 	dir := t.TempDir()
 

@@ -27,25 +27,6 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 )
 
-/* This needs some more thoughts
-func FromStream(rd io.Reader, ver versioning.Version, cache caching.StateCache) (*LocalState, error) {
-	st := &LocalState{cache: cache}
-
-	var err error
-	if ver.Equals(versioning.FromString("1.1.0")) {
-		err = st.deserializeFromStream(rd)
-	} else {
-		err = st.deserializeFromStreamv100(rd)
-	}
-
-	if err != nil {
-		return nil, err
-	} else {
-		return st, nil
-	}
-}
-*/
-
 type State struct {
 	Metadata Metadata
 

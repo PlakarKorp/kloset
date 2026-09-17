@@ -56,13 +56,13 @@ func TestDelState(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, cache.PutState(stateID, data))
 
-	has, err := st.HasState(stateID)
+	has, err := cache.HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, has)
 
 	require.NoError(t, st.DelState(stateID))
 
-	has, err = st.HasState(stateID)
+	has, err = cache.HasState(stateID)
 	require.NoError(t, err)
 	require.False(t, has)
 }
@@ -186,12 +186,16 @@ func TestDelPackfile(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestListPackfileEntries(t *testing.T) {
-	st, _ := newAggregate(t)
+	st, cache := newAggregate(t)
 
+	// The aggregate receives packfile entries via merge, so seed the cache
+	// directly.
 	pf1 := objects.MAC{0xAA}
 	pf2 := objects.MAC{0xBB}
-	require.NoError(t, st.PutPackfile(objects.MAC{0x01}, pf1))
-	require.NoError(t, st.PutPackfile(objects.MAC{0x02}, pf2))
+	for i, pf := range []objects.MAC{pf1, pf2} {
+		pe := PackfileEntry{Packfile: pf, StateID: objects.MAC{byte(i + 1)}, Timestamp: time.Now()}
+		require.NoError(t, cache.PutPackfile(pe.Packfile, pe.ToBytes()))
+	}
 
 	var entries []PackfileEntry
 	for pe, err := range st.ListPackfileEntries() {
@@ -326,13 +330,13 @@ func TestMergeStateFromCache(t *testing.T) {
 	require.NoError(t, src.PutPackfile(objects.NilMac, pfMAC))
 
 	// Merge into an aggregate using MergeStateFromCache.
-	dst, _ := newAggregate(t)
+	dst, dstCache := newAggregate(t)
 
 	stateID := objects.MAC{0x99}
 	err := dst.MergeStateFromCache(stateID, srcCache)
 	require.NoError(t, err)
 
-	has, err := dst.HasState(stateID)
+	has, err := dstCache.HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, has)
 }

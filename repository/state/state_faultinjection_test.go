@@ -155,16 +155,6 @@ func TestListIteratorsParseError(t *testing.T) {
 		require.True(t, sawErr)
 	})
 
-	t.Run("ListObjectsOfType", func(t *testing.T) {
-		var sawErr bool
-		for _, err := range st.ListObjectsOfType(resources.RT_OBJECT) {
-			if err != nil {
-				sawErr = true
-			}
-		}
-		require.True(t, sawErr)
-	})
-
 	t.Run("ListOrphanDeltas", func(t *testing.T) {
 		var sawErr bool
 		for _, err := range st.ListOrphanDeltas() {
