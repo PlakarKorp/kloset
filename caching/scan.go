@@ -29,10 +29,6 @@ func (c *ScanCache) NewScanBatch() *ScanBatch {
 	return &ScanBatch{c.cache.NewBatch()}
 }
 
-func (c *ScanCache) NewBatch() StateBatch {
-	return c.NewScanBatch()
-}
-
 func (c *ScanCache) PutFile(source int, file string, data []byte) error {
 	return c.put("__file__", fmt.Sprintf("%d:%s", source, file), data)
 }

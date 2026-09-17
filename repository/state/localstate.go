@@ -157,7 +157,7 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 	return ls.PutState(stateID)
 }
 
-func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from caching.StateCache) error {
+func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from *caching.ScanCache) error {
 	has, err := ls.HasState(stateID)
 	if err != nil {
 		return err
@@ -616,7 +616,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 	return nil
 }
 
-func (ls *LocalState) mergeFromCache(from caching.StateCache) error {
+func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 	for _, entry := range from.GetDeltas() {
 		delta, err := DeltaEntryFromBytes(entry)
 		if err != nil {
@@ -671,10 +671,6 @@ func (ls *LocalState) HasState(stateID objects.MAC) (bool, error) {
 
 func (ls *LocalState) DelState(stateID objects.MAC) error {
 	return ls.cache.DelState(stateID)
-}
-
-func (ls *LocalState) NewBatch() caching.StateBatch {
-	return ls.cache.NewBatch()
 }
 
 func (ls *LocalState) PutDelta(de *DeltaEntry) error {
