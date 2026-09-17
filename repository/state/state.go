@@ -114,8 +114,8 @@ func (ls *State) DelColouredResource(rtype resources.Type, resourceMAC objects.M
 	return ls.cache.PutDeleted(uint8(ET_COLOURED), resourceMAC, del.ToBytes())
 }
 
-func (ls *State) NewBatch() caching.StateBatch {
-	return ls.cache.NewBatch()
+func (ls *State) NewBatch() *caching.ScanBatch {
+	return ls.cache.NewScanBatch()
 }
 
 func (ls *State) BlobExists(Type resources.Type, blobMAC objects.MAC) bool {
