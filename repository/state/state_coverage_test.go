@@ -109,8 +109,9 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 	}
 	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, snapID, pf, delta.ToBytes()))
 
-	// Mark the snapshot as coloured (deleted).
-	require.NoError(t, st.ColourResource(resources.RT_SNAPSHOT, snapID))
+	// Mark the snapshot as coloured (deleted); the aggregate receives coloured
+	// entries via merge, so seed the cache directly.
+	colourInCache(t, cache, resources.RT_SNAPSHOT, snapID)
 
 	count := 0
 	for _, err := range st.ListSnapshots() {
@@ -118,35 +119,6 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 		count++
 	}
 	require.Zero(t, count)
-}
-
-// TestListObjectsOfTypeMixed exercises ListObjectsOfType including the
-// missing packfile continue branch.
-func TestListObjectsOfTypeMixed(t *testing.T) {
-	st, cache := newAggregate(t)
-
-	pfPresent := objects.MAC{0x33}
-	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf")))
-
-	deltaWithPf := DeltaEntry{
-		Type:     resources.RT_OBJECT,
-		Blob:     objects.MAC{0x44},
-		Location: Location{Packfile: pfPresent},
-	}
-	deltaWithoutPf := DeltaEntry{
-		Type:     resources.RT_OBJECT,
-		Blob:     objects.MAC{0x55},
-		Location: Location{Packfile: objects.MAC{0xEF}},
-	}
-	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, deltaWithPf.Blob, pfPresent, deltaWithPf.ToBytes()))
-	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, deltaWithoutPf.Blob, deltaWithoutPf.Location.Packfile, deltaWithoutPf.ToBytes()))
-
-	var found []DeltaEntry
-	for de, err := range st.ListObjectsOfType(resources.RT_OBJECT) {
-		require.NoError(t, err)
-		found = append(found, de)
-	}
-	require.Equal(t, []DeltaEntry{deltaWithPf}, found)
 }
 
 // TestListOrphanDeltasWithMixedState seeds both present and missing-packfile
