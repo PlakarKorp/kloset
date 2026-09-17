@@ -113,7 +113,7 @@ func TestUpdateSerialOr(t *testing.T) {
 }
 
 func TestMergeState(t *testing.T) {
-	state, _ := newAggregate(t)
+	state, cache := newAggregate(t)
 
 	// Build a delta state stream to merge.
 	src, _ := newDeltaState(t)
@@ -141,13 +141,13 @@ func TestMergeState(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the state was merged
-	hasState, err := state.HasState(stateID)
+	hasState, err := cache.HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, hasState)
 }
 
 func TestPutState(t *testing.T) {
-	state, _ := newAggregate(t)
+	state, cache := newAggregate(t)
 	state.Metadata.Serial = uuid.New()
 
 	stateID := objects.MAC{1, 2, 3, 4}
@@ -155,7 +155,7 @@ func TestPutState(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify state was stored
-	hasState, err := state.HasState(stateID)
+	hasState, err := cache.HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, hasState)
 }
@@ -175,7 +175,7 @@ func TestSerializeToStream(t *testing.T) {
 		},
 		Flags: 0x1234,
 	}
-	state.PutDelta(deltaEntry)
+	require.NoError(t, state.PutDelta(deltaEntry))
 
 	deletedEntry := &ColouredEntry{
 		Type: resources.RT_OBJECT,
@@ -317,14 +317,16 @@ func TestBlobExists(t *testing.T) {
 		},
 		Flags: 0x1234,
 	}
-	state.PutDelta(deltaEntry)
+	putDeltaInCache(t, cache, deltaEntry)
 	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
 
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.True(t, exists)
 
-	// Test with deleted packfile
-	state.ColourResource(resources.RT_PACKFILE, deltaEntry.Location.Packfile)
+	// Test with deleted packfile. The aggregate receives coloured entries via
+	// merge, so seed the cache directly.
+	ce := ColouredEntry{Type: resources.RT_PACKFILE, Blob: deltaEntry.Location.Packfile, When: time.Now()}
+	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
@@ -351,7 +353,7 @@ func TestGetSubpartForBlob(t *testing.T) {
 		Location: expectedLocation,
 		Flags:    0x1234,
 	}
-	state.PutDelta(deltaEntry)
+	putDeltaInCache(t, cache, deltaEntry)
 	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
 
 	location, exists, err = state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
@@ -411,8 +413,8 @@ func TestListSnapshots(t *testing.T) {
 		Flags: 0x5678,
 	}
 
-	state.PutDelta(delta1)
-	state.PutDelta(delta2)
+	putDeltaInCache(t, cache, delta1)
+	putDeltaInCache(t, cache, delta2)
 	cache.PutPackfile(packfile, []byte("packfile data"))
 
 	// List snapshots
@@ -427,55 +429,8 @@ func TestListSnapshots(t *testing.T) {
 	require.Contains(t, found, snapshot2)
 }
 
-func TestListObjectsOfType(t *testing.T) {
-	state, cache := newAggregate(t)
-
-	// Add objects of different types
-	object1 := objects.MAC{1, 2, 3, 4}
-	object2 := objects.MAC{5, 6, 7, 8}
-	packfile := objects.MAC{9, 10, 11, 12}
-
-	delta1 := &DeltaEntry{
-		Type:    resources.RT_OBJECT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    object1,
-		Location: Location{
-			Packfile: packfile,
-			Offset:   1000,
-			Length:   500,
-		},
-		Flags: 0x1234,
-	}
-	delta2 := &DeltaEntry{
-		Type:    resources.RT_OBJECT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    object2,
-		Location: Location{
-			Packfile: packfile,
-			Offset:   1500,
-			Length:   500,
-		},
-		Flags: 0x5678,
-	}
-
-	state.PutDelta(delta1)
-	state.PutDelta(delta2)
-	cache.PutPackfile(packfile, []byte("packfile data"))
-
-	// List objects of type RT_OBJECT
-	var found []DeltaEntry
-	for delta, err := range state.ListObjectsOfType(resources.RT_OBJECT) {
-		require.NoError(t, err)
-		found = append(found, delta)
-	}
-
-	require.Len(t, found, 2)
-	require.Contains(t, found, *delta1)
-	require.Contains(t, found, *delta2)
-}
-
 func TestListOrphanDeltas(t *testing.T) {
-	state, _ := newAggregate(t)
+	state, cache := newAggregate(t)
 
 	// Add delta with missing packfile (orphan)
 	orphanDelta := &DeltaEntry{
@@ -489,7 +444,7 @@ func TestListOrphanDeltas(t *testing.T) {
 		},
 		Flags: 0x1234,
 	}
-	state.PutDelta(orphanDelta)
+	putDeltaInCache(t, cache, orphanDelta)
 
 	// List orphan deltas
 	var found []DeltaEntry
@@ -502,21 +457,24 @@ func TestListOrphanDeltas(t *testing.T) {
 	require.Equal(t, *orphanDelta, found[0])
 }
 
-func TestDeleteResource(t *testing.T) {
-	state, _ := newAggregate(t)
+// putDeltaInCache seeds a delta entry directly in the aggregate's cache: the
+// aggregate receives deltas via merge, not through a method of its own.
+func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
+	t.Helper()
+	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.ToBytes()))
+}
 
-	resource := objects.MAC{1, 2, 3, 4}
-	err := state.ColourResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-
-	// Verify resource is marked as deleted
-	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-	require.True(t, hasDeleted)
+// colourInCache seeds a coloured entry directly in the aggregate's cache: the
+// aggregate receives coloured entries via merge, not through a method of its
+// own.
+func colourInCache(t *testing.T, cache *caching.SQLState, rtype resources.Type, resource objects.MAC) {
+	t.Helper()
+	ce := ColouredEntry{Type: rtype, Blob: resource, When: time.Now()}
+	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
 }
 
 func TestHasDeletedResource(t *testing.T) {
-	state, _ := newAggregate(t)
+	state, cache := newAggregate(t)
 
 	resource := objects.MAC{1, 2, 3, 4}
 
@@ -526,7 +484,7 @@ func TestHasDeletedResource(t *testing.T) {
 	require.False(t, hasDeleted)
 
 	// Delete the resource
-	state.ColourResource(resources.RT_OBJECT, resource)
+	colourInCache(t, cache, resources.RT_OBJECT, resource)
 
 	// Test existing deleted resource
 	hasDeleted, err = state.HasColouredResource(resources.RT_OBJECT, resource)
@@ -556,14 +514,14 @@ func TestSetConfiguration(t *testing.T) {
 }
 
 func TestListDeletedResources(t *testing.T) {
-	state, _ := newAggregate(t)
+	state, cache := newAggregate(t)
 
 	// Delete some resources
 	resource1 := objects.MAC{1, 2, 3, 4}
 	resource2 := objects.MAC{5, 6, 7, 8}
 
-	state.ColourResource(resources.RT_OBJECT, resource1)
-	state.ColourResource(resources.RT_OBJECT, resource2)
+	colourInCache(t, cache, resources.RT_OBJECT, resource1)
+	colourInCache(t, cache, resources.RT_OBJECT, resource2)
 
 	// List deleted resources
 	var found []ColouredEntry
