@@ -1,8 +1,9 @@
 GO =	go
 
-all:
-	@echo "nothing to build, kloset is a library."
-	@echo "run ${MAKE} test for tests and vet."
+all: kloset
+
+kloset:
+	${GO} build -v ./...
 
 check: test
 
