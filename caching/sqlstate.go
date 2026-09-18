@@ -553,7 +553,7 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 
 // Configuration handling
 func (c *SQLState) PutConfiguration(key string, data []byte) error {
-	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?,  ?)", key, data)
+	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET data=excluded.data", key, data)
 	return err
 }
 
