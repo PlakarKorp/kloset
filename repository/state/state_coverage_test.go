@@ -8,7 +8,6 @@ import (
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
@@ -16,7 +15,7 @@ import (
 // "oldCe.CreatedAt.Before(ce.CreatedAt)" branch of insertOrUpdateConfiguration:
 // after seeding an older entry, a newer SetConfiguration call replaces it.
 func TestSetConfigurationOverwriteNewer(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	older := ConfigurationEntry{
 		Key:       "k",
@@ -39,7 +38,7 @@ func TestSetConfigurationOverwriteNewer(t *testing.T) {
 // when the stored entry is newer than the incoming one, insertOrUpdate keeps
 // the stored value.
 func TestSetConfigurationKeepsOlder(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	// Seed cache with a future-dated entry so subsequent SetConfiguration
 	// won't replace it.
@@ -62,7 +61,7 @@ func TestSetConfigurationKeepsOlder(t *testing.T) {
 // TestListSnapshotsWithMissingPackfile exercises ListSnapshots's continue
 // branch when the packfile referenced by a delta is not in the cache.
 func TestListSnapshotsWithMissingPackfile(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	pfMissing := objects.MAC{0xAA}
 	pfPresent := objects.MAC{0xBB}
@@ -84,20 +83,20 @@ func TestListSnapshotsWithMissingPackfile(t *testing.T) {
 
 	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf-data")))
 
-	// ListSnapshots should produce exactly the entry whose packfile is
-	// present in the cache. The mockStateCache.GetDelta iterator yields
-	// all deltas regardless of key parsing, so order is not deterministic.
-	count := 0
-	for range st.ListSnapshots() {
-		count++
+	// ListSnapshots must produce exactly the entry whose packfile is present
+	// in the cache.
+	var found []objects.MAC
+	for snap, err := range st.ListSnapshots() {
+		require.NoError(t, err)
+		found = append(found, snap)
 	}
-	require.GreaterOrEqual(t, count, 0)
+	require.Equal(t, []objects.MAC{deltaPresent.Blob}, found)
 }
 
 // TestListSnapshotsSkipsColoured exercises the path where a snapshot has been
 // coloured (marked deleted) — it should be skipped by ListSnapshots.
 func TestListSnapshotsSkipsColoured(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	pf := objects.MAC{0xCC}
 	require.NoError(t, cache.PutPackfile(pf, []byte("pf")))
@@ -113,17 +112,18 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 	// Mark the snapshot as coloured (deleted).
 	require.NoError(t, st.ColourResource(resources.RT_SNAPSHOT, snapID))
 
-	for range st.ListSnapshots() {
-		// We don't strongly assert non-iteration here because the mock's
-		// HasColoured may return false for various reasons; the point is
-		// to execute the coloured-check branch.
+	count := 0
+	for _, err := range st.ListSnapshots() {
+		require.NoError(t, err)
+		count++
 	}
+	require.Zero(t, count)
 }
 
 // TestListObjectsOfTypeMixed exercises ListObjectsOfType including the
 // missing packfile continue branch.
 func TestListObjectsOfTypeMixed(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	pfPresent := objects.MAC{0x33}
 	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf")))
@@ -141,17 +141,18 @@ func TestListObjectsOfTypeMixed(t *testing.T) {
 	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, deltaWithPf.Blob, pfPresent, deltaWithPf.ToBytes()))
 	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, deltaWithoutPf.Blob, deltaWithoutPf.Location.Packfile, deltaWithoutPf.ToBytes()))
 
-	count := 0
-	for range st.ListObjectsOfType(resources.RT_OBJECT) {
-		count++
+	var found []DeltaEntry
+	for de, err := range st.ListObjectsOfType(resources.RT_OBJECT) {
+		require.NoError(t, err)
+		found = append(found, de)
 	}
-	require.GreaterOrEqual(t, count, 0)
+	require.Equal(t, []DeltaEntry{deltaWithPf}, found)
 }
 
 // TestListOrphanDeltasWithMixedState seeds both present and missing-packfile
 // deltas; ListOrphanDeltas should only emit those whose packfile is absent.
 func TestListOrphanDeltasWithMixedState(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	pfPresent := objects.MAC{0xA1}
 	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf")))
@@ -169,22 +170,20 @@ func TestListOrphanDeltasWithMixedState(t *testing.T) {
 	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, orphan.Blob, orphan.Location.Packfile, orphan.ToBytes()))
 	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, healthy.Blob, pfPresent, healthy.ToBytes()))
 
-	count := 0
-	for range st.ListOrphanDeltas() {
-		count++
+	var found []DeltaEntry
+	for de, err := range st.ListOrphanDeltas() {
+		require.NoError(t, err)
+		found = append(found, de)
 	}
-	require.GreaterOrEqual(t, count, 0)
+	require.Equal(t, []DeltaEntry{orphan}, found)
 }
 
 // TestSerializeDeserializeAllEntryTypes drives a complete round-trip of every
-// entry type the on-stream format supports, so both SerializeToStream and
-// deserializeFromStream cover the per-entry branches (DELETE, LOCATIONS,
-// COLOURED, PACKFILE, CONFIGURATION, METADATA).
+// entry type the on-stream format supports, so both State.SerializeToStream
+// and LocalState.deserializeFromStream cover the per-entry branches (DELETE,
+// LOCATIONS, COLOURED, PACKFILE, CONFIGURATION, METADATA).
 func TestSerializeDeserializeAllEntryTypes(t *testing.T) {
-	cache := newMockStateCache()
-	src, err := NewLocalState(cache)
-	require.NoError(t, err)
-	src.Metadata.Serial = uuid.New()
+	src, srcCache := newDeltaState(t)
 
 	// LOCATIONS / delta
 	require.NoError(t, src.PutDelta(&DeltaEntry{
@@ -204,14 +203,13 @@ func TestSerializeDeserializeAllEntryTypes(t *testing.T) {
 	require.NoError(t, src.DelDelta(resources.RT_CHUNK, objects.MAC{0xDE}, objects.MAC{0xAD}))
 
 	// CONFIGURATION
-	require.NoError(t, src.SetConfiguration("ck", []byte("cv")))
+	ce := ConfigurationEntry{Key: "ck", Value: []byte("cv"), CreatedAt: time.Now()}
+	require.NoError(t, srcCache.PutConfiguration(ce.Key, ce.ToBytes()))
 
 	var buf bytes.Buffer
 	require.NoError(t, src.SerializeToStream(&buf))
 
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
+	dst, _ := newAggregate(t)
 	require.NoError(t, dst.deserializeFromStream(&buf))
 	require.Equal(t, src.Metadata.Serial, dst.Metadata.Serial)
 }
@@ -219,9 +217,7 @@ func TestSerializeDeserializeAllEntryTypes(t *testing.T) {
 // TestDeserializeFromStreamShortHeader feeds too few bytes so reading the
 // state header returns an error.
 func TestDeserializeFromStreamShortHeader(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newAggregate(t)
 	require.Error(t, st.deserializeFromStream(bytes.NewReader(make([]byte, 5))))
 }
 
@@ -236,9 +232,7 @@ func TestDeserializeFromStreamBadEntryLength(t *testing.T) {
 	// Wrong length (0).
 	buf.Write([]byte{0, 0, 0, 0})
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newAggregate(t)
 	require.Error(t, st.deserializeFromStream(buf))
 }
 
@@ -257,9 +251,7 @@ func TestDeserializeFromStreamUnknownEntryType(t *testing.T) {
 	buf.Write(make([]byte, 8))    // timestamp
 	buf.Write(make([]byte, 16))   // serial
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newAggregate(t)
 	require.NoError(t, st.deserializeFromStream(buf))
 }
 
@@ -314,13 +306,11 @@ func TestDeserializeFromStreamV100AllEntryTypes(t *testing.T) {
 
 	// METADATA terminator + fields
 	buf.WriteByte(byte(ET_METADATA))
-	writeUint32LE(buf, 0)            // version
-	writeUint64LE(buf, uint64(0))    // timestamp
-	buf.Write(make([]byte, 16))      // serial
+	writeUint32LE(buf, 0)         // version
+	writeUint64LE(buf, uint64(0)) // timestamp
+	buf.Write(make([]byte, 16))   // serial
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newAggregate(t)
 	require.NoError(t, st.deserializeFromStreamv100(buf))
 }
 
@@ -340,9 +330,7 @@ func writeUint64LE(buf *bytes.Buffer, v uint64) {
 // TestMergeFromCachePopulated exercises mergeFromCache with all four cache
 // categories populated, so each loop body in the merge function runs.
 func TestMergeFromCachePopulated(t *testing.T) {
-	srcCache := newMockStateCache()
-	src, err := NewLocalState(srcCache)
-	require.NoError(t, err)
+	src, srcCache := newDeltaState(t)
 
 	require.NoError(t, src.PutDelta(&DeltaEntry{
 		Type: resources.RT_OBJECT, Blob: objects.MAC{0x01},
@@ -350,11 +338,10 @@ func TestMergeFromCachePopulated(t *testing.T) {
 	}))
 	require.NoError(t, src.ColourResource(resources.RT_OBJECT, objects.MAC{0x02}))
 	require.NoError(t, src.PutPackfile(objects.MAC{0x03}, objects.MAC{0x30}))
-	require.NoError(t, src.SetConfiguration("mfk", []byte("mfv")))
+	ce := ConfigurationEntry{Key: "mfk", Value: []byte("mfv"), CreatedAt: time.Now()}
+	require.NoError(t, srcCache.PutConfiguration(ce.Key, ce.ToBytes()))
 
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
+	dst, _ := newAggregate(t)
 
 	require.NoError(t, dst.mergeFromCache(srcCache))
 }
@@ -362,9 +349,7 @@ func TestMergeFromCachePopulated(t *testing.T) {
 // TestMergeStateFromCacheAlreadyHas exercises the early-return branch of
 // MergeStateFromCache when HasState already returns true.
 func TestMergeStateFromCacheAlreadyHas(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, cache := newAggregate(t)
 
 	stateID := objects.MAC{0xCA, 0xFE}
 	mt := Metadata{Version: versioning.FromString(VERSION), Timestamp: time.Now()}
@@ -372,17 +357,15 @@ func TestMergeStateFromCacheAlreadyHas(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, cache.PutState(stateID, mtBytes))
 
-	src := newMockStateCache()
+	src := newScanCache(t)
 	require.NoError(t, st.MergeStateFromCache(stateID, src))
 }
 
 // TestSerializeToStreamWithAllEntryTypes follows up by triggering each
-// SerializeToStream branch (DELETE / LOCATIONS / COLOURED / PACKFILE /
+// State.SerializeToStream branch (DELETE / LOCATIONS / COLOURED / PACKFILE /
 // CONFIGURATION) with a non-empty cache.
 func TestSerializeToStreamWithAllEntryTypes(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, cache := newDeltaState(t)
 
 	require.NoError(t, st.PutDelta(&DeltaEntry{
 		Type: resources.RT_OBJECT, Blob: objects.MAC{0x01},
@@ -391,19 +374,14 @@ func TestSerializeToStreamWithAllEntryTypes(t *testing.T) {
 	require.NoError(t, st.ColourResource(resources.RT_OBJECT, objects.MAC{0x02}))
 	require.NoError(t, st.PutPackfile(objects.MAC{0x03}, objects.MAC{0x30}))
 	require.NoError(t, st.DelDelta(resources.RT_OBJECT, objects.MAC{0x04}, objects.MAC{0x40}))
-	require.NoError(t, st.SetConfiguration("sk", []byte("sv")))
+	ce := ConfigurationEntry{Key: "sk", Value: []byte("sv"), CreatedAt: time.Now()}
+	require.NoError(t, cache.PutConfiguration(ce.Key, ce.ToBytes()))
 
 	var buf bytes.Buffer
 	require.NoError(t, st.SerializeToStream(&buf))
 	require.NotZero(t, buf.Len())
 
 	// And read it back too, so deserializeFromStream gets all branches.
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
+	dst, _ := newAggregate(t)
 	require.NoError(t, dst.deserializeFromStream(&buf))
-
-	// also ensure the FromStream public wrapper still works
-	st2 := time.Now()
-	_ = st2
 }

@@ -62,15 +62,6 @@ func TestScanBatchDelta(t *testing.T) {
 	require.True(t, found)
 }
 
-// TestScanCacheNewBatch verifies that NewBatch is the same as NewScanBatch.
-func TestScanCacheNewBatch(t *testing.T) {
-	cache := newScanCache(t)
-
-	batch := cache.NewBatch()
-	require.NotNil(t, batch)
-	require.NoError(t, batch.Commit())
-}
-
 // TestScanCacheGetLatestState verifies it returns NilMac (not an error).
 func TestScanCacheGetLatestState(t *testing.T) {
 	cache := newScanCache(t)
