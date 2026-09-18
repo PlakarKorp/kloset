@@ -12,18 +12,6 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func newStateWithCache(t *testing.T) (*LocalState, *mockStateCache) {
-	t.Helper()
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
-	return st, cache
-}
-
-// ---------------------------------------------------------------------------
 // DeleteEntry ToBytes / FromBytes round-trip
 // ---------------------------------------------------------------------------
 
@@ -57,7 +45,7 @@ func TestDeleteEntryFromBytesShort(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDelState(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	stateID := objects.MAC{0xDE, 0xAD}
 	mt := Metadata{
@@ -84,7 +72,7 @@ func TestDelState(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestGetStates(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	id1 := objects.MAC{0x01}
 	id2 := objects.MAC{0x02}
@@ -107,7 +95,7 @@ func TestGetStates(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestNewBatch(t *testing.T) {
-	st, _ := newStateWithCache(t)
+	st, cache := newDeltaState(t)
 	batch := st.NewBatch()
 	require.NotNil(t, batch)
 
@@ -127,6 +115,14 @@ func TestNewBatch(t *testing.T) {
 	err := batch.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.ToBytes())
 	require.NoError(t, err)
 	require.NoError(t, batch.Commit())
+
+	// The committed delta must be visible through the cache.
+	found := false
+	for _, data := range cache.GetDelta(de.Type, de.Blob) {
+		require.Equal(t, de.ToBytes(), data)
+		found = true
+	}
+	require.True(t, found)
 }
 
 // ---------------------------------------------------------------------------
@@ -134,7 +130,7 @@ func TestNewBatch(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDelDelta(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newDeltaState(t)
 
 	blobMAC := objects.MAC{0x11}
 	pfMAC := objects.MAC{0x22}
@@ -147,12 +143,21 @@ func TestDelDelta(t *testing.T) {
 	require.NoError(t, st.PutDelta(de))
 
 	// After PutDelta the delta should be visible via the cache.
-	require.NotEmpty(t, cache.deltas)
+	found := false
+	for range cache.GetDelta(de.Type, blobMAC) {
+		found = true
+	}
+	require.True(t, found)
 
-	// DelDelta records a delete entry (does not touch cache.deltas directly in
-	// the current implementation — it writes a deleted marker to the cache).
-	err := st.DelDelta(resources.RT_CHUNK, blobMAC, pfMAC)
-	require.NoError(t, err)
+	// DelDelta records a delete entry (it does not touch the delta itself —
+	// it writes a deleted marker for the delta state stream).
+	require.NoError(t, st.DelDelta(resources.RT_CHUNK, blobMAC, pfMAC))
+
+	var deleted int
+	for range cache.GetDeletedEntries() {
+		deleted++
+	}
+	require.Equal(t, 1, deleted)
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +165,7 @@ func TestDelDelta(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDelPackfile(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newDeltaState(t)
 
 	pfMAC := objects.MAC{0x33}
 	// First, add the packfile.
@@ -172,7 +177,7 @@ func TestDelPackfile(t *testing.T) {
 	// DelPackfile marks the packfile as deleted (writes a delete entry to the
 	// "deleted" store inside the cache).
 	require.NoError(t, st.DelPackfile(pfMAC))
-	// The packfile itself is still present in the cache map (the delete entry
+	// The packfile itself is still present in the cache (the delete entry
 	// is separate). What matters is the operation does not error.
 }
 
@@ -181,7 +186,7 @@ func TestDelPackfile(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestListPackfileEntries(t *testing.T) {
-	st, _ := newStateWithCache(t)
+	st, _ := newAggregate(t)
 
 	pf1 := objects.MAC{0xAA}
 	pf2 := objects.MAC{0xBB}
@@ -208,7 +213,7 @@ func TestListPackfileEntries(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDelColouredResource(t *testing.T) {
-	st, _ := newStateWithCache(t)
+	st, _ := newDeltaState(t)
 
 	resMAC := objects.MAC{0x44}
 	// First colour it.
@@ -276,9 +281,7 @@ func TestReadHeaderShortBuffer(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestSerializeWithDeleteEntries(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newDeltaState(t)
 
 	// Add a delta and a packfile, then delete both.
 	blobMAC := objects.MAC{0xBE, 0xEF}
@@ -298,11 +301,9 @@ func TestSerializeWithDeleteEntries(t *testing.T) {
 	require.NoError(t, st.SerializeToStream(&buf))
 	require.Greater(t, buf.Len(), 0)
 
-	// Deserialise back and make sure it does not error.
-	cache2 := newMockStateCache()
-	st2, err := FromStream(&buf, versioning.FromString("1.1.0"), cache2)
-	require.NoError(t, err)
-	require.NotNil(t, st2)
+	// Deserialise back into an aggregate and make sure it does not error.
+	dst, _ := newAggregate(t)
+	require.NoError(t, dst.deserializeFromStream(&buf))
 }
 
 // ---------------------------------------------------------------------------
@@ -310,10 +311,8 @@ func TestSerializeWithDeleteEntries(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestMergeStateFromCache(t *testing.T) {
-	// Build a "source" state in its own cache.
-	srcCache := newMockStateCache()
-	src, err := NewLocalState(srcCache)
-	require.NoError(t, err)
+	// Build a "source" delta state in its own scan cache.
+	src, srcCache := newDeltaState(t)
 
 	blobMAC := objects.MAC{0x77}
 	pfMAC := objects.MAC{0x88}
@@ -326,13 +325,11 @@ func TestMergeStateFromCache(t *testing.T) {
 	require.NoError(t, src.PutDelta(de))
 	require.NoError(t, src.PutPackfile(objects.NilMac, pfMAC))
 
-	// Merge into a different state using MergeStateFromCache.
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
+	// Merge into an aggregate using MergeStateFromCache.
+	dst, _ := newAggregate(t)
 
 	stateID := objects.MAC{0x99}
-	err = dst.MergeStateFromCache(stateID, srcCache)
+	err := dst.MergeStateFromCache(stateID, srcCache)
 	require.NoError(t, err)
 
 	has, err := dst.HasState(stateID)
@@ -394,8 +391,6 @@ func TestDeserializeFromStreamv100(t *testing.T) {
 	stream := buildV100Stream(t)
 
 	// Deserialise as version 1.0.0 (uses deserializeFromStreamv100 code path).
-	cache := newMockStateCache()
-	st, err := FromStream(stream, versioning.FromString("1.0.0"), cache)
-	require.NoError(t, err)
-	require.NotNil(t, st)
+	st, _ := newAggregate(t)
+	require.NoError(t, st.deserializeFromStreamv100(stream))
 }
