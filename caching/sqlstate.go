@@ -561,6 +561,9 @@ func (c *SQLState) GetConfiguration(key string) ([]byte, error) {
 	query := "SELECT data FROM configurations WHERE key = ?"
 	var data []byte
 	if err := c.db.QueryRow(query, key).Scan(&data); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
