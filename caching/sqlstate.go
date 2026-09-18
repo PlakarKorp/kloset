@@ -105,10 +105,6 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
 }
 
-func (c *SQLState) NewBatch() StateBatch {
-	return &sqlStateBatch{c, make([]sDelta, 0)}
-}
-
 func (c *sqlStateBatch) Put([]byte, []byte) error {
 	panic("NOT IMPLEMENTED")
 }
@@ -557,7 +553,7 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 
 // Configuration handling
 func (c *SQLState) PutConfiguration(key string, data []byte) error {
-	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?,  ?)", key, data)
+	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET data=excluded.data", key, data)
 	return err
 }
 
@@ -565,6 +561,9 @@ func (c *SQLState) GetConfiguration(key string) ([]byte, error) {
 	query := "SELECT data FROM configurations WHERE key = ?"
 	var data []byte
 	if err := c.db.QueryRow(query, key).Scan(&data); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 

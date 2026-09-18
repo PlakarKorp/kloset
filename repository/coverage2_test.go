@@ -18,10 +18,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newStateCache returns a fresh caching.StateCache (an SQLState, the same
-// backend repository.New uses for its own state) in a temporary directory,
-// cleaned up at the end of the test.
-func newStateCache(t *testing.T) caching.StateCache {
+// newStateCache returns a fresh SQLState (the same backend repository.New
+// uses for its own state) in a temporary directory, cleaned up at the end of
+// the test.
+func newStateCache(t *testing.T) *caching.SQLState {
 	t.Helper()
 	tmp, err := os.MkdirTemp("", "kloset-statecache-*")
 	require.NoError(t, err)
