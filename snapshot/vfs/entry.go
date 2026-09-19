@@ -72,11 +72,23 @@ func (e *Entry) HasObject() bool {
 
 var ErrMalformedEntry = errors.New("malformed vfs entry")
 
+// integration/fs up to v1.1.7 left parent path on "/" to "/<device>:"
+// on windows, instead of "/".  cope with it.
+func isParentPathWindowsBug(p string) bool {
+	return len(p) == 3 && p[0] == '/' &&
+		'A' <= p[1] && p[1] <= 'Z' &&
+		p[2] == ':'
+}
+
 func (e *Entry) validate() error {
 	name := e.FileInfo.Lname
 
 	// root is named "/"; the builder leaves its parent as "/" or "".
 	if name == "/" && (e.ParentPath == "/" || e.ParentPath == "") {
+		return nil
+	}
+
+	if name == "/" && isParentPathWindowsBug(e.ParentPath) {
 		return nil
 	}
 
@@ -347,7 +359,7 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 			}
 
 			// a dirpack lists one directory: every record is a direct child.
-			if entry.ParentPath != prefix {
+			if entry.ParentPath != prefix && prefix == "/" && isParentPathWindowsBug(entry.ParentPath) {
 				yield(nil, fmt.Errorf("%w: entry %q claims parent %q in dirpack for %q",
 					ErrMalformedEntry, entry.FileInfo.Lname, entry.ParentPath, prefix))
 				return
