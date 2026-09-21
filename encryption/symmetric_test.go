@@ -757,24 +757,27 @@ func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
 	r := strings.NewReader(originalData)
 
 	// Step 1: Compress the data
+	// NotNil, not NotEmpty: these readers are backed by live pipes with
+	// writer goroutines; testify's NotEmpty inspects them via reflection
+	// and races with the writes.
 	compressedReader, err := compression.DeflateStream("GZIP", r)
 	require.NoError(t, err)
-	require.NotEmpty(t, compressedReader)
+	require.NotNil(t, compressedReader)
 
 	// Step 2: Encrypt the compressed data
 	encryptedReader, err := enc.EncryptStream(params.config, params.key, compressedReader)
 	require.NoError(t, err)
-	require.NotEmpty(t, encryptedReader)
+	require.NotNil(t, encryptedReader)
 
 	// Step 3: Decrypt the data
 	decryptedReader, err := enc.DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
 	require.NoError(t, err)
-	require.NotEmpty(t, decryptedReader)
+	require.NotNil(t, decryptedReader)
 
 	// Step 4: Decompress the decrypted data
 	decompressedReader, err := compression.InflateStream("GZIP", decryptedReader)
 	require.NoError(t, err)
-	require.NotEmpty(t, decompressedReader)
+	require.NotNil(t, decompressedReader)
 
 	// Read the final output
 	finalData, err := io.ReadAll(decompressedReader)
