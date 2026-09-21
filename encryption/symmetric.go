@@ -21,7 +21,7 @@ const (
 	chunkSize          = 64 * 1024 // Size of each chunk for encryption/decryption
 	DEFAULT_KDF        = "ARGON2ID"
 	AESGCMSIVNonceSize = 12
-	AESGMSIV_OVERHEAD  = AESGCMSIVNonceSize + aes.BlockSize
+	AESGCMSIV_OVERHEAD  = AESGCMSIVNonceSize + aes.BlockSize
 )
 
 type Configuration struct {
@@ -301,7 +301,7 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 
 		// Encrypt and write data chunks, each as nonce || ciphertext || tag
 		chunk := make([]byte, config.ChunkSize)
-		out := make([]byte, 0, config.ChunkSize+AESGMSIV_OVERHEAD)
+		out := make([]byte, 0, config.ChunkSize+AESGCMSIV_OVERHEAD)
 		for {
 			// Use ReadFull to read exactly chunkSize or less at EOF
 			n, err := io.ReadFull(r, chunk)
@@ -364,10 +364,10 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 	go func() {
 		defer pw.Close()
 
-		// Each frame is nonce || ciphertext || tag, ChunkSize+AESGMSIV_OVERHEAD
+		// Each frame is nonce || ciphertext || tag, ChunkSize+AESGCMSIV_OVERHEAD
 		// bytes except the last one, which may be shorter. The reader is free
 		// to return frames in arbitrary fragments, so reassemble with ReadFull.
-		buffer := make([]byte, config.ChunkSize+AESGMSIV_OVERHEAD)
+		buffer := make([]byte, config.ChunkSize+AESGCMSIV_OVERHEAD)
 		for {
 			n, rerr := io.ReadFull(r, buffer)
 			if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
@@ -376,7 +376,7 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 			}
 
 			if n > 0 {
-				if n < AESGMSIV_OVERHEAD {
+				if n < AESGCMSIV_OVERHEAD {
 					pw.CloseWithError(fmt.Errorf("encrypted chunk too short: %d bytes", n))
 					return
 				}
