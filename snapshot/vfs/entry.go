@@ -80,8 +80,6 @@ func isParentPathWindowsBug(p string) bool {
 		p[2] == ':'
 }
 
-// validateDirpackEntry runs the checks common to every dirpack record read
-// path: field validation, then the windows-bug parent-path check.
 func validateDirpackEntry(entry *Entry, parentPath string) error {
 	if err := entry.validate(); err != nil {
 		return err
@@ -315,6 +313,31 @@ func readDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
 	return
 }
 
+func decodeDirpackRecord(rd io.Reader, parentPath string) (*Entry, error) {
+	_, siz, err := readDirPackHdr(rd)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, io.EOF
+		}
+		return nil, fmt.Errorf("failed to read: %w", err)
+	}
+
+	var entry Entry
+	lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
+	if err := msgpack.NewDecoder(lrd).Decode(&entry); err != nil {
+		return nil, fmt.Errorf("failed to read entry: %w", err)
+	}
+	if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
+		return nil, fmt.Errorf("failed to read entry mac: %w", err)
+	}
+
+	if err := validateDirpackEntry(&entry, parentPath); err != nil {
+		return nil, err
+	}
+
+	return &entry, nil
+}
+
 func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	prefix := e.Path()
 
@@ -322,7 +345,7 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return e.getdentsDirpackNoCache(fsc, prefix)
 	}
 
-	m, err := fsc.getDirpackMap(prefix)
+	listing, err := fsc.getDirpackMap(prefix)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
@@ -331,7 +354,7 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 	}
 
 	return func(yield func(*Entry, error) bool) {
-		for _, entry := range m {
+		for _, entry := range listing.order {
 			if !yield(entry, nil) {
 				return
 			}
@@ -367,34 +390,16 @@ func (e *Entry) getdentsDirpackNoCache(fsc *Filesystem, prefix string) (iter.Seq
 	rd := NewObjectReader(fsc.repo, obj, size, -1)
 	return func(yield func(*Entry, error) bool) {
 		for {
-			_, siz, err := readDirPackHdr(rd)
+			entry, err := decodeDirpackRecord(rd, prefix)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break
 				}
-
-				yield(nil, fmt.Errorf("failed to read: %w", err))
-				return
-			}
-
-			var entry Entry
-			lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
-			err = msgpack.NewDecoder(lrd).Decode(&entry)
-			if err != nil {
-				yield(nil, fmt.Errorf("failed to read entry: %w", err))
-				return
-			}
-			if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
-				yield(nil, fmt.Errorf("failed to read entry mac: %w", err))
-				return
-			}
-
-			if err := validateDirpackEntry(&entry, prefix); err != nil {
 				yield(nil, err)
 				return
 			}
 
-			if !yield(&entry, nil) {
+			if !yield(entry, nil) {
 				return
 			}
 		}

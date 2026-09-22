@@ -47,13 +47,18 @@ type CustomMetadata struct {
 	Value []byte `msgpack:"value" json:"value"`
 }
 
+type dirpackListing struct {
+	order  []*Entry
+	byName map[string]*Entry
+}
+
 type Filesystem struct {
 	tree         *btree.BTree[string, objects.MAC, objects.MAC]
 	xattrs       *btree.BTree[string, objects.MAC, objects.MAC]
 	errors       *btree.BTree[string, objects.MAC, objects.MAC]
 	dirpack      *btree.BTree[string, objects.MAC, objects.MAC]
 	repo         *repository.Repository
-	dirpackCache *lru.Cache[string, map[string]*Entry]
+	dirpackCache *lru.Cache[string, *dirpackListing]
 	dirpackSF    singleflight.Group
 
 	dirpackCacheSize int
@@ -142,7 +147,7 @@ func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors ob
 		return nil, err
 	}
 	fs.dirpackCacheSize = 256
-	fs.dirpackCache = lru.New[string, map[string]*Entry](fs.dirpackCacheSize, nil)
+	fs.dirpackCache = lru.New[string, *dirpackListing](fs.dirpackCacheSize, nil)
 
 	return fs, nil
 }
@@ -390,36 +395,36 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
 
-	m, err := fsc.getDirpackMap(parentPath)
+	listing, err := fsc.getDirpackMap(parentPath)
 	if err != nil {
 		return nil, err
 	}
 
-	if entry, ok := m[base]; ok {
+	if entry, ok := listing.byName[base]; ok {
 		return entry, nil
 	}
 	return nil, fs.ErrNotExist
 }
 
-func (fsc *Filesystem) getDirpackMap(parentPath string) (map[string]*Entry, error) {
+func (fsc *Filesystem) getDirpackMap(parentPath string) (*dirpackListing, error) {
 	if prefetcher := fsc.prefetcher; prefetcher != nil {
 		prefetcher.onConsume(parentPath)
 	}
 
-	if m, exists := fsc.dirpackCache.Get(parentPath); exists {
-		return m, nil
+	if listing, exists := fsc.dirpackCache.Get(parentPath); exists {
+		return listing, nil
 	}
 
 	v, err, _ := fsc.dirpackSF.Do(parentPath, func() (any, error) {
-		if m, exists := fsc.dirpackCache.Get(parentPath); exists {
-			return m, nil
+		if listing, exists := fsc.dirpackCache.Get(parentPath); exists {
+			return listing, nil
 		}
 		return fsc.loadDirpackMap(parentPath)
 	})
 	if err != nil {
 		return nil, err
 	}
-	return v.(map[string]*Entry), nil
+	return v.(*dirpackListing), nil
 }
 
 func (fsc *Filesystem) getEntryFollow(entrypath string) (*Entry, error) {
@@ -506,7 +511,7 @@ func (fsc *Filesystem) getEntryNoFollow(entrypath string) (*Entry, error) {
 	return entry, nil
 }
 
-func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, error) {
+func (fsc *Filesystem) loadDirpackMap(parentPath string) (*dirpackListing, error) {
 	objectMac, found, err := fsc.dirpack.Find(parentPath)
 	if err != nil {
 		return nil, err
@@ -521,7 +526,7 @@ func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, err
 // loadDirpackMapByMAC is loadDirpackMap with the dirpack object MAC already
 // resolved; the prefetcher uses it to skip the redundant dirpack.Find since
 // its cursor already yields the MAC alongside the path.
-func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.MAC) (map[string]*Entry, error) {
+func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.MAC) (*dirpackListing, error) {
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
 		return nil, err
@@ -540,26 +545,13 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 	//rd := NewObjectReader(fsc.repo, obj, size, -1)
 	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
 
-	cache := make(map[string]*Entry)
+	listing := &dirpackListing{byName: make(map[string]*Entry)}
 	for {
-		_, siz, err := readDirPackHdr(rd)
+		entry, err := decodeDirpackRecord(rd, parentPath)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, err
-		}
-
-		var entry Entry
-		lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
-		if err := msgpack.NewDecoder(lrd).Decode(&entry); err != nil {
-			return nil, err
-		}
-		if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
-			return nil, err
-		}
-
-		if err := validateDirpackEntry(&entry, parentPath); err != nil {
 			return nil, err
 		}
 
@@ -585,12 +577,13 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 			entry.Chunks = uint64(len(obj.Chunks))
 		}
 
-		cache[entry.Name()] = &entry
+		listing.order = append(listing.order, entry)
+		listing.byName[entry.Name()] = entry
 	}
 
-	_ = fsc.dirpackCache.Put(parentPath, cache)
+	_ = fsc.dirpackCache.Put(parentPath, listing)
 
-	return cache, nil
+	return listing, nil
 }
 
 func (fsc *Filesystem) Children(path string) (iter.Seq2[*Entry, error], error) {

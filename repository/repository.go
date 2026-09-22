@@ -21,6 +21,7 @@ import (
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/fastcdc"
 	_ "github.com/PlakarKorp/go-cdc-chunkers/chunkers/ultracdc"
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/lru"
 	"github.com/PlakarKorp/kloset/compression"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/encryption"
@@ -35,6 +36,7 @@ import (
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/throttle"
 	"github.com/PlakarKorp/kloset/versioning"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -96,6 +98,56 @@ type Repository struct {
 	macHasherPool *HasherPool
 
 	NoStateToLocalDisk bool
+
+	packfileCache     *lru.Cache[objects.MAC, []byte]
+	packfileCacheOnce sync.Once
+	packfileSF        singleflight.Group
+}
+
+const packfileCacheCapacity = 64
+
+func (r *Repository) getPackfileCache() *lru.Cache[objects.MAC, []byte] {
+	r.packfileCacheOnce.Do(func() {
+		r.packfileCache = lru.New[objects.MAC, []byte](packfileCacheCapacity, nil)
+	})
+	return r.packfileCache
+}
+
+func (r *Repository) fetchPackfile(mac objects.MAC) ([]byte, error) {
+	cache := r.getPackfileCache()
+	if v, ok := cache.Get(mac); ok {
+		return v, nil
+	}
+
+	v, err, _ := r.packfileSF.Do(string(mac[:]), func() (any, error) {
+		if v, ok := cache.Get(mac); ok {
+			return v, nil
+		}
+
+		span := r.ioStats.GetReadSpan()
+		rd, err := r.store.Get(r.appContext, storage.StorageResourcePackfile, mac, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer rd.Close()
+
+		data, err := io.ReadAll(rd)
+		if len(data) > 0 {
+			span.Add(int64(len(data)))
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		if err := cache.Put(mac, data); err != nil {
+			return nil, err
+		}
+		return data, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]byte), nil
 }
 
 func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
@@ -979,6 +1031,14 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 
 	offset := loc.Offset
 	length := loc.Length
+
+	if raw, err := r.fetchPackfile(loc.Packfile); err == nil {
+		start := uint64(storage.STORAGE_HEADER_SIZE) + offset
+		end := start + uint64(length)
+		if end <= uint64(len(raw)) {
+			return raw[start:end], nil
+		}
+	}
 
 	overhead, err := padmeLength(length)
 	if err != nil {

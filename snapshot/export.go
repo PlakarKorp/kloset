@@ -95,8 +95,9 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	}
 
 	const dirpackPrefetchBatch = 64
-	window := snap.AppContext().MaxConcurrency * dirpackPrefetchBatch
-	pvfs.StartDirpackPrefetch(window, dirpackPrefetchBatch)
+	workers := snap.AppContext().MaxConcurrency
+	window := workers * dirpackPrefetchBatch
+	pvfs.StartDirpackPrefetch(window, workers)
 	defer pvfs.StopDirpackPrefetch()
 
 	entry, err := pvfs.GetEntry(pathname)

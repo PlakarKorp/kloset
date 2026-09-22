@@ -70,7 +70,7 @@ func (fsc *Filesystem) StartDirpackPrefetch(window, workers int) {
 	// point (the walk has not started), so resizing it here is safe.
 	if need := 2 * (window + workers); need > fsc.dirpackCacheSize {
 		fsc.dirpackCacheSize = need
-		fsc.dirpackCache = lru.New[string, map[string]*Entry](need, nil)
+		fsc.dirpackCache = lru.New[string, *dirpackListing](need, nil)
 	}
 
 	fsc.prefetcher.workerWg.Add(workers)
