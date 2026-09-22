@@ -14,6 +14,7 @@ import (
 	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/PlakarKorp/kloset/throttle"
 )
@@ -99,6 +100,12 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	window := workers * dirpackPrefetchBatch
 	pvfs.StartDirpackPrefetch(window, workers)
 	defer pvfs.StopDirpackPrefetch()
+
+	if plan, err := snap.PlanPackfileFetches(pathname, int(workers)); err == nil {
+		_ = snap.repository.PrefetchPlan(plan, repository.PrefetchPlanOptions{
+			Concurrency: int(workers),
+		})
+	}
 
 	entry, err := pvfs.GetEntry(pathname)
 	if err != nil {
