@@ -108,6 +108,10 @@ func (r *Repository) getSpanCache() *packfileSpanCache {
 	return r.spanCache
 }
 
+func (r *Repository) ClearSpanCache() {
+	r.getSpanCache().clear()
+}
+
 func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
 	st, err := storage.New(ctx, storeConfig)
 	if err != nil {

@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/PlakarKorp/kloset/caching/lru"
@@ -16,6 +17,7 @@ import (
 // load of the same directory never both hit the backend.
 type dirpackPrefetcher struct {
 	fsc     *Filesystem
+	prefix  string
 	window  int
 	workers int
 
@@ -42,13 +44,30 @@ type prefetchJob struct {
 	mac  objects.MAC
 }
 
+func dirpackPrefetchInScope(dir, prefix string) (inScope, keepScanning bool) {
+	if prefix == "" || prefix == "/" || dir == prefix {
+		return true, true
+	}
+	dirPrefix := prefix
+	if !strings.HasSuffix(dirPrefix, "/") {
+		dirPrefix += "/"
+	}
+	if strings.HasPrefix(dir, dirPrefix) {
+		return true, true
+	}
+	if dir < dirPrefix {
+		return false, true
+	}
+	return false, false
+}
+
 // window is the maximum number of directories kept in flight
-func (fsc *Filesystem) StartDirpackPrefetch(window, workers int) {
+func (fsc *Filesystem) StartDirpackPrefetch(prefix string, window, workers int) {
 	if fsc.dirpack == nil || fsc.dirpackCache == nil || fsc.prefetcher != nil {
 		return
 	}
 
-	cursor, err := fsc.dirpack.ScanFrom("/")
+	cursor, err := fsc.dirpack.ScanFrom(prefix)
 	if err != nil {
 		// Not a fatal error, we just run without prefetching!
 		return
@@ -56,6 +75,7 @@ func (fsc *Filesystem) StartDirpackPrefetch(window, workers int) {
 
 	fsc.prefetcher = &dirpackPrefetcher{
 		fsc:      fsc,
+		prefix:   prefix,
 		window:   window,
 		workers:  workers,
 		jobs:     make(chan prefetchJob, workers),
@@ -102,15 +122,24 @@ func (p *dirpackPrefetcher) feed(cursor iterator.Iterator[string, objects.MAC]) 
 	// worker. Returns false when the cursor is exhausted/errored or we are
 	// shutting down.
 	enqueue := func() bool {
-		if !cursor.Next() {
-			return false
-		}
-		dir, mac := cursor.Current()
-		select {
-		case p.jobs <- prefetchJob{path: dir, mac: mac}:
-			return true
-		case <-p.quit:
-			return false
+		for {
+			if !cursor.Next() {
+				return false
+			}
+			dir, mac := cursor.Current()
+			inScope, keepScanning := dirpackPrefetchInScope(dir, p.prefix)
+			if !keepScanning {
+				return false
+			}
+			if !inScope {
+				continue
+			}
+			select {
+			case p.jobs <- prefetchJob{path: dir, mac: mac}:
+				return true
+			case <-p.quit:
+				return false
+			}
 		}
 	}
 

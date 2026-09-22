@@ -99,3 +99,17 @@ func TestPackfileSpanCacheLookupWrongPackfileMiss(t *testing.T) {
 	_, ok := c.lookup(objects.MAC{2}, 0, 5)
 	require.False(t, ok)
 }
+
+func TestPackfileSpanCacheClear(t *testing.T) {
+	c := newPackfileSpanCache()
+	mac := objects.MAC{1}
+	c.store(mac, 0, []byte("0123456789"))
+
+	_, ok := c.lookup(mac, 0, 5)
+	require.True(t, ok)
+
+	c.clear()
+
+	_, ok = c.lookup(mac, 0, 5)
+	require.False(t, ok)
+}

@@ -5,6 +5,7 @@ import (
 	"sync"
 
 	"github.com/PlakarKorp/kloset/objects"
+	"golang.org/x/sync/errgroup"
 )
 
 type PackfileFetchRange struct {
@@ -35,6 +36,13 @@ type packfileSpanCache struct {
 
 func newPackfileSpanCache() *packfileSpanCache {
 	return &packfileSpanCache{spans: make(map[objects.MAC][]cachedSpan)}
+}
+
+func (c *packfileSpanCache) clear() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.spans = make(map[objects.MAC][]cachedSpan)
 }
 
 func (c *packfileSpanCache) lookup(packfile objects.MAC, offset uint64, length uint32) ([]byte, bool) {
@@ -111,35 +119,17 @@ func (r *Repository) PrefetchPlan(plan FetchPlan, opts PrefetchPlanOptions) erro
 
 	cache := r.getSpanCache()
 
-	jobsCh := make(chan job)
-	var wg sync.WaitGroup
-	var firstErr error
-	var errMu sync.Mutex
-
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := range jobsCh {
-				data, err := r.fetchPaddedRange(j.packfile, j.span.Offset, j.span.Length)
-				if err != nil {
-					errMu.Lock()
-					if firstErr == nil {
-						firstErr = err
-					}
-					errMu.Unlock()
-					continue
-				}
-				cache.store(j.packfile, j.span.Offset, data)
-			}
-		}()
-	}
-
+	wg := new(errgroup.Group)
+	wg.SetLimit(concurrency)
 	for _, j := range jobs {
-		jobsCh <- j
+		wg.Go(func() error {
+			data, err := r.fetchPaddedRange(j.packfile, j.span.Offset, j.span.Length)
+			if err != nil {
+				return err
+			}
+			cache.store(j.packfile, j.span.Offset, data)
+			return nil
+		})
 	}
-	close(jobsCh)
-	wg.Wait()
-
-	return firstErr
+	return wg.Wait()
 }

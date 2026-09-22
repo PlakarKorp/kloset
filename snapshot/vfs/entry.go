@@ -338,6 +338,25 @@ func decodeDirpackRecord(rd io.Reader, parentPath string) (*Entry, error) {
 	return &entry, nil
 }
 
+func openDirpackObjectReader(fsc *Filesystem, objectMac objects.MAC, prefetchSize int32) (*ObjectReader, error) {
+	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, err := objects.NewObjectFromBytes(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	var size int64
+	for _, c := range obj.Chunks {
+		size += int64(c.Length)
+	}
+
+	return NewObjectReader(fsc.repo, obj, size, prefetchSize), nil
+}
+
 func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	prefix := e.Path()
 

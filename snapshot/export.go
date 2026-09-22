@@ -98,13 +98,14 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	const dirpackPrefetchBatch = 64
 	workers := snap.AppContext().MaxConcurrency
 	window := workers * dirpackPrefetchBatch
-	pvfs.StartDirpackPrefetch(window, workers)
+	pvfs.StartDirpackPrefetch(pathname, window, workers)
 	defer pvfs.StopDirpackPrefetch()
 
 	if plan, err := snap.PlanPackfileFetches(pathname, int(workers)); err == nil {
 		_ = snap.repository.PrefetchPlan(plan, repository.PrefetchPlanOptions{
 			Concurrency: int(workers),
 		})
+		defer snap.repository.ClearSpanCache()
 	}
 
 	entry, err := pvfs.GetEntry(pathname)

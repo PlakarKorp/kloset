@@ -7,6 +7,7 @@ import (
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
+	"golang.org/x/sync/errgroup"
 )
 
 func (snap *Snapshot) PlanPackfileFetches(pathname string, concurrency int) (repository.FetchPlan, error) {
@@ -49,51 +50,35 @@ func (snap *Snapshot) PlanPackfileFetches(pathname string, concurrency int) (rep
 
 	plan := make(repository.FetchPlan)
 	var planMu sync.Mutex
-	var firstErr error
-	var errMu sync.Mutex
 
-	jobs := make(chan objects.MAC)
-	var wg sync.WaitGroup
-	for i := 0; i < concurrency; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for mac := range jobs {
-				obj, err := snap.LookupObject(mac)
-				if err != nil {
-					errMu.Lock()
-					if firstErr == nil {
-						firstErr = err
-					}
-					errMu.Unlock()
+	wg := new(errgroup.Group)
+	wg.SetLimit(concurrency)
+	for _, mac := range objectMACs {
+		wg.Go(func() error {
+			obj, err := snap.LookupObject(mac)
+			if err != nil {
+				return err
+			}
+
+			for _, chunk := range obj.Chunks {
+				loc, exists, err := snap.repository.GetLocationForBlob(resources.RT_CHUNK, chunk.ContentMAC)
+				if err != nil || !exists {
 					continue
 				}
 
-				for _, chunk := range obj.Chunks {
-					loc, exists, err := snap.repository.GetLocationForBlob(resources.RT_CHUNK, chunk.ContentMAC)
-					if err != nil || !exists {
-						continue
-					}
-
-					planMu.Lock()
-					plan[loc.Packfile] = append(plan[loc.Packfile], repository.PackfileFetchRange{
-						Offset: loc.Offset,
-						Length: loc.Length,
-					})
-					planMu.Unlock()
-				}
+				planMu.Lock()
+				plan[loc.Packfile] = append(plan[loc.Packfile], repository.PackfileFetchRange{
+					Offset: loc.Offset,
+					Length: loc.Length,
+				})
+				planMu.Unlock()
 			}
-		}()
+			return nil
+		})
 	}
 
-	for _, mac := range objectMACs {
-		jobs <- mac
-	}
-	close(jobs)
-	wg.Wait()
-
-	if firstErr != nil {
-		return nil, firstErr
+	if err := wg.Wait(); err != nil {
+		return nil, err
 	}
 
 	return plan, nil
