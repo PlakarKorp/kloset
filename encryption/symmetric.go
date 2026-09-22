@@ -362,28 +362,32 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 	go func() {
 		defer pw.Close()
 
+		// EncryptStream emits fixed-size frames with no length prefix: the
+		// decrypt side must consume exactly one frame per Decrypt call, so
+		// read with ReadFull rather than trusting the reader's boundaries.
+		// Only the final frame may be shorter (ErrUnexpectedEOF).
 		buffer := make([]byte, config.ChunkSize+AESGMSIV_OVERHEAD)
 		for {
-			n, err := r.Read(buffer)
-			if err != nil {
-				if err != io.EOF {
+			n, err := io.ReadFull(r, buffer)
+			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+				pw.CloseWithError(fmt.Errorf("failed to read encrypted chunk: %w", err))
+				return
+			}
+
+			if n > 0 {
+				// Decrypt each chunk and write it to the pipe
+				decryptedChunk, err := dataGCM.Decrypt(buffer[:n], nil)
+				if err != nil {
+					pw.CloseWithError(err)
+					return
+				}
+				if _, err := pw.Write(decryptedChunk); err != nil {
 					pw.CloseWithError(err)
 					return
 				}
 			}
 
-			if n == 0 {
-				return
-			}
-
-			// Decrypt each chunk and write it to the pipe
-			decryptedChunk, err := dataGCM.Decrypt(buffer[:n], nil)
-			if err != nil {
-				pw.CloseWithError(err)
-				return
-			}
-			if _, err := pw.Write(decryptedChunk); err != nil {
-				pw.CloseWithError(err)
+			if err == io.EOF || err == io.ErrUnexpectedEOF {
 				return
 			}
 		}
