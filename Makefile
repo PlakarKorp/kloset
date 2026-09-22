@@ -3,7 +3,7 @@ GO =	go
 all: kloset
 
 kloset:
-	${GO} build -v ./...
+	${GO} vet -v ./...
 
 check: test
 
@@ -15,4 +15,4 @@ junit:
 	${GO} test -v -p 4 -coverprofile=coverage.out -covermode=atomic -timeout 2m -json ./... \
 		| ${GO} tool go-junit-report -parser gojson -set-exit-code > junit.xml
 
-.PHONY: all check test junit
+.PHONY: all check test junit kloset
