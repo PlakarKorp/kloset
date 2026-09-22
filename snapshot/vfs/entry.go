@@ -80,6 +80,21 @@ func isParentPathWindowsBug(p string) bool {
 		p[2] == ':'
 }
 
+// validateDirpackEntry runs the checks common to every dirpack record read
+// path: field validation, then the windows-bug parent-path check.
+func validateDirpackEntry(entry *Entry, parentPath string) error {
+	if err := entry.validate(); err != nil {
+		return err
+	}
+
+	if entry.ParentPath != parentPath && parentPath == "/" && isParentPathWindowsBug(entry.ParentPath) {
+		return fmt.Errorf("%w: entry %q claims parent %q in dirpack for %q",
+			ErrMalformedEntry, entry.FileInfo.Lname, entry.ParentPath, parentPath)
+	}
+
+	return nil
+}
+
 func (e *Entry) validate() error {
 	name := e.FileInfo.Lname
 
@@ -303,6 +318,28 @@ func readDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
 func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	prefix := e.Path()
 
+	if fsc.dirpackCache == nil {
+		return e.getdentsDirpackNoCache(fsc, prefix)
+	}
+
+	m, err := fsc.getDirpackMap(prefix)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
+		}
+		return nil, err
+	}
+
+	return func(yield func(*Entry, error) bool) {
+		for _, entry := range m {
+			if !yield(entry, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func (e *Entry) getdentsDirpackNoCache(fsc *Filesystem, prefix string) (iter.Seq2[*Entry, error], error) {
 	objectMac, ok, err := fsc.dirpack.Find(prefix)
 	if err != nil {
 		return nil, err
@@ -312,7 +349,6 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
 	}
 
-	// LookupObject inlined
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
 		return nil, err
@@ -353,15 +389,8 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 				return
 			}
 
-			if err := entry.validate(); err != nil {
+			if err := validateDirpackEntry(&entry, prefix); err != nil {
 				yield(nil, err)
-				return
-			}
-
-			// a dirpack lists one directory: every record is a direct child.
-			if entry.ParentPath != prefix && prefix == "/" && isParentPathWindowsBug(entry.ParentPath) {
-				yield(nil, fmt.Errorf("%w: entry %q claims parent %q in dirpack for %q",
-					ErrMalformedEntry, entry.FileInfo.Lname, entry.ParentPath, prefix))
 				return
 			}
 

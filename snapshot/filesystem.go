@@ -25,8 +25,8 @@ func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 }
 
 func (s *Snapshot) FilesystemWithCache() (*vfs.Filesystem, error) {
-	if s.filesystem != nil {
-		return s.filesystem, nil
+	if s.filesystemWithCache != nil {
+		return s.filesystemWithCache, nil
 	}
 
 	didx, err := s.DirPack()
@@ -40,6 +40,6 @@ func (s *Snapshot) FilesystemWithCache() (*vfs.Filesystem, error) {
 		return nil, err
 	}
 
-	s.filesystem = fs
+	s.filesystemWithCache = fs
 	return fs, nil
 }

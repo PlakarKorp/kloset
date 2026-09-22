@@ -27,7 +27,8 @@ type Snapshot struct {
 	repository *repository.Repository
 	checkCache *caching.CheckCache
 
-	filesystem *vfs.Filesystem
+	filesystem          *vfs.Filesystem
+	filesystemWithCache *vfs.Filesystem
 
 	Header *header.Header
 }

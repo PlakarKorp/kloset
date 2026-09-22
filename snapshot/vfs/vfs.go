@@ -135,7 +135,7 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	return fs, nil
 }
 
-// XXX - until we do refacto to remove object resolve from ResolveEntry, ONLY CALL IN SUBCOMMAND BACKUP
+// XXX - until we do refacto to remove object resolve from ResolveEntry
 func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
 	fs, err := NewFilesystem(repo, root, xattrs, errors, dirpackidx)
 	if err != nil {
@@ -390,17 +390,24 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
 
+	m, err := fsc.getDirpackMap(parentPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if entry, ok := m[base]; ok {
+		return entry, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func (fsc *Filesystem) getDirpackMap(parentPath string) (map[string]*Entry, error) {
 	if prefetcher := fsc.prefetcher; prefetcher != nil {
 		prefetcher.onConsume(parentPath)
 	}
 
-	// Fast path: if the prefetcher (or an earlier lookup) already warmed this
-	// directory, serve from cache without entering the singleflight group.
 	if m, exists := fsc.dirpackCache.Get(parentPath); exists {
-		if entry, ok := m[base]; ok {
-			return entry, nil
-		}
-		return nil, fs.ErrNotExist
+		return m, nil
 	}
 
 	v, err, _ := fsc.dirpackSF.Do(parentPath, func() (any, error) {
@@ -412,12 +419,7 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	if err != nil {
 		return nil, err
 	}
-	m := v.(map[string]*Entry)
-
-	if entry, ok := m[base]; ok {
-		return entry, nil
-	}
-	return nil, fs.ErrNotExist
+	return v.(map[string]*Entry), nil
 }
 
 func (fsc *Filesystem) getEntryFollow(entrypath string) (*Entry, error) {
@@ -554,6 +556,10 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 			return nil, err
 		}
 		if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
+			return nil, err
+		}
+
+		if err := validateDirpackEntry(&entry, parentPath); err != nil {
 			return nil, err
 		}
 
