@@ -405,22 +405,20 @@ func (r *Repository) IngestStateFile(stateID objects.MAC) error {
 	return nil
 }
 
-// Rebuild state with a specified different cache, this will go away in the
-// future.
-func (r *Repository) RebuildStateWithCache(cacheInstance *caching.SQLState) error {
+// RebuildLegacyState synchronizes ls, a LegacyState over the old pebble
+// repository cache, with the repository's state files: it merges the states
+// present remotely but missing locally, and drops the local states unknown to
+// the repository. Unlike the regular rebuild it does not touch the
+// repository's own local state.
+//
+// Deprecated: exists only for `plakar repair` and is removed with it.
+func (r *Repository) RebuildLegacyState(ls *state.LegacyState) error {
 	t0 := time.Now()
 	defer func() {
-		r.Logger().Trace("repository", "rebuildState(): %s", time.Since(t0))
+		r.Logger().Trace("repository", "rebuildLegacyState(): %s", time.Since(t0))
 	}()
 
-	/* Use on-disk local state, and merge it with repository's own state */
-	aggregatedState, err := state.NewLocalState(cacheInstance)
-	if err != nil {
-		return err
-	}
-
-	// identify local states
-	localStates, err := cacheInstance.GetStates()
+	localStates, err := ls.GetStates()
 	if err != nil {
 		return err
 	}
@@ -472,39 +470,25 @@ func (r *Repository) RebuildStateWithCache(cacheInstance *caching.SQLState) erro
 		return err
 	}
 
-	rebuilt := false
 	for _, stateID := range orderedStates {
 		remoteStateRd, v, err := r.GetState(stateID)
 		if err != nil {
 			return err
 		}
 
-		err = aggregatedState.MergeState(stateID, remoteStateRd, v)
+		err = ls.MergeState(stateID, remoteStateRd, v)
 		remoteStateRd.Close()
 
 		if err != nil {
 			return err
 		}
-
-		rebuilt = true
 	}
 
 	// delete local states that are not present in remote
 	for _, stateID := range outdatedStates {
-		if err := aggregatedState.DelState(stateID); err != nil {
+		if err := ls.DelState(stateID); err != nil {
 			return err
 		}
-		rebuilt = true
-	}
-
-	r.state = aggregatedState
-
-	// The first Serial id is our repository ID, this allows us to deal
-	// naturally with concurrent first backups.
-	r.state.UpdateSerialOr(r.configuration.RepositoryID)
-
-	if rebuilt {
-		r.storageSizeDirty = true
 	}
 
 	return nil

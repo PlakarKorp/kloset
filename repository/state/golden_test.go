@@ -546,32 +546,32 @@ func TestGoldenLoadFull(t *testing.T) {
 	t.Skip("state.FromStream is pending rework")
 
 	/*
-		data := readFixture(t, "full-v110.state")
+			data := readFixture(t, "full-v110.state")
 
-		sc := newScanCache(t)
-		st, err := state.FromStream(bytes.NewReader(data), gV110, sc)
+			sc := newScanCache(t)
+			st, err := state.FromStream(bytes.NewReader(data), gV110, sc)
+			require.NoError(t, err)
+
+		requireMetadata(t, st.Metadata, gState3, gV110, gT3, gSerial)
+
+		objs := collect2(t, st.ListObjectsOfType(resources.RT_OBJECT))
+		require.Len(t, objs, 1)
+		require.Equal(t, gObjF, objs[0].Blob)
+		require.Equal(t, state.Location{Packfile: gPackF, Offset: 0, Length: 40}, objs[0].Location)
+
+		colouredSnaps := collect2(t, st.ListColouredResources(resources.RT_SNAPSHOT))
+		require.Len(t, colouredSnaps, 1)
+		require.Equal(t, gSnapX, colouredSnaps[0].Blob)
+		require.Equal(t, gT3.UnixNano(), colouredSnaps[0].When.UnixNano())
+
+		require.True(t, st.BlobExists(resources.RT_OBJECT, gObjF))
+
+		raw, err := sc.GetConfiguration("fixture-key")
 		require.NoError(t, err)
-
-	requireMetadata(t, st.Metadata, gState3, gV110, gT3, gSerial)
-
-	objs := collect2(t, st.ListObjectsOfType(resources.RT_OBJECT))
-	require.Len(t, objs, 1)
-	require.Equal(t, gObjF, objs[0].Blob)
-	require.Equal(t, state.Location{Packfile: gPackF, Offset: 0, Length: 40}, objs[0].Location)
-
-	colouredSnaps := collect2(t, st.ListColouredResources(resources.RT_SNAPSHOT))
-	require.Len(t, colouredSnaps, 1)
-	require.Equal(t, gSnapX, colouredSnaps[0].Blob)
-	require.Equal(t, gT3.UnixNano(), colouredSnaps[0].When.UnixNano())
-
-	require.True(t, st.BlobExists(resources.RT_OBJECT, gObjF))
-
-	raw, err := sc.GetConfiguration("fixture-key")
-	require.NoError(t, err)
-	cfg, err := state.ConfigurationEntryFromBytes(raw)
-	require.NoError(t, err)
-		require.Equal(t, "fixture-key", cfg.Key)
-		require.Equal(t, []byte("fixture-value"), cfg.Value)
-		require.Equal(t, gT3.UnixNano(), cfg.CreatedAt.UnixNano())
+		cfg, err := state.ConfigurationEntryFromBytes(raw)
+		require.NoError(t, err)
+			require.Equal(t, "fixture-key", cfg.Key)
+			require.Equal(t, []byte("fixture-value"), cfg.Value)
+			require.Equal(t, gT3.UnixNano(), cfg.CreatedAt.UnixNano())
 	*/
 }

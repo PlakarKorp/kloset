@@ -135,9 +135,9 @@ func TestDelDelta(t *testing.T) {
 	blobMAC := objects.MAC{0x11}
 	pfMAC := objects.MAC{0x22}
 	de := &DeltaEntry{
-		Type:    resources.RT_CHUNK,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    blobMAC,
+		Type:     resources.RT_CHUNK,
+		Version:  versioning.FromString("1.0.0"),
+		Blob:     blobMAC,
 		Location: Location{Packfile: pfMAC, Offset: 0, Length: 32},
 	}
 	require.NoError(t, st.PutDelta(de))
@@ -287,9 +287,9 @@ func TestSerializeWithDeleteEntries(t *testing.T) {
 	blobMAC := objects.MAC{0xBE, 0xEF}
 	pfMAC := objects.MAC{0xCA, 0xFE}
 	de := &DeltaEntry{
-		Type:    resources.RT_CHUNK,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    blobMAC,
+		Type:     resources.RT_CHUNK,
+		Version:  versioning.FromString("1.0.0"),
+		Blob:     blobMAC,
 		Location: Location{Packfile: pfMAC, Offset: 0, Length: 16},
 	}
 	require.NoError(t, st.PutDelta(de))
@@ -317,9 +317,9 @@ func TestMergeStateFromCache(t *testing.T) {
 	blobMAC := objects.MAC{0x77}
 	pfMAC := objects.MAC{0x88}
 	de := &DeltaEntry{
-		Type:    resources.RT_SNAPSHOT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    blobMAC,
+		Type:     resources.RT_SNAPSHOT,
+		Version:  versioning.FromString("1.0.0"),
+		Blob:     blobMAC,
 		Location: Location{Packfile: pfMAC, Offset: 0, Length: 8},
 	}
 	require.NoError(t, src.PutDelta(de))
@@ -366,9 +366,9 @@ func buildV100Stream(t *testing.T) *bytes.Buffer {
 
 	// A single ET_LOCATIONS entry.
 	de := &DeltaEntry{
-		Type:    resources.RT_CHUNK,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    objects.MAC{0x55},
+		Type:     resources.RT_CHUNK,
+		Version:  versioning.FromString("1.0.0"),
+		Blob:     objects.MAC{0x55},
 		Location: Location{Packfile: objects.MAC{0x66}, Offset: 0, Length: 4},
 	}
 	buf.WriteByte(byte(ET_LOCATIONS))

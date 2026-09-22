@@ -8,42 +8,49 @@ import (
 	"testing"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/hashing"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/repository/state"
 	"github.com/PlakarKorp/kloset/resources"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/PlakarKorp/kloset/versioning"
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
-// newStateCache returns a fresh SQLState (the same backend repository.New
-// uses for its own state) in a temporary directory, cleaned up at the end of
-// the test.
-func newStateCache(t *testing.T) *caching.SQLState {
+// newLegacyState returns a LegacyState over a fresh pebble repository cache
+// (the same shape `plakar repair` feeds RebuildLegacyState), in a temporary
+// directory cleaned up at the end of the test.
+func newLegacyState(t *testing.T) *state.LegacyState {
 	t.Helper()
-	tmp, err := os.MkdirTemp("", "kloset-statecache-*")
-	require.NoError(t, err)
-	t.Cleanup(func() { os.RemoveAll(tmp) })
 
-	sc, err := caching.NewSQLState(tmp, false)
+	man := caching.NewManager(pebble.Constructor(t.TempDir()))
+	t.Cleanup(func() { man.Close() })
+
+	// The manager owns the cache and closes it on man.Close().
+	cache, err := man.Repository(uuid.New())
 	require.NoError(t, err)
-	return sc
+
+	ls, err := state.NewLegacyState(cache)
+	require.NoError(t, err)
+	return ls
 }
 
-// TestRebuildStateWithCacheEmpty drives RebuildStateWithCache against a fresh
-// repository with an empty external cache. There are no remote states yet, so
+// TestRebuildLegacyStateEmpty drives RebuildLegacyState against a fresh
+// repository with an empty legacy cache. There are no remote states yet, so
 // the function should walk every branch (no missing, no outdated) and succeed.
-func TestRebuildStateWithCacheEmpty(t *testing.T) {
+func TestRebuildLegacyStateEmpty(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	require.NoError(t, repo.RebuildStateWithCache(newStateCache(t)))
+	require.NoError(t, repo.RebuildLegacyState(newLegacyState(t)))
 }
 
-// TestRebuildStateWithCacheAfterBackup exercises the "missing states" branch of
-// RebuildStateWithCache: a backup writes a remote state that the fresh external
+// TestRebuildLegacyStateAfterBackup exercises the "missing states" branch of
+// RebuildLegacyState: a backup writes a remote state that the fresh legacy
 // cache does not know about, so the function must fetch, topo-sort and merge it.
-func TestRebuildStateWithCacheAfterBackup(t *testing.T) {
+func TestRebuildLegacyStateAfterBackup(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 
 	files := []ptesting.MockFile{
@@ -52,30 +59,38 @@ func TestRebuildStateWithCacheAfterBackup(t *testing.T) {
 	}
 	_ = ptesting.GenerateSnapshot(t, repo, files)
 
-	// A brand-new cache has none of the remote states -> exercises the
+	// A brand-new legacy state has none of the remote states -> exercises the
 	// missingStates / TopoSort / MergeState loop.
-	require.NoError(t, repo.RebuildStateWithCache(newStateCache(t)))
+	ls := newLegacyState(t)
+	require.NoError(t, repo.RebuildLegacyState(ls))
 
-	// At least one snapshot must be visible after the rebuild.
+	// The merge must have populated the legacy aggregate with the snapshot's
+	// packfile entries (RebuildLegacyState does not touch the repository's own
+	// state, so assert on the legacy side).
 	var count int
-	for _, err := range repo.ListSnapshots() {
+	for _, err := range ls.ListPackfileEntries() {
 		require.NoError(t, err)
 		count++
 	}
 	require.Greater(t, count, 0)
 }
 
-// TestRebuildStateWithCacheOutdated exercises the "outdated states" deletion
-// branch: the external cache contains a state MAC that is absent from the
-// remote store, so RebuildStateWithCache must delete it locally.
-func TestRebuildStateWithCacheOutdated(t *testing.T) {
+// TestRebuildLegacyStateOutdated exercises the "outdated states" deletion
+// branch: the legacy cache contains a state MAC that is absent from the
+// remote store, so RebuildLegacyState must delete it locally.
+func TestRebuildLegacyStateOutdated(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 
-	sc := newStateCache(t)
-	// Seed the cache with a bogus state that does not exist remotely.
-	require.NoError(t, sc.PutState(objects.MAC{0xDE, 0xAD, 0xBE, 0xEF}, []byte("stale")))
+	ls := newLegacyState(t)
+	// Seed the legacy state with a bogus state that does not exist remotely.
+	staleID := objects.MAC{0xDE, 0xAD, 0xBE, 0xEF}
+	require.NoError(t, ls.PutState(staleID))
 
-	require.NoError(t, repo.RebuildStateWithCache(sc))
+	require.NoError(t, repo.RebuildLegacyState(ls))
+
+	has, err := ls.HasState(staleID)
+	require.NoError(t, err)
+	require.False(t, has, "stale state should have been dropped by the rebuild")
 }
 
 // TestGetStateNotFound confirms GetState surfaces an error for a MAC that was
