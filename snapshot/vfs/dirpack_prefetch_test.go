@@ -103,7 +103,7 @@ func TestDirpackPrefetchSameResultAsCold(t *testing.T) {
 	cold := walkForBackup(t, coldFS, files)
 
 	warmFS := freshCacheFS(t, repo, id)
-	warmFS.StartDirpackPrefetch(8, 4)
+	warmFS.StartDirpackPrefetch("/", 8, 4)
 	defer warmFS.StopDirpackPrefetch()
 	warm := walkForBackup(t, warmFS, files)
 
@@ -132,16 +132,16 @@ func TestDirpackPrefetchLifecycle(t *testing.T) {
 	require.NotPanics(t, func() { fs.StopDirpackPrefetch() })
 
 	// Double start: the second call must be a no-op, not leak a prefetcher.
-	fs.StartDirpackPrefetch(8, 4)
-	fs.StartDirpackPrefetch(8, 4)
+	fs.StartDirpackPrefetch("/", 8, 4)
+	fs.StartDirpackPrefetch("/", 8, 4)
 	walkForBackup(t, fs, files)
 	fs.StopDirpackPrefetch()
 
 	// Restart on the same filesystem must work and still resolve entries.
 	fs2 := freshCacheFS(t, repo, base.Header.Identifier)
-	fs2.StartDirpackPrefetch(4, 2)
+	fs2.StartDirpackPrefetch("/", 4, 2)
 	fs2.StopDirpackPrefetch()
-	fs2.StartDirpackPrefetch(4, 2)
+	fs2.StartDirpackPrefetch("/", 4, 2)
 	defer fs2.StopDirpackPrefetch()
 	got := walkForBackup(t, fs2, files)
 	require.Len(t, got, len(files))
@@ -159,7 +159,7 @@ func TestDirpackPrefetchNoCacheNoop(t *testing.T) {
 	fs, err := base.Filesystem()
 	require.NoError(t, err)
 
-	require.NotPanics(t, func() { fs.StartDirpackPrefetch(8, 4) })
+	require.NotPanics(t, func() { fs.StartDirpackPrefetch("/", 8, 4) })
 
 	for _, p := range prefetchTreeFilePaths() {
 		e, err := fs.GetEntryForBackup(p)
