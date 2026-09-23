@@ -3,6 +3,7 @@ package lru
 import (
 	"errors"
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -319,4 +320,28 @@ func TestCache(t *testing.T) {
 		require.Equal(t, uint64(0), misses)
 		require.Equal(t, uint64(1), size)
 	})
+}
+
+func TestGetPutSameKeyConcurrently(t *testing.T) {
+	c := New[string, int](4, nil)
+	require.NoError(t, c.Put("k", 0))
+
+	var wg sync.WaitGroup
+	for w := range 4 {
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := range 1000 {
+				require.NoError(t, c.Put("k", w*1000+i))
+			}
+		}()
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				_, ok := c.Get("k")
+				require.True(t, ok)
+			}
+		}()
+	}
+	wg.Wait()
 }
