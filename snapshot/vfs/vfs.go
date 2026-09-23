@@ -540,20 +540,11 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 
 	cache := make(map[string]*Entry)
 	for {
-		_, siz, err := readDirPackHdr(rd)
+		entry, err := decodeDirpackRecord(rd, parentPath)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return nil, err
-		}
-
-		var entry Entry
-		lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
-		if err := msgpack.NewDecoder(lrd).Decode(&entry); err != nil {
-			return nil, err
-		}
-		if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
 			return nil, err
 		}
 
@@ -579,7 +570,7 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 			entry.Chunks = uint64(len(obj.Chunks))
 		}
 
-		cache[entry.Name()] = &entry
+		cache[entry.Name()] = entry
 	}
 
 	_ = fsc.dirpackCache.Put(parentPath, cache)
