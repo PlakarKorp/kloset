@@ -101,11 +101,15 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 		c.head = n
 		n.prev = nil
 	}
+	var val V
+	if ok {
+		val = n.val
+	}
 	c.mtx.Unlock()
 
 	if ok {
 		c.hits.Add(1)
-		return n.val, true
+		return val, true
 	} else {
 		c.misses.Add(1)
 		var zero V
