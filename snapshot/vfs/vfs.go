@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"golang.org/x/sync/singleflight"
 
@@ -60,6 +61,9 @@ type Filesystem struct {
 	repo         *repository.Repository
 	dirpackCache *lru.Cache[string, *dirpackListing]
 	dirpackSF    singleflight.Group
+
+	pendingMu sync.Mutex
+	pending   map[string]*pendingDirpack
 
 	dirpackCacheSize int
 
@@ -413,6 +417,13 @@ func (fsc *Filesystem) getDirpackListing(parentPath string) (*dirpackListing, er
 
 	if listing, exists := fsc.dirpackCache.Get(parentPath); exists {
 		return listing, nil
+	}
+
+	if w := fsc.pendingDirpackLoad(parentPath); w != nil {
+		<-w.done
+		if w.listing != nil {
+			return w.listing, nil
+		}
 	}
 
 	v, err, _ := fsc.dirpackSF.Do(parentPath, func() (any, error) {

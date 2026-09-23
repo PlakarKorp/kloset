@@ -22,6 +22,7 @@ type dirpackPrefetcher struct {
 	workers int
 
 	jobs     chan prefetchJob
+	batches  chan []prefetchJob
 	consumed chan struct{}
 	quit     chan struct{}
 
@@ -79,6 +80,7 @@ func (fsc *Filesystem) StartDirpackPrefetch(prefix string, window, workers int) 
 		window:   window,
 		workers:  workers,
 		jobs:     make(chan prefetchJob, workers),
+		batches:  make(chan []prefetchJob),
 		consumed: make(chan struct{}, window),
 		quit:     make(chan struct{}),
 		seen:     lru.New[string, struct{}](window, nil),
@@ -94,6 +96,7 @@ func (fsc *Filesystem) StartDirpackPrefetch(prefix string, window, workers int) 
 	}
 
 	fsc.prefetcher.workerWg.Add(workers)
+	go fsc.prefetcher.collect()
 	for range workers {
 		go fsc.prefetcher.worker()
 	}
@@ -169,13 +172,8 @@ func (p *dirpackPrefetcher) feed(cursor iterator.Iterator[string, objects.MAC]) 
 
 func (p *dirpackPrefetcher) worker() {
 	defer p.workerWg.Done()
-	for job := range p.jobs {
-		_, _, _ = p.fsc.dirpackSF.Do(job.path, func() (any, error) {
-			if m, exists := p.fsc.dirpackCache.Get(job.path); exists {
-				return m, nil
-			}
-			return p.fsc.loadDirpackListingByMAC(job.path, job.mac)
-		})
+	for batch := range p.batches {
+		p.fsc.loadDirpackBatch(batch)
 	}
 }
 
