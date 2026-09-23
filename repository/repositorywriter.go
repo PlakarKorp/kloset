@@ -265,12 +265,15 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	}
 
 	span := r.ioStats.GetWriteSpan()
+	putStart := time.Now()
 	nbytes, err := r.store.Put(ctx, storage.StorageResourcePackfile, mac, rd)
 
 	span.Add(nbytes)
 	if err != nil {
 		return err
 	}
+
+	r.ioStats.Write.ObserveLatency(time.Since(putStart))
 
 	r.transactionMtx.RLock()
 	defer r.transactionMtx.RUnlock()

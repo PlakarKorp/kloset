@@ -51,14 +51,14 @@ type ThrottledReadCloser struct {
 	closer io.Closer
 }
 
-func NewThrottledReadCloser(ctx context.Context, rd io.Reader, readBytesPerSec int64) *ThrottledReadCloser {
+func NewThrottledReadCloser(ctx context.Context, rd io.ReadCloser, readBytesPerSec int64) *ThrottledReadCloser {
 	if rd == nil {
 		return nil
 	}
 	b := newBucket(readBytesPerSec, readBytesPerSec)
 	return &ThrottledReadCloser{
 		ThrottledReader: ThrottledReader{ctx: ctx, rd: rd, b: b},
-		closer:          rd.(io.Closer),
+		closer:          rd,
 	}
 }
 

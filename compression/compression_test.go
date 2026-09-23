@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	cprss "github.com/PlakarKorp/kloset/compression"
+	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 	"github.com/stretchr/testify/require"
 )
@@ -53,11 +54,24 @@ func TestLookupDefaultConfiguration(t *testing.T) {
 		require.False(t, cfg.EnableCRC)
 	})
 
+	t.Run("CheckZSTDDefaults", func(t *testing.T) {
+		cfg, err := cprss.LookupDefaultConfiguration("ZSTD")
+
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.Equal(t, "ZSTD", cfg.Algorithm)
+		require.Equal(t, int(zstd.SpeedDefault), cfg.Level)
+		require.Equal(t, -1, cfg.WindowSize)
+		require.Equal(t, -1, cfg.ChunkSize)
+		require.Equal(t, -1, cfg.BlockSize)
+		require.False(t, cfg.EnableCRC)
+	})
+
 	t.Run("CheckUnknownAlgorithm", func(t *testing.T) {
 		cfg, err := cprss.LookupDefaultConfiguration("UNKNOWN")
 
 		require.Nil(t, cfg)
-		require.EqualError(t, err, "unknown hashing algorithm: UNKNOWN")
+		require.EqualError(t, err, "unknown compression algorithm: UNKNOWN")
 	})
 }
 
@@ -78,6 +92,10 @@ func compressDataForTest(t *testing.T, algorithm string, data []byte) []byte {
 		writer = gzip.NewWriter(&compressedData)
 	case "LZ4":
 		writer = lz4.NewWriter(&compressedData)
+	case "ZSTD":
+		w, err := zstd.NewWriter(&compressedData)
+		require.NoError(t, err)
+		writer = w
 	default:
 		require.FailNow(t, "unsupported algorithm", "algorithm=%s", algorithm)
 	}
@@ -104,6 +122,11 @@ func decompressDataForTest(t *testing.T, algorithm string, r io.Reader) []byte {
 	case "LZ4":
 		reader = lz4.NewReader(r)
 		closer = nil
+	case "ZSTD":
+		zr, err := zstd.NewReader(r)
+		require.NoError(t, err)
+		reader = zr.IOReadCloser()
+		closer = zr.IOReadCloser()
 	default:
 		require.FailNow(t, "unsupported algorithm", "algorithm=%s", algorithm)
 	}
@@ -311,6 +334,18 @@ func TestDeflateStream(t *testing.T) {
 		require.Equal(t, data, decompressedData)
 	})
 
+	t.Run("DispatchZSTD", func(t *testing.T) {
+		data := []byte("hello zstd")
+
+		compressedReader, err := cprss.DeflateStream("ZSTD", bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "ZSTD", compressedReader)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
 	t.Run("PartialReadOnGZIPData", func(t *testing.T) {
 		data := bytes.Repeat([]byte("hello gzip"), 128)
 
@@ -406,6 +441,20 @@ func TestInflateStream(t *testing.T) {
 		require.Equal(t, data, decompressedData)
 	})
 
+	t.Run("DispatchZSTD", func(t *testing.T) {
+		data := []byte("hello zstd")
+		compressedData := compressDataForTest(t, "ZSTD", data)
+
+		decompressedReader, err := cprss.InflateStream("ZSTD", io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
 	t.Run("PartialReadOnGZIPData", func(t *testing.T) {
 		data := bytes.Repeat([]byte("hello gzip"), 128)
 		compressedData := compressDataForTest(t, "GZIP", data)
@@ -460,7 +509,7 @@ func TestInflateStream(t *testing.T) {
 func TestInflateStreamCloseClosesUnderlyingReader(t *testing.T) {
 	// readCloserInternal.Close() closes both the inflated stream and the
 	// caller-supplied input reader. Verify both happen.
-	for _, algo := range []string{"GZIP", "LZ4"} {
+	for _, algo := range []string{"GZIP", "LZ4", "ZSTD"} {
 		t.Run(algo, func(t *testing.T) {
 			compressed := compressDataForTest(t, algo, []byte("payload"))
 			inputClosed := false
@@ -530,5 +579,91 @@ func TestLargeData(t *testing.T) {
 		require.NoError(t, err)
 		require.NotEmpty(t, decompressedData)
 		require.Equal(t, data, decompressedData)
+	})
+}
+
+func TestDeflateZstdStream(t *testing.T) {
+	t.Run("CompressData", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello zstd"), 128)
+
+		compressedReader, err := cprss.DeflateZstdStream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "ZSTD", compressedReader)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("CompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+
+		compressedReader, err := cprss.DeflateZstdStream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "ZSTD", compressedReader)
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("Fails_IfSourceReaderFails", func(t *testing.T) {
+		compressedReader, err := cprss.DeflateZstdStream(&errorReader{})
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		_, err = io.ReadAll(compressedReader)
+		require.Error(t, err)
+	})
+}
+
+func TestInflateZstdStream(t *testing.T) {
+	t.Run("DecompressData", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello zstd"), 128)
+		compressedData := compressDataForTest(t, "ZSTD", data)
+
+		decompressedReader, err := cprss.InflateZstdStream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("DecompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+		compressedData := compressDataForTest(t, "ZSTD", data)
+
+		decompressedReader, err := cprss.InflateZstdStream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("FailsOnTruncatedFrame", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello zstd"), 1024)
+		compressedData := compressDataForTest(t, "ZSTD", data)
+		truncatedData := compressedData[:len(compressedData)-4]
+
+		decompressedReader, err := cprss.InflateZstdStream(io.NopCloser(bytes.NewReader(truncatedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+	})
+
+	t.Run("FailsOnGarbageInput", func(t *testing.T) {
+		decompressedReader, err := cprss.InflateZstdStream(io.NopCloser(bytes.NewReader([]byte("not zstd at all"))))
+		if err != nil {
+			require.Nil(t, decompressedReader)
+			return
+		}
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
 	})
 }

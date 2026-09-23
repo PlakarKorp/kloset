@@ -27,6 +27,7 @@ import (
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/scanlog"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
+	"github.com/PlakarKorp/kloset/throttle"
 	"github.com/gabriel-vasile/mimetype"
 	"golang.org/x/sync/errgroup"
 )
@@ -364,6 +365,11 @@ func (snap *Builder) Backup(source *Source) error {
 	sampler.Start(snap.AppContext())
 	defer sampler.Stop()
 
+	snap.throttler = nil
+	if source.MaxReadRate() > 0 {
+		snap.throttler = throttle.NewThrottler(source.MaxReadRate(), 0)
+	}
+
 	sourceCtx, err := snap.prepareSourceContext(source)
 	if sourceCtx != nil {
 		defer sourceCtx.indexes.Close(snap.Logger())
@@ -521,6 +527,10 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	var totalEntropy float64
 	var totalFreq [256]float64
 	var totalDataSize int64
+
+	if snap.throttler != nil {
+		rd = snap.throttler.Reader(snap.AppContext(), rd)
+	}
 
 	// Helper function to process a chunk
 	processChunk := func(idx int, data []byte) error {
@@ -824,15 +834,13 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	}
 
 	if cachedPath != nil && cachedPath.ObjectMAC != (objects.MAC{}) {
-		if snap.repository.BlobExists(resources.RT_OBJECT, cachedPath.ObjectMAC) {
-			return &contentMeta{
-				ObjectMAC:   cachedPath.ObjectMAC,
-				Size:        cachedPath.FileInfo.Size(),
-				Chunks:      cachedPath.Chunks,
-				Entropy:     cachedPath.Entropy,
-				ContentType: cachedPath.ContentType,
-			}, nil
-		}
+		return &contentMeta{
+			ObjectMAC:   cachedPath.ObjectMAC,
+			Size:        cachedPath.FileInfo.Size(),
+			Chunks:      cachedPath.Chunks,
+			Entropy:     cachedPath.Entropy,
+			ContentType: cachedPath.ContentType,
+		}, nil
 	}
 
 	obj, objMAC, dataSize, err := snap.chunkify(idx, chunker, record.Pathname, record.Reader, record.IsXattr)
@@ -856,7 +864,7 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 	dirEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
 	var dirEntryMAC objects.MAC
 
-	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+	if cachedPath != nil {
 		dirEntryMAC = cachedPath.MAC
 		serialized, err := dirEntry.ToBytes()
 		if err != nil {
@@ -897,7 +905,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	var serializedFileEntry []byte
 	var err error
 
-	if cachedPath != nil && snap.repository.BlobExists(resources.RT_VFS_ENTRY, cachedPath.MAC) {
+	if cachedPath != nil {
 		fileEntryMAC = cachedPath.MAC
 		if fileEntry.Object == (objects.MAC{}) && cachedPath.ObjectMAC != (objects.MAC{}) {
 			fileEntry.Object = cachedPath.ObjectMAC

@@ -590,6 +590,38 @@ func TestDecryptStream(t *testing.T) {
 		require.Empty(t, data)
 	})
 
+	t.Run("FragmentedReadsOneByte", func(t *testing.T) {
+		params := setup(t)
+		encrypted := encrypt(t, params, "hello world")
+
+		// A reader that returns one byte at a time must not break frame
+		// reassembly: decryption relies on reading complete frames, not on
+		// the reader preserving EncryptStream's write boundaries.
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(iotest.OneByteReader(bytes.NewReader(encrypted))))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.NoError(t, err)
+		require.Equal(t, "hello world", string(data))
+	})
+
+	t.Run("FragmentedReadsMultiChunk", func(t *testing.T) {
+		params := setup(t)
+		payload := strings.Repeat("0123456789abcdef", (2*params.config.ChunkSize+12345)/16)
+		encrypted := encrypt(t, params, payload)
+
+		// Several full frames plus a short final one, delivered in partial
+		// reads that never line up with frame boundaries.
+		rd, err := enc.DecryptStream(params.config, params.key, io.NopCloser(iotest.HalfReader(bytes.NewReader(encrypted))))
+		require.NoError(t, err)
+		require.NotNil(t, rd)
+
+		data, err := io.ReadAll(rd)
+		require.NoError(t, err)
+		require.Equal(t, payload, string(data))
+	})
+
 	t.Run("ConfigNil", func(t *testing.T) {
 		require.Panics(t, func() {
 			enc.DecryptStream(nil, []byte("0123456789abcdef0123456789abcdef"), io.NopCloser(bytes.NewReader([]byte("data"))))
@@ -725,24 +757,27 @@ func TestCompressEncryptThenDecryptDecompressStream(t *testing.T) {
 	r := strings.NewReader(originalData)
 
 	// Step 1: Compress the data
+	// NotNil, not NotEmpty: these readers are backed by live pipes with
+	// writer goroutines; testify's NotEmpty inspects them via reflection
+	// and races with the writes.
 	compressedReader, err := compression.DeflateStream("GZIP", r)
 	require.NoError(t, err)
-	require.NotEmpty(t, compressedReader)
+	require.NotNil(t, compressedReader)
 
 	// Step 2: Encrypt the compressed data
 	encryptedReader, err := enc.EncryptStream(params.config, params.key, compressedReader)
 	require.NoError(t, err)
-	require.NotEmpty(t, encryptedReader)
+	require.NotNil(t, encryptedReader)
 
 	// Step 3: Decrypt the data
 	decryptedReader, err := enc.DecryptStream(params.config, params.key, io.NopCloser(encryptedReader))
 	require.NoError(t, err)
-	require.NotEmpty(t, decryptedReader)
+	require.NotNil(t, decryptedReader)
 
 	// Step 4: Decompress the decrypted data
 	decompressedReader, err := compression.InflateStream("GZIP", decryptedReader)
 	require.NoError(t, err)
-	require.NotEmpty(t, decompressedReader)
+	require.NotNil(t, decompressedReader)
 
 	// Read the final output
 	finalData, err := io.ReadAll(decompressedReader)

@@ -70,6 +70,39 @@ func (e *Entry) HasObject() bool {
 	return e.Object != objects.MAC{}
 }
 
+var ErrMalformedEntry = errors.New("malformed vfs entry")
+
+// integration/fs up to v1.1.7 left parent path on "/" to "/<device>:"
+// on windows, instead of "/".  cope with it.
+func isParentPathWindowsBug(p string) bool {
+	return len(p) == 3 && p[0] == '/' &&
+		'A' <= p[1] && p[1] <= 'Z' &&
+		p[2] == ':'
+}
+
+func (e *Entry) validate() error {
+	name := e.FileInfo.Lname
+
+	// root is named "/"; the builder leaves its parent as "/" or "".
+	if name == "/" && (e.ParentPath == "/" || e.ParentPath == "") {
+		return nil
+	}
+
+	if name == "/" && isParentPathWindowsBug(e.ParentPath) {
+		return nil
+	}
+
+	if name == "" || name == "." || name == ".." || strings.ContainsRune(name, '/') {
+		return fmt.Errorf("%w: bad name %q", ErrMalformedEntry, name)
+	}
+
+	if !path.IsAbs(e.ParentPath) || path.Clean(e.ParentPath) != e.ParentPath {
+		return fmt.Errorf("%w: bad parent path %q", ErrMalformedEntry, e.ParentPath)
+	}
+
+	return nil
+}
+
 // Return empty lists for nil slices.
 func (e *Entry) MarshalJSON() ([]byte, error) {
 	// Create an alias to avoid recursive MarshalJSON calls
@@ -124,8 +157,13 @@ func NewEntry(parentPath string, record *connectors.Record) *Entry {
 
 func EntryFromBytes(bytes []byte) (*Entry, error) {
 	entry := Entry{}
-	err := msgpack.Unmarshal(bytes, &entry)
-	return &entry, err
+	if err := msgpack.Unmarshal(bytes, &entry); err != nil {
+		return &entry, err
+	}
+	if err := entry.validate(); err != nil {
+		return nil, err
+	}
+	return &entry, nil
 }
 
 func (e *Entry) ToBytes() ([]byte, error) {
@@ -312,6 +350,18 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 			}
 			if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
 				yield(nil, fmt.Errorf("failed to read entry mac: %w", err))
+				return
+			}
+
+			if err := entry.validate(); err != nil {
+				yield(nil, err)
+				return
+			}
+
+			// a dirpack lists one directory: every record is a direct child.
+			if entry.ParentPath != prefix && prefix == "/" && isParentPathWindowsBug(entry.ParentPath) {
+				yield(nil, fmt.Errorf("%w: entry %q claims parent %q in dirpack for %q",
+					ErrMalformedEntry, entry.FileInfo.Lname, entry.ParentPath, prefix))
 				return
 			}
 

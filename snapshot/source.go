@@ -26,6 +26,8 @@ type Source struct {
 	excludes *exclude.RuleSet
 
 	failure error
+
+	maxReadRate int64
 }
 
 func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, error) {
@@ -51,7 +53,7 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 		} else if s.typ != typ {
 			return nil, fmt.Errorf("mismatched type when adding importer %q expected %q", typ, s.typ)
 		} else if s.flags != flags {
-			return nil, fmt.Errorf("mismatched flags when adding importer %q expected %q", flags, s.flags)
+			return nil, fmt.Errorf("mismatched flags when adding importer %d expected %d", flags, s.flags)
 		}
 
 		is = append(is, imp)
@@ -141,6 +143,14 @@ func (s *Source) Flags() location.Flags {
 
 func (s *Source) Importers() []importer.Importer {
 	return s.importers
+}
+
+func (s *Source) MaxReadRate() int64 {
+	return s.maxReadRate
+}
+
+func (s *Source) SetMaxReadRate(r int64) {
+	s.maxReadRate = r
 }
 
 func commonPathPrefixSlice(paths []string) string {

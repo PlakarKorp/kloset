@@ -6,8 +6,11 @@ import (
 	"io"
 	"sync"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 )
+
+const DEFAULT_COMPRESSION_ALGORITHM = "LZ4"
 
 type Configuration struct {
 	Algorithm  string `json:"algorithm"`
@@ -19,14 +22,8 @@ type Configuration struct {
 }
 
 func NewDefaultConfiguration() *Configuration {
-	return &Configuration{
-		Algorithm:  "LZ4",
-		Level:      int(lz4.Level9),
-		WindowSize: -1,
-		ChunkSize:  -1,
-		BlockSize:  -1,
-		EnableCRC:  false,
-	}
+	configuration, _ := LookupDefaultConfiguration(DEFAULT_COMPRESSION_ALGORITHM)
+	return configuration
 }
 
 func LookupDefaultConfiguration(algorithm string) (*Configuration, error) {
@@ -49,8 +46,17 @@ func LookupDefaultConfiguration(algorithm string) (*Configuration, error) {
 			BlockSize:  -1,
 			EnableCRC:  false,
 		}, nil
+	case "ZSTD":
+		return &Configuration{
+			Algorithm:  "ZSTD",
+			Level:      int(zstd.SpeedDefault),
+			WindowSize: -1,
+			ChunkSize:  -1,
+			BlockSize:  -1,
+			EnableCRC:  false,
+		}, nil
 	default:
-		return nil, fmt.Errorf("unknown hashing algorithm: %s", algorithm)
+		return nil, fmt.Errorf("unknown compression algorithm: %s", algorithm)
 	}
 }
 
@@ -58,6 +64,7 @@ func DeflateStream(name string, r io.Reader) (io.Reader, error) {
 	m := map[string]func(io.Reader) (io.Reader, error){
 		"GZIP": DeflateGzipStream,
 		"LZ4":  DeflateLZ4Stream,
+		"ZSTD": DeflateZstdStream,
 	}
 	if fn, exists := m[name]; exists {
 		return fn(r)
@@ -94,6 +101,32 @@ func DeflateLZ4Stream(r io.Reader) (io.Reader, error) {
 	return pr, nil
 }
 
+func DeflateZstdStream(r io.Reader) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		zw, err := zstd.NewWriter(pw)
+		if err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
+		if _, err := io.Copy(zw, r); err != nil {
+			zw.Close()
+			pw.CloseWithError(err)
+			return
+		}
+
+		// Close writes the final frame, so it can't be deferred
+		// past pw.Close() or the reader sees a truncated stream.
+		if err := zw.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
+}
+
 type readCloserInternal struct {
 	input  io.Closer
 	reader io.ReadCloser
@@ -106,6 +139,7 @@ func InflateStream(name string, r io.ReadCloser) (io.ReadCloser, error) {
 	m := map[string]func(io.ReadCloser) (io.ReadCloser, error){
 		"GZIP": InflateGzipStream,
 		"LZ4":  InflateLZ4Stream,
+		"ZSTD": InflateZstdStream,
 	}
 	if fn, exists := m[name]; exists {
 		or, err := fn(r)
@@ -155,6 +189,25 @@ func InflateLZ4Stream(r io.ReadCloser) (io.ReadCloser, error) {
 		if err != nil {
 			pw.CloseWithError(err)
 		}
+	}()
+	return pr, nil
+}
+
+func InflateZstdStream(r io.ReadCloser) (io.ReadCloser, error) {
+	zr, err := zstd.NewReader(r)
+	if err != nil {
+		return nil, err
+	}
+
+	pr, pw := io.Pipe()
+	go func() {
+		defer zr.Close()
+
+		if _, err := io.Copy(pw, zr.IOReadCloser()); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
 	}()
 	return pr, nil
 }

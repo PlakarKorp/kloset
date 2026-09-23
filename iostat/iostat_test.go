@@ -56,8 +56,8 @@ func TestTrackerAddZeroBytes(t *testing.T) {
 	if s.TotalBytes != 0 {
 		t.Errorf("expected 0 bytes, got %d", s.TotalBytes)
 	}
-	if len(tr.samples) != 0 {
-		t.Errorf("expected no samples after adding 0 bytes, got %d", len(tr.samples))
+	if tr.tput.count != 0 {
+		t.Errorf("expected no samples after adding 0 bytes, got %d", tr.tput.count)
 	}
 }
 
@@ -123,7 +123,6 @@ func TestWallClockThroughput(t *testing.T) {
 	}
 }
 
-
 func TestSpanAddNil(t *testing.T) {
 	var s *Span
 	// should not panic
@@ -175,29 +174,6 @@ func TestStatsMultipleSamples(t *testing.T) {
 	}
 	if s.P99 == 0 {
 		t.Error("expected non-zero P99")
-	}
-}
-
-func TestPercentileEdgeCases(t *testing.T) {
-	// empty slice
-	if v := percentile([]float64{}, 50); v != 0 {
-		t.Errorf("expected 0 for empty slice, got %f", v)
-	}
-
-	// p <= 0 returns first element
-	data := []float64{1.0, 2.0, 3.0}
-	if v := percentile(data, 0); v != 1.0 {
-		t.Errorf("expected 1.0 for p=0, got %f", v)
-	}
-
-	// p >= 100 returns last element
-	if v := percentile(data, 100); v != 3.0 {
-		t.Errorf("expected 3.0 for p=100, got %f", v)
-	}
-
-	// interpolation
-	if v := percentile(data, 50); v == 0 {
-		t.Error("expected non-zero for p=50")
 	}
 }
 
@@ -270,8 +246,8 @@ func TestBucketAccumulation(t *testing.T) {
 
 	// Add bytes with a duration shorter than sampleWindow — no sample yet
 	tr.add(1024, 10*time.Millisecond, time.Time{})
-	if len(tr.samples) != 0 {
-		t.Errorf("expected 0 samples for short duration, got %d", len(tr.samples))
+	if tr.tput.count != 0 {
+		t.Errorf("expected 0 samples for short duration, got %d", tr.tput.count)
 	}
 
 	// Stats flushes partial bucket
