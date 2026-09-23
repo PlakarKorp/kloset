@@ -37,6 +37,8 @@ func (e *MockExporter) Root() string          { return e.rootDir }
 func (p *MockExporter) Flags() location.Flags { return 0 }
 
 func (e *MockExporter) Export(ctx context.Context, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
+	defer close(results)
+
 	for record := range records {
 		pathname := record.Pathname
 		if len(pathname) > 5 && pathname[:5] == "mock:" {
