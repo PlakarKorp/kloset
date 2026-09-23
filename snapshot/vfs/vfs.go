@@ -140,7 +140,7 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	return fs, nil
 }
 
-// XXX - until we do refacto to remove object resolve from ResolveEntry, ONLY CALL IN SUBCOMMAND BACKUP
+// XXX - until we do refacto to remove object resolve from ResolveEntry
 func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
 	fs, err := NewFilesystem(repo, root, xattrs, errors, dirpackidx)
 	if err != nil {

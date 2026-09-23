@@ -89,10 +89,15 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 
 	emitter.FilesystemSummary(fileCount, dirCount, symlinkCount, 0, totalSize)
 
-	pvfs, err := snap.Filesystem()
+	pvfs, err := snap.FilesystemWithCache()
 	if err != nil {
 		return err
 	}
+
+	const dirpackPrefetchBatch = 64
+	window := snap.AppContext().MaxConcurrency * dirpackPrefetchBatch
+	pvfs.StartDirpackPrefetch(pathname, window, dirpackPrefetchBatch)
+	defer pvfs.StopDirpackPrefetch()
 
 	entry, err := pvfs.GetEntry(pathname)
 	if err != nil {
