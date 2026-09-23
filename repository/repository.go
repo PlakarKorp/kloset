@@ -518,6 +518,17 @@ func (r *Repository) Store() storage.Store {
 	return r.store
 }
 
+func (r *Repository) CheckReadable() error {
+	mode, err := r.store.Mode(r.appContext)
+	if err != nil {
+		return err
+	}
+	if mode&storage.ModeRead == 0 {
+		return ErrNotReadable
+	}
+	return nil
+}
+
 func (r *Repository) StorageSize() (int64, error) {
 	if r.storageSizeDirty {
 		size, err := r.store.Size(r.appContext)
