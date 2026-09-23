@@ -20,13 +20,13 @@ import (
 // dirRec / fileRec build importer records for a directory / regular file.
 func dirRec(p string) *connectors.Record {
 	return connectors.NewRecord(p, "", objects.FileInfo{
-		Lname: path.Base(p), Lmode: os.ModeDir | 0755,
+		Lname: path.Base(p), Lmode: os.ModeDir | 0o755,
 	}, nil, nil)
 }
 
 func fileRec(p, content string) *connectors.Record {
 	return connectors.NewRecord(p, "", objects.FileInfo{
-		Lname: path.Base(p), Lmode: 0644, Lsize: int64(len(content)),
+		Lname: path.Base(p), Lmode: 0o644, Lsize: int64(len(content)),
 	}, nil, func() (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(content)), nil
 	})
@@ -145,6 +145,29 @@ func TestDirpackPrefetchLifecycle(t *testing.T) {
 	defer fs2.StopDirpackPrefetch()
 	got := walkForBackup(t, fs2, files)
 	require.Len(t, got, len(files))
+}
+
+func TestDirpackPrefetchScopedStillResolvesEverything(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(prefetchTree))
+	defer func() { _ = base.Close() }()
+	id := base.Header.Identifier
+	files := prefetchTreeFilePaths()
+
+	coldFS := freshCacheFS(t, repo, id)
+	cold := walkForBackup(t, coldFS, files)
+
+	scopedFS := freshCacheFS(t, repo, id)
+	scopedFS.StartDirpackPrefetch("/dir05", 8, 4)
+	defer scopedFS.StopDirpackPrefetch()
+	scoped := walkForBackup(t, scopedFS, files)
+
+	for _, p := range files {
+		c, s := cold[p], scoped[p]
+		require.Equal(t, c.MAC, s.MAC, p)
+		require.Equal(t, c.Object, s.Object, p)
+		require.Equal(t, c.FileInfo, s.FileInfo, p)
+	}
 }
 
 // TestDirpackPrefetchNoCacheNoop verifies the prefetcher is inert on a
