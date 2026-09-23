@@ -140,16 +140,45 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		}
 	}()
 
+	batches := make(chan *exportBatch, exportBatchesInFlight-2)
 	go func() {
 		defer close(records)
+		for b := range batches {
+			<-b.done
+			for _, r := range b.records {
+				records <- r
+			}
+		}
+	}()
+
+	go func() {
+		defer close(batches)
+
+		batch := newExportBatch()
+		flush := func() {
+			go snap.fetchBatch(batch)
+			batches <- batch
+			batch = newExportBatch()
+		}
+		defer func() {
+			if len(batch.records) > 0 {
+				flush()
+			}
+		}()
+		emit := func(r *connectors.Record) {
+			batch.records = append(batch.records, r)
+			if batch.full() {
+				flush()
+			}
+		}
 
 		// We are a single file, let's emit the root dir to create the parent
 		// dir if any.
 		if !entry.IsDir() {
-			records <- connectors.NewRecord("/", "", objects.FileInfo{Lname: "/", Lmode: 0700 | os.ModeDir, LmodTime: time.Now()}, nil,
+			emit(connectors.NewRecord("/", "", objects.FileInfo{Lname: "/", Lmode: 0700 | os.ModeDir, LmodTime: time.Now()}, nil,
 				func() (io.ReadCloser, error) {
 					return nil, nil
-				})
+				}))
 		}
 
 		// emitted symlinks, to skip entries below them: an exporter can't tell
@@ -213,13 +242,19 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				isRegular = true
 				emitter.File(entrypath)
 			}
-			records <- connectors.NewRecord(entrypath, e.SymlinkTarget, e.FileInfo, e.ExtendedAttributes,
+			open := func() (io.ReadCloser, error) { return e.Open(pvfs) }
+			if isRegular {
+				f := &exportFile{entry: e}
+				batch.files = append(batch.files, f)
+				batch.size += e.Size()
+				open = func() (io.ReadCloser, error) { return f.open(pvfs) }
+			}
+			emit(connectors.NewRecord(entrypath, e.SymlinkTarget, e.FileInfo, e.ExtendedAttributes,
 				func() (io.ReadCloser, error) {
-					f, err := e.Open(pvfs)
+					rd, err := open()
 					if err != nil {
 						return nil, err
 					}
-					var rd io.ReadCloser = f
 					if isRegular {
 						rd = newCountingReadCloser(rd, snap.repository.ExportStats.GetWriteSpan())
 					}
@@ -228,7 +263,7 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 						rd = throttler.WriteFromReadCloser(snap.AppContext(), rd)
 					}
 					return rd, nil
-				})
+				}))
 			return nil
 		})
 
@@ -256,10 +291,10 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				if err != nil {
 					break
 				}
-				records <- connectors.NewXattr(xattr.Path, xattr.Name, xattr.Type,
+				emit(connectors.NewXattr(xattr.Path, xattr.Name, xattr.Type,
 					func() (io.ReadCloser, error) {
 						return io.NopCloser(vfs.NewObjectReader(snap.repository, xattr.ResolvedObject, xattr.Size, -1)), nil
-					})
+					}))
 			}
 		}
 	}()
