@@ -590,6 +590,7 @@ func needsObjectMetadata(entry *Entry) bool {
 }
 
 func setObjectMetadata(entry *Entry, obj *objects.Object) {
+	entry.ResolvedObject = obj
 	entry.ContentType = obj.ContentType
 	entry.Entropy = obj.Entropy
 	entry.Chunks = uint64(len(obj.Chunks))
