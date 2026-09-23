@@ -545,45 +545,54 @@ func (fsc *Filesystem) loadDirpackListingByMAC(parentPath string, objectMac obje
 	//rd := NewObjectReader(fsc.repo, obj, size, -1)
 	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
 
-	listing := &dirpackListing{byName: make(map[string]*Entry)}
-	for {
-		entry, err := decodeDirpackRecord(rd, parentPath)
+	listing, err := decodeDirpackListing(parentPath, rd)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, entry := range listing.order {
+		if !needsObjectMetadata(entry) {
+			continue
+		}
+		buf, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, entry.Object)
 		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
 			return nil, err
 		}
-
-		// resolve object to extract content-type, nchunks and entropy
-		if entry.GetContentType() == "" && entry.HasObject() {
-			rd, err := fsc.repo.GetBlob(resources.RT_OBJECT, entry.Object)
-			if err != nil {
-				return nil, err
-			}
-
-			bytes, err := io.ReadAll(rd)
-			if err != nil {
-				return nil, err
-			}
-
-			obj, err := objects.NewObjectFromBytes(bytes)
-			if err != nil {
-				return nil, err
-			}
-
-			entry.ContentType = obj.ContentType
-			entry.Entropy = obj.Entropy
-			entry.Chunks = uint64(len(obj.Chunks))
+		obj, err := objects.NewObjectFromBytes(buf)
+		if err != nil {
+			return nil, err
 		}
-
-		listing.order = append(listing.order, entry)
-		listing.byName[entry.Name()] = entry
+		setObjectMetadata(entry, obj)
 	}
 
 	_ = fsc.dirpackCache.Put(parentPath, listing)
 
 	return listing, nil
+}
+
+func decodeDirpackListing(parentPath string, rd io.Reader) (*dirpackListing, error) {
+	listing := &dirpackListing{byName: make(map[string]*Entry)}
+	for {
+		entry, err := decodeDirpackRecord(rd, parentPath)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return listing, nil
+			}
+			return nil, err
+		}
+		listing.order = append(listing.order, entry)
+		listing.byName[entry.Name()] = entry
+	}
+}
+
+func needsObjectMetadata(entry *Entry) bool {
+	return entry.GetContentType() == "" && entry.HasObject()
+}
+
+func setObjectMetadata(entry *Entry, obj *objects.Object) {
+	entry.ContentType = obj.ContentType
+	entry.Entropy = obj.Entropy
+	entry.Chunks = uint64(len(obj.Chunks))
 }
 
 func (fsc *Filesystem) Children(path string) (iter.Seq2[*Entry, error], error) {
