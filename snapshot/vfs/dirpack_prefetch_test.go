@@ -89,7 +89,7 @@ func walkForBackup(t *testing.T, fs *vfs.Filesystem, files []string) map[string]
 // TestDirpackPrefetchSameResultAsCold is the core safety net: resolving every
 // entry through GetEntryForBackup with the prefetcher running must produce the
 // exact same entries as resolving them on a cold cache with no prefetcher. This
-// guards the loadDirpackMap/loadDirpackMapByMAC split, the restored pre-
+// guards the loadDirpackListing/loadDirpackListingByMAC split, the restored pre-
 // singleflight cache fast-path, and the prefetch/on-demand singleflight
 // coalescing.
 func TestDirpackPrefetchSameResultAsCold(t *testing.T) {

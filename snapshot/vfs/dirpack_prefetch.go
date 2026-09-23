@@ -70,7 +70,7 @@ func (fsc *Filesystem) StartDirpackPrefetch(window, workers int) {
 	// point (the walk has not started), so resizing it here is safe.
 	if need := 2 * (window + workers); need > fsc.dirpackCacheSize {
 		fsc.dirpackCacheSize = need
-		fsc.dirpackCache = lru.New[string, map[string]*Entry](need, nil)
+		fsc.dirpackCache = lru.New[string, *dirpackListing](need, nil)
 	}
 
 	fsc.prefetcher.workerWg.Add(workers)
@@ -145,7 +145,7 @@ func (p *dirpackPrefetcher) worker() {
 			if m, exists := p.fsc.dirpackCache.Get(job.path); exists {
 				return m, nil
 			}
-			return p.fsc.loadDirpackMapByMAC(job.path, job.mac)
+			return p.fsc.loadDirpackListingByMAC(job.path, job.mac)
 		})
 	}
 }

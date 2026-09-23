@@ -343,6 +343,28 @@ func decodeDirpackRecord(rd io.Reader, parentPath string) (*Entry, error) {
 func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	prefix := e.Path()
 
+	if fsc.dirpackCache == nil {
+		return e.getdentsDirpackNoCache(fsc, prefix)
+	}
+
+	listing, err := fsc.getDirpackListing(prefix)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
+		}
+		return nil, err
+	}
+
+	return func(yield func(*Entry, error) bool) {
+		for _, entry := range listing.order {
+			if !yield(entry, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func (e *Entry) getdentsDirpackNoCache(fsc *Filesystem, prefix string) (iter.Seq2[*Entry, error], error) {
 	objectMac, ok, err := fsc.dirpack.Find(prefix)
 	if err != nil {
 		return nil, err
@@ -352,7 +374,6 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
 	}
 
-	// LookupObject inlined
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
 		return nil, err
