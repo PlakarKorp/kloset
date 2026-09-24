@@ -23,6 +23,10 @@ type Options struct {
 
 // requests
 type Record struct {
+	// kloset doesn't make use of this field at all, it's just
+	// echoed back in the record.
+	ID string
+
 	Reader io.ReadCloser
 
 	Pathname string
