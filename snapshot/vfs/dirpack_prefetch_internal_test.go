@@ -114,3 +114,94 @@ func TestDirpackFeederRespectsWindow(t *testing.T) {
 	close(p.quit)
 	p.feederWg.Wait()
 }
+
+func TestDirpackPrefetchInScope(t *testing.T) {
+	cases := []struct {
+		dir, prefix      string
+		wantInScope      bool
+		wantKeepScanning bool
+	}{
+		{"/anything", "", true, true},
+		{"/anything", "/", true, true},
+		{"/a", "/a", true, true},
+		{"/a/b", "/a", true, true},
+		{"/a/b", "/a/", true, true},
+		{"/ab", "/a", false, false},
+		{"/b", "/a", false, false},
+		// "/a-extra" sorts before "/a/b" ('-' < '/'): a sibling to skip,
+		// not the end of "/a"'s subtree.
+		{"/a-extra", "/a", false, true},
+	}
+	for _, c := range cases {
+		inScope, keepScanning := dirpackPrefetchInScope(c.dir, c.prefix)
+		require.Equal(t, c.wantInScope, inScope, "inScope: dir=%q prefix=%q", c.dir, c.prefix)
+		require.Equal(t, c.wantKeepScanning, keepScanning, "keepScanning: dir=%q prefix=%q", c.dir, c.prefix)
+	}
+}
+
+// TestDirpackFeederStopsAtScopeBoundary checks that a scoped feeder enqueues
+// only directories under prefix and stops (without draining the rest of the
+// cursor) as soon as it scans past the subtree.
+func TestDirpackFeederStopsAtScopeBoundary(t *testing.T) {
+	dirs := []string{"/a", "/a/b", "/a/c", "/b", "/c"}
+
+	p := &dirpackPrefetcher{
+		prefix:   "/a",
+		window:   len(dirs),
+		jobs:     make(chan prefetchJob, len(dirs)),
+		consumed: make(chan struct{}, len(dirs)),
+		quit:     make(chan struct{}),
+	}
+
+	p.feederWg.Add(1)
+	go p.feed(newSliceCursor(dirs))
+
+	var got []string
+	for i := 0; i < 3; i++ {
+		path, ok := recvJobPath(t, p.jobs)
+		require.Truef(t, ok, "timed out after %d/3 in-scope jobs: %v", len(got), got)
+		got = append(got, path)
+	}
+
+	select {
+	case extra := <-p.jobs:
+		t.Fatalf("feeder enqueued out-of-scope directory %q", extra.path)
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	close(p.quit)
+	p.feederWg.Wait()
+
+	require.Equal(t, []string{"/a", "/a/b", "/a/c"}, got)
+}
+
+// TestDirpackFeederSkipsLexicalSiblingWithoutStopping regression-tests the
+// case dirpackPrefetchInScope exists for: "/a-extra" sorts before "/a/b" in
+// the dirpack index (byte '-' < '/'), so a feeder that stopped on the first
+// out-of-scope key would silently drop "/a/b" and everything after it.
+func TestDirpackFeederSkipsLexicalSiblingWithoutStopping(t *testing.T) {
+	dirs := []string{"/a", "/a-extra", "/a/b", "/a/c", "/b"}
+
+	p := &dirpackPrefetcher{
+		prefix:   "/a",
+		window:   len(dirs),
+		jobs:     make(chan prefetchJob, len(dirs)),
+		consumed: make(chan struct{}, len(dirs)),
+		quit:     make(chan struct{}),
+	}
+
+	p.feederWg.Add(1)
+	go p.feed(newSliceCursor(dirs))
+
+	var got []string
+	for i := 0; i < 3; i++ {
+		path, ok := recvJobPath(t, p.jobs)
+		require.Truef(t, ok, "timed out after %d/3 in-scope jobs: %v", len(got), got)
+		got = append(got, path)
+	}
+
+	close(p.quit)
+	p.feederWg.Wait()
+
+	require.Equal(t, []string{"/a", "/a/b", "/a/c"}, got)
+}

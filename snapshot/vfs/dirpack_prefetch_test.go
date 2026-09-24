@@ -20,13 +20,13 @@ import (
 // dirRec / fileRec build importer records for a directory / regular file.
 func dirRec(p string) *connectors.Record {
 	return connectors.NewRecord(p, "", objects.FileInfo{
-		Lname: path.Base(p), Lmode: os.ModeDir | 0755,
+		Lname: path.Base(p), Lmode: os.ModeDir | 0o755,
 	}, nil, nil)
 }
 
 func fileRec(p, content string) *connectors.Record {
 	return connectors.NewRecord(p, "", objects.FileInfo{
-		Lname: path.Base(p), Lmode: 0644, Lsize: int64(len(content)),
+		Lname: path.Base(p), Lmode: 0o644, Lsize: int64(len(content)),
 	}, nil, func() (io.ReadCloser, error) {
 		return io.NopCloser(strings.NewReader(content)), nil
 	})
@@ -89,7 +89,7 @@ func walkForBackup(t *testing.T, fs *vfs.Filesystem, files []string) map[string]
 // TestDirpackPrefetchSameResultAsCold is the core safety net: resolving every
 // entry through GetEntryForBackup with the prefetcher running must produce the
 // exact same entries as resolving them on a cold cache with no prefetcher. This
-// guards the loadDirpackMap/loadDirpackMapByMAC split, the restored pre-
+// guards the loadDirpackListing/loadDirpackListingByMAC split, the restored pre-
 // singleflight cache fast-path, and the prefetch/on-demand singleflight
 // coalescing.
 func TestDirpackPrefetchSameResultAsCold(t *testing.T) {
@@ -103,7 +103,7 @@ func TestDirpackPrefetchSameResultAsCold(t *testing.T) {
 	cold := walkForBackup(t, coldFS, files)
 
 	warmFS := freshCacheFS(t, repo, id)
-	warmFS.StartDirpackPrefetch(8, 4)
+	warmFS.StartDirpackPrefetch("/", 8, 4)
 	defer warmFS.StopDirpackPrefetch()
 	warm := walkForBackup(t, warmFS, files)
 
@@ -132,19 +132,42 @@ func TestDirpackPrefetchLifecycle(t *testing.T) {
 	require.NotPanics(t, func() { fs.StopDirpackPrefetch() })
 
 	// Double start: the second call must be a no-op, not leak a prefetcher.
-	fs.StartDirpackPrefetch(8, 4)
-	fs.StartDirpackPrefetch(8, 4)
+	fs.StartDirpackPrefetch("/", 8, 4)
+	fs.StartDirpackPrefetch("/", 8, 4)
 	walkForBackup(t, fs, files)
 	fs.StopDirpackPrefetch()
 
 	// Restart on the same filesystem must work and still resolve entries.
 	fs2 := freshCacheFS(t, repo, base.Header.Identifier)
-	fs2.StartDirpackPrefetch(4, 2)
+	fs2.StartDirpackPrefetch("/", 4, 2)
 	fs2.StopDirpackPrefetch()
-	fs2.StartDirpackPrefetch(4, 2)
+	fs2.StartDirpackPrefetch("/", 4, 2)
 	defer fs2.StopDirpackPrefetch()
 	got := walkForBackup(t, fs2, files)
 	require.Len(t, got, len(files))
+}
+
+func TestDirpackPrefetchScopedStillResolvesEverything(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	base := ptesting.GenerateSnapshot(t, repo, nil, ptesting.WithGenerator(prefetchTree))
+	defer func() { _ = base.Close() }()
+	id := base.Header.Identifier
+	files := prefetchTreeFilePaths()
+
+	coldFS := freshCacheFS(t, repo, id)
+	cold := walkForBackup(t, coldFS, files)
+
+	scopedFS := freshCacheFS(t, repo, id)
+	scopedFS.StartDirpackPrefetch("/dir05", 8, 4)
+	defer scopedFS.StopDirpackPrefetch()
+	scoped := walkForBackup(t, scopedFS, files)
+
+	for _, p := range files {
+		c, s := cold[p], scoped[p]
+		require.Equal(t, c.MAC, s.MAC, p)
+		require.Equal(t, c.Object, s.Object, p)
+		require.Equal(t, c.FileInfo, s.FileInfo, p)
+	}
 }
 
 // TestDirpackPrefetchNoCacheNoop verifies the prefetcher is inert on a
@@ -159,7 +182,7 @@ func TestDirpackPrefetchNoCacheNoop(t *testing.T) {
 	fs, err := base.Filesystem()
 	require.NoError(t, err)
 
-	require.NotPanics(t, func() { fs.StartDirpackPrefetch(8, 4) })
+	require.NotPanics(t, func() { fs.StartDirpackPrefetch("/", 8, 4) })
 
 	for _, p := range prefetchTreeFilePaths() {
 		e, err := fs.GetEntryForBackup(p)
