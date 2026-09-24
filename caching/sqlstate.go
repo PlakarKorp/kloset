@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"iter"
 	"runtime"
-	"sync"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
 	"github.com/PlakarKorp/kloset/objects"
@@ -16,9 +15,6 @@ import (
 
 type SQLState struct {
 	db *sqlite.SQLiteCache
-
-	mtx  sync.RWMutex
-	blob map[objects.MAC]bool
 }
 
 // XXX: could we reuse something?!
@@ -102,51 +98,7 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		db.SetMaxIdleConns(runtime.NumCPU() / 2)
 	}
 
-	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
-}
-
-func (c *SQLState) NewBatch() StateBatch {
-	return &sqlStateBatch{c, make([]sDelta, 0)}
-}
-
-func (c *sqlStateBatch) Put([]byte, []byte) error {
-	panic("NOT IMPLEMENTED")
-}
-
-func (c *sqlStateBatch) Count() uint32 {
-	return uint32(len(c.deltas))
-}
-
-func (c *sqlStateBatch) Commit() error {
-	if len(c.deltas) == 0 {
-		return nil
-	}
-
-	tx, err := c.parent.db.Begin()
-	if err != nil {
-		return err
-	}
-
-	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO deltas (mac, type, packfile, payload) VALUES (?, ?, ?, ?);`)
-	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	defer stmt.Close()
-
-	for _, rec := range c.deltas {
-		if _, err := stmt.Exec(rec.mac, rec.typ, rec.pack, rec.payload); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-
-	c.deltas = nil
-	return nil
+	return &SQLState{db}, nil
 }
 
 // States handling, mostly unused.
@@ -249,18 +201,6 @@ func (c *SQLState) DelState(stateID objects.MAC) error {
 }
 
 // Deltas handling
-func (c *sqlStateBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	packMACHex := hex.EncodeToString(packfile[:])
-	c.deltas = append(c.deltas, sDelta{blobMACHex, int(blobType), packMACHex, data})
-
-	c.parent.mtx.Lock()
-	c.parent.blob[blobCsum] = true
-	c.parent.mtx.Unlock()
-
-	return nil
-}
-
 func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
 		query := `SELECT mac, payload
@@ -557,7 +497,7 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 
 // Configuration handling
 func (c *SQLState) PutConfiguration(key string, data []byte) error {
-	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?,  ?)", key, data)
+	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET data=excluded.data", key, data)
 	return err
 }
 
@@ -565,6 +505,9 @@ func (c *SQLState) GetConfiguration(key string) ([]byte, error) {
 	query := "SELECT data FROM configurations WHERE key = ?"
 	var data []byte
 	if err := c.db.QueryRow(query, key).Scan(&data); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
 		return nil, err
 	}
 
@@ -602,14 +545,4 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 			}
 		}
 	}
-}
-
-// Those two are only to construct deltas, when working with the local state we
-// do the actual deletion.
-func (c *SQLState) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
-	panic("PutDeleted is not to be used with local state")
-}
-
-func (c *SQLState) GetDeletedEntries() iter.Seq[[]byte] {
-	panic("PutDeleted is not to be used with local state")
 }

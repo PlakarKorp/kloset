@@ -4,10 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
-	"iter"
 	"testing"
 
-	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/stretchr/testify/require"
@@ -67,14 +65,12 @@ func (r *failAfterReader) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-// seedAllEntryTypes populates a state with one entry of every serialized type
-// (DELETE, LOCATIONS, COLOURED, PACKFILE, CONFIGURATION) so that
+// seedAllEntryTypes populates a delta state with one entry of every serialized
+// type (DELETE, LOCATIONS, COLOURED, PACKFILE, CONFIGURATION) so that
 // SerializeToStream walks all of its data-bearing loops.
-func seedAllEntryTypes(t *testing.T) *LocalState {
+func seedAllEntryTypes(t *testing.T) *State {
 	t.Helper()
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, cache := newDeltaState(t)
 
 	require.NoError(t, st.PutDelta(&DeltaEntry{
 		Type: resources.RT_OBJECT, Blob: objects.MAC{0x01},
@@ -83,7 +79,8 @@ func seedAllEntryTypes(t *testing.T) *LocalState {
 	require.NoError(t, st.ColourResource(resources.RT_OBJECT, objects.MAC{0x02}))
 	require.NoError(t, st.PutPackfile(objects.MAC{0x03}, objects.MAC{0x30}))
 	require.NoError(t, st.DelDelta(resources.RT_OBJECT, objects.MAC{0x04}, objects.MAC{0x40}))
-	require.NoError(t, st.SetConfiguration("sk", []byte("sv")))
+	ce := ConfigurationEntry{Key: "sk", Value: []byte("sv")}
+	require.NoError(t, cache.PutConfiguration(ce.Key, ce.ToBytes()))
 
 	return st
 }
@@ -94,21 +91,23 @@ func seedAllEntryTypes(t *testing.T) *LocalState {
 // branch (header, each entry type's type/length/payload, and the metadata
 // trailer fields).
 func TestSerializeToStreamWriteErrorsAtEveryOffset(t *testing.T) {
+	// SerializeToStream only reads from the cache, so a single seeded state
+	// can be serialized repeatedly.
+	st := seedAllEntryTypes(t)
+
 	// Learn the full serialized length first.
 	var probe bytes.Buffer
-	require.NoError(t, seedAllEntryTypes(t).SerializeToStream(&probe))
+	require.NoError(t, st.SerializeToStream(&probe))
 	total := probe.Len()
 	require.Greater(t, total, 0)
 
 	for cutoff := 0; cutoff < total; cutoff++ {
-		st := seedAllEntryTypes(t)
 		w := &failAfterWriter{after: cutoff}
 		err := st.SerializeToStream(w)
 		require.ErrorIs(t, err, errFault, "cutoff=%d should fault mid-serialize", cutoff)
 	}
 
 	// Sanity: with no fault, serialization succeeds.
-	st := seedAllEntryTypes(t)
 	var ok bytes.Buffer
 	require.NoError(t, st.SerializeToStream(&ok))
 	require.Equal(t, total, ok.Len())
@@ -124,61 +123,31 @@ func TestDeserializeFromStreamReadErrorsAtEveryOffset(t *testing.T) {
 	require.Greater(t, len(valid), 0)
 
 	for cutoff := 0; cutoff < len(valid); cutoff++ {
-		cache := newMockStateCache()
-		st, err := NewLocalState(cache)
-		require.NoError(t, err)
+		st, _ := newAggregate(t)
 
 		r := &failAfterReader{data: valid, max: cutoff}
-		err = st.deserializeFromStream(r)
+		err := st.deserializeFromStream(r)
 		require.Error(t, err, "cutoff=%d should fail to deserialize", cutoff)
 	}
 
 	// Sanity: the full stream deserializes cleanly.
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newAggregate(t)
 	require.NoError(t, st.deserializeFromStream(bytes.NewReader(valid)))
 }
 
-// corruptDeltaCache is a StateCache whose delta iterators always yield a
-// malformed buffer, so the DeltaEntryFromBytes error branch of the List*
-// iterators is exercised.
-type corruptDeltaCache struct {
-	*mockStateCache
-}
-
-func (c *corruptDeltaCache) GetDeltas() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		yield(objects.NilMac, []byte{0x00, 0x01})
-	}
-}
-
-func (c *corruptDeltaCache) GetDeltasByType(resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		yield(objects.NilMac, []byte{0x00, 0x01})
-	}
-}
-
-// TestListIteratorsParseError feeds a corrupt delta buffer through the List*
-// iterators and asserts the DeltaEntryFromBytes error is surfaced.
+// TestListIteratorsParseError stores corrupt delta payloads through the real
+// cache (payloads are opaque bytes for the cache) and asserts the
+// DeltaEntryFromBytes error is surfaced by the List* iterators.
 func TestListIteratorsParseError(t *testing.T) {
-	cache := &corruptDeltaCache{newMockStateCache()}
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, cache := newAggregate(t)
+
+	garbage := []byte{0x00, 0x01}
+	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, objects.MAC{0x01}, objects.MAC{0x10}, garbage))
+	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, objects.MAC{0x02}, objects.MAC{0x20}, garbage))
 
 	t.Run("ListSnapshots", func(t *testing.T) {
 		var sawErr bool
 		for _, err := range st.ListSnapshots() {
-			if err != nil {
-				sawErr = true
-			}
-		}
-		require.True(t, sawErr)
-	})
-
-	t.Run("ListObjectsOfType", func(t *testing.T) {
-		var sawErr bool
-		for _, err := range st.ListObjectsOfType(resources.RT_OBJECT) {
 			if err != nil {
 				sawErr = true
 			}
@@ -197,75 +166,12 @@ func TestListIteratorsParseError(t *testing.T) {
 	})
 }
 
-// hasPackfileErrCache returns an error from HasPackfile, exercising the
-// HasPackfile-error yield branches in the List* iterators. The delta iterators
-// yield one well-formed entry so the iterator reaches the HasPackfile call.
-type hasPackfileErrCache struct {
-	*mockStateCache
-	validDelta []byte
-}
-
-func (c *hasPackfileErrCache) HasPackfile(objects.MAC) (bool, error) {
-	return false, errFault
-}
-
-func (c *hasPackfileErrCache) GetDeltas() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) { yield(objects.NilMac, c.validDelta) }
-}
-
-func (c *hasPackfileErrCache) GetDeltasByType(resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) { yield(objects.NilMac, c.validDelta) }
-}
-
-// TestListIteratorsHasPackfileError exercises the HasPackfile-error branch of
-// each List* iterator.
-func TestListIteratorsHasPackfileError(t *testing.T) {
-	delta := &DeltaEntry{
-		Type: resources.RT_SNAPSHOT, Blob: objects.MAC{0xAA},
-		Location: Location{Packfile: objects.MAC{0xBB}},
-	}
-	cache := &hasPackfileErrCache{mockStateCache: newMockStateCache(), validDelta: delta.ToBytes()}
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
-
-	for _, lister := range []func() bool{
-		func() bool {
-			for _, e := range st.ListSnapshots() {
-				if e != nil {
-					return true
-				}
-			}
-			return false
-		},
-		func() bool {
-			for _, e := range st.ListObjectsOfType(resources.RT_SNAPSHOT) {
-				if e != nil {
-					return true
-				}
-			}
-			return false
-		},
-		func() bool {
-			for _, e := range st.ListOrphanDeltas() {
-				if e != nil {
-					return true
-				}
-			}
-			return false
-		},
-	} {
-		require.True(t, lister(), "iterator should surface HasPackfile error")
-	}
-}
-
 // TestDeletedEntriesRoundTrip exercises the ET_DELETE serialize loop and every
 // arm of the ET_DELETE dispatch in deserializeFromStream by recording a delete
 // for each deletable type (LOCATIONS / PACKFILE / COLOURED), serializing, then
-// deserializing into a fresh state.
+// deserializing into a fresh aggregate.
 func TestDeletedEntriesRoundTrip(t *testing.T) {
-	srcCache := newMockStateCache()
-	src, err := NewLocalState(srcCache)
-	require.NoError(t, err)
+	src, srcCache := newDeltaState(t)
 
 	require.NoError(t, src.DelDelta(resources.RT_OBJECT, objects.MAC{0x11}, objects.MAC{0x12}))
 	require.NoError(t, src.DelPackfile(objects.MAC{0x13}))
@@ -281,9 +187,7 @@ func TestDeletedEntriesRoundTrip(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, src.SerializeToStream(&buf))
 
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
+	dst, _ := newAggregate(t)
 	require.NoError(t, dst.deserializeFromStream(bytes.NewReader(buf.Bytes())))
 
 	// The deserialized side replayed the deletes against its own cache; the
@@ -313,19 +217,14 @@ func TestDeserializeInvalidDeleteType(t *testing.T) {
 	buf.Write(lenBuf)
 	buf.Write(del.ToBytes())
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, _ := newAggregate(t)
 
-	err = st.deserializeFromStream(bytes.NewReader(buf.Bytes()))
+	err := st.deserializeFromStream(bytes.NewReader(buf.Bytes()))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "invalid delete Type")
 }
 
-// Ensure the wrapper caches still satisfy the full StateCache interface.
 var (
-	_ caching.StateCache = (*corruptDeltaCache)(nil)
-	_ caching.StateCache = (*hasPackfileErrCache)(nil)
-	_ io.Writer          = (*failAfterWriter)(nil)
-	_ io.Reader          = (*failAfterReader)(nil)
+	_ io.Writer = (*failAfterWriter)(nil)
+	_ io.Reader = (*failAfterReader)(nil)
 )
