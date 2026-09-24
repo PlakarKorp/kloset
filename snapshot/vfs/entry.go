@@ -208,17 +208,17 @@ func (e *Entry) AddClassification(analyzer string, classes []string) {
 }
 
 func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
-	return e.open(fs, 0)
+	return e.open(fs, false)
 }
 
 // OpenSequential opens e for reading from start to end: content is fetched
 // ahead of the reader, which pays off on large files over slow storage.  A
 // Seek falls back to what Open does.
 func (e *Entry) OpenSequential(fs *Filesystem) (fs.File, error) {
-	return e.open(fs, sequentialWindows)
+	return e.open(fs, true)
 }
 
-func (e *Entry) open(fs *Filesystem, windows int) (fs.File, error) {
+func (e *Entry) open(fs *Filesystem, sequential bool) (fs.File, error) {
 	if e.FileInfo.IsDir() {
 		return &vdir{
 			entry: e,
@@ -255,7 +255,7 @@ func (e *Entry) open(fs *Filesystem, windows int) (fs.File, error) {
 	}
 
 	rd := NewObjectReader(fs.repo, e.ResolvedObject, e.Size(), -1)
-	rd.windows = windows
+	rd.sequential = sequential
 
 	return &vfile{
 		entry: e,

@@ -5,16 +5,23 @@ import (
 	"context"
 	"io"
 	"os"
+	"sync"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
+	"golang.org/x/sync/semaphore"
 )
 
 const default_prefetchSize = 4 * 1024 * 1024
 
-// sequentialWindows is how many prefetch windows a sequential reader keeps in
-// flight.  Hardcoded, and per reader, until the budget is shared.
-const sequentialWindows = 8
+// readaheadWindows bounds the windows fetched ahead of their reader, across
+// all sequential readers of the process: memory is a process-wide limit.  A
+// window costs several times its 4MB while decoding, and a lone reader gains
+// little past 16.  Hardcoded until we know where the concurrency of a store
+// comes from.
+const readaheadWindows = 16
+
+var readaheadBudget = semaphore.NewWeighted(readaheadWindows)
 
 type ObjectReader struct {
 	object *objects.Object
@@ -31,8 +38,8 @@ type ObjectReader struct {
 	prefetchedObjoff int // Keeps track of the chunk position we prefetched up to.
 	prefetchBuffer   bytes.Buffer
 
-	windows int        // read-ahead depth, 0 reads one window at a time.
-	ra      *readahead // started on the first Read when windows > 0.
+	sequential bool       // fetch windows ahead of the reader.
+	ra         *readahead // started on the first Read when sequential.
 }
 
 func NewObjectReader(repo *repository.Repository, object *objects.Object, size int64, prefetchSize int32) *ObjectReader {
@@ -86,7 +93,7 @@ func (or *ObjectReader) prefetch() error {
 }
 
 func (or *ObjectReader) Read(p []byte) (int, error) {
-	if or.windows > 0 && or.ra == nil {
+	if or.sequential && or.ra == nil {
 		or.ra = or.startReadahead()
 	}
 	if or.ra != nil {
@@ -127,7 +134,7 @@ func (or *ObjectReader) Seek(offset int64, whence int) (int64, error) {
 		// the serial path has nothing buffered: restart it from here.
 		or.doSeek = true
 	}
-	or.windows = 0
+	or.sequential = false
 	return or.seek(offset, whence)
 }
 
@@ -137,7 +144,7 @@ func (or *ObjectReader) Close() error {
 		or.ra.stop()
 		or.ra = nil
 	}
-	or.windows = 0
+	or.sequential = false
 	return nil
 }
 
@@ -288,21 +295,32 @@ func (or *ObjectReader) ReadAt(p []byte, off int64) (int, error) {
 }
 
 type window struct {
-	data []byte
-	err  error
+	data   []byte
+	err    error
+	budget bool // holds one unit of the read-ahead budget.
 }
 
-// readahead fetches and decodes up to cap(slots) windows ahead of the reader,
-// each in its own goroutine, and hands them over in file order.
+// readahead fetches and decodes windows ahead of the reader, each in its own
+// goroutine, as far as readaheadBudget allows, and hands them over in file
+// order.  When its next window is not claimed yet, the reader fetches it
+// itself, outside the budget: a starved reader goes as fast as the serial path
+// and never waits on another reader.
 type readahead struct {
+	or      *ObjectReader
+	budget  *semaphore.Weighted // readaheadBudget when the reader started.
 	ctx     context.Context
 	cancel  context.CancelFunc
-	pending []chan window // one per window, in file order.
-	slots   chan struct{} // windows fetched or in flight, not yet consumed.
-	next    int
-	skip    int64 // bytes to drop from the first window.
-	buf     []byte
-	err     error
+	bounds  [][2]int      // chunk range of each window.
+	pending []chan window // one per window, filled by the producer.
+
+	mu      sync.Mutex
+	claimed int // windows [0, claimed) are fetched or being fetched.
+	stopped bool
+
+	next int
+	skip int64 // bytes to drop from the first window.
+	buf  []byte
+	err  error
 }
 
 func (or *ObjectReader) startReadahead() *readahead {
@@ -322,10 +340,12 @@ func (or *ObjectReader) startReadahead() *readahead {
 
 	ctx, cancel := context.WithCancel(or.repo.AppContext())
 	ra := &readahead{
+		or:      or,
+		budget:  readaheadBudget,
 		ctx:     ctx,
 		cancel:  cancel,
+		bounds:  bounds,
 		pending: make([]chan window, len(bounds)),
-		slots:   make(chan struct{}, or.windows),
 		skip:    or.bufferOffset,
 	}
 	for i := range ra.pending {
@@ -333,21 +353,31 @@ func (or *ObjectReader) startReadahead() *readahead {
 		ra.pending[i] = make(chan window, 1)
 	}
 
-	go func() {
-		for i, b := range bounds {
-			select {
-			case ra.slots <- struct{}{}:
-			case <-ctx.Done():
-				return
-			}
-			go func() {
-				data, err := or.fetchWindow(ctx, b[0], b[1])
-				ra.pending[i] <- window{data, err}
-			}()
-		}
-	}()
-
+	go ra.produce()
 	return ra
+}
+
+func (ra *readahead) produce() {
+	for {
+		if err := ra.budget.Acquire(ra.ctx, 1); err != nil {
+			return
+		}
+
+		ra.mu.Lock()
+		if ra.stopped || ra.claimed == len(ra.bounds) {
+			ra.mu.Unlock()
+			ra.budget.Release(1)
+			return
+		}
+		i := ra.claimed
+		ra.claimed++
+		ra.mu.Unlock()
+
+		go func() {
+			data, err := ra.or.fetchWindow(ra.ctx, ra.bounds[i][0], ra.bounds[i][1])
+			ra.pending[i] <- window{data, err, true}
+		}()
+	}
 }
 
 func (or *ObjectReader) fetchWindow(ctx context.Context, start, end int) ([]byte, error) {
@@ -374,24 +404,35 @@ func (ra *readahead) read(p []byte) (int, error) {
 		if ra.err != nil {
 			return 0, ra.err
 		}
-		if ra.next == len(ra.pending) {
-			ra.cancel()
+		if ra.next == len(ra.bounds) {
+			ra.stop()
 			return 0, io.EOF
 		}
 
 		var w window
-		select {
-		case w = <-ra.pending[ra.next]:
-		case <-ra.ctx.Done():
-			ra.err = ra.ctx.Err()
-			return 0, ra.err
+		ra.mu.Lock()
+		if ra.next == ra.claimed {
+			ra.claimed++
+			ra.mu.Unlock()
+			b := ra.bounds[ra.next]
+			w.data, w.err = ra.or.fetchWindow(ra.ctx, b[0], b[1])
+		} else {
+			ra.mu.Unlock()
+			select {
+			case w = <-ra.pending[ra.next]:
+			case <-ra.ctx.Done():
+				ra.err = ra.ctx.Err()
+				return 0, ra.err
+			}
 		}
-		<-ra.slots
+		if w.budget {
+			ra.budget.Release(1)
+		}
 		ra.next++
 
 		if w.err != nil {
 			ra.err = w.err
-			ra.cancel()
+			ra.stop()
 			return 0, ra.err
 		}
 		ra.buf = w.data[ra.skip:]
@@ -403,6 +444,25 @@ func (ra *readahead) read(p []byte) (int, error) {
 	return n, nil
 }
 
+// stop cancels the fetches in flight and gives their budget back as they
+// finish.  Windows [next, claimed) all come from the producer: the reader
+// consumes the ones it fetches itself before returning.
 func (ra *readahead) stop() {
+	ra.mu.Lock()
+	if ra.stopped {
+		ra.mu.Unlock()
+		return
+	}
+	ra.stopped = true
+	next, claimed := ra.next, ra.claimed
+	ra.mu.Unlock()
+
 	ra.cancel()
+	go func() {
+		for i := next; i < claimed; i++ {
+			if w := <-ra.pending[i]; w.budget {
+				ra.budget.Release(1)
+			}
+		}
+	}()
 }

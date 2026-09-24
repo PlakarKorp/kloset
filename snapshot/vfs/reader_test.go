@@ -158,3 +158,102 @@ func TestGetObjectChunksRange(t *testing.T) {
 	require.Equal(t, end-start, n)
 	require.True(t, bytes.Equal(want, got), "chunks [%d, %d) differ from the content", start, end)
 }
+
+// settledReadBytes waits for prefetching to go quiet and returns the bytes read
+// from the store so far.
+func settledReadBytes(repo *repository.Repository) int64 {
+	last := repo.IOStats().Read.TotalBytes()
+	for range 50 {
+		time.Sleep(200 * time.Millisecond)
+		cur := repo.IOStats().Read.TotalBytes()
+		if cur == last {
+			return cur
+		}
+		last = cur
+	}
+	return last
+}
+
+func openSequential(t *testing.T, fs *vfs.Filesystem) io.ReadCloser {
+	t.Helper()
+	entry, err := fs.GetEntry("/large")
+	require.NoError(t, err)
+	f, err := entry.OpenSequential(fs)
+	require.NoError(t, err)
+	return f
+}
+
+// A window is 4MB of content plus at most one chunk; 12MB bounds it with room.
+const maxWindowBytes = 12 << 20
+
+func TestReadaheadBudgetBoundsPrefetch(t *testing.T) {
+	repo, fs, _ := largeFile(t)
+	defer vfs.SetReadaheadBudget(2)()
+
+	before := settledReadBytes(repo)
+	const readers = 3
+	for range readers {
+		f := openSequential(t, fs)
+		defer f.Close()
+		_, err := f.Read(make([]byte, 1))
+		require.NoError(t, err)
+	}
+
+	// each reader holds the window it reads, and two more are shared.
+	fetched := settledReadBytes(repo) - before
+	require.LessOrEqual(t, fetched, int64((2+readers)*maxWindowBytes),
+		"readers fetched %d bytes ahead with a budget of 2 windows", fetched)
+}
+
+func TestReadaheadBudgetDoesNotStarveReaders(t *testing.T) {
+	_, fs, content := largeFile(t)
+	defer vfs.SetReadaheadBudget(1)()
+
+	// interleave three readers competing for one window of budget: each must
+	// keep making progress on its own.
+	var files []io.ReadCloser
+	var got [][]byte
+	for range 3 {
+		f := openSequential(t, fs)
+		defer f.Close()
+		files = append(files, f)
+		got = append(got, nil)
+	}
+	buf := make([]byte, 1<<20)
+	for done := 0; done < len(files); {
+		done = 0
+		for i, f := range files {
+			n, err := f.Read(buf)
+			got[i] = append(got[i], buf[:n]...)
+			if err == io.EOF {
+				done++
+				continue
+			}
+			require.NoError(t, err)
+		}
+	}
+	for i := range got {
+		require.True(t, bytes.Equal(content, got[i]), "reader %d read wrong bytes", i)
+	}
+}
+
+func TestReadaheadBudgetReturnedOnClose(t *testing.T) {
+	repo, fs, _ := largeFile(t)
+	defer vfs.SetReadaheadBudget(2)()
+
+	a := openSequential(t, fs)
+	_, err := a.Read(make([]byte, 1))
+	require.NoError(t, err)
+	settledReadBytes(repo)
+	require.NoError(t, a.Close())
+
+	// with the budget back, b fetches two windows ahead of the one it reads.
+	before := settledReadBytes(repo)
+	b := openSequential(t, fs)
+	defer b.Close()
+	_, err = b.Read(make([]byte, 1))
+	require.NoError(t, err)
+
+	fetched := settledReadBytes(repo) - before
+	require.Greater(t, fetched, int64(8<<20), "only %d bytes fetched: the closed reader kept its budget", fetched)
+}
