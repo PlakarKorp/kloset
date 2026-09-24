@@ -7,6 +7,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/connectors"
@@ -111,7 +112,11 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 	records := make(chan *connectors.Record, snap.AppContext().MaxConcurrency*2)
 	results := make(chan *connectors.Result, snap.AppContext().MaxConcurrency*2)
 
-	go func() {
+	// if there are pending items in the results channel when the
+	// Exporter exits, there's a chance we close the emitter while
+	// this is still running.  wait for it.
+	var wg sync.WaitGroup
+	wg.Go(func() {
 		for ack := range results {
 			if ack.Err != nil {
 				emitter.PathError(ack.Record.Pathname, ack.Err)
@@ -133,7 +138,7 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 				}
 			}
 		}
-	}()
+	})
 
 	go func() {
 		defer close(records)
@@ -259,5 +264,9 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		}
 	}()
 
-	return exp.Export(snap.AppContext(), records, results)
+	err = exp.Export(snap.AppContext(), records, results)
+
+	wg.Wait() // wait the events reporting before exiting.
+
+	return err
 }
