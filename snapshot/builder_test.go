@@ -1,7 +1,9 @@
 package snapshot_test
 
 import (
+	"bytes"
 	"testing"
+	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -43,4 +45,30 @@ func TestBuilderOptionsDataClassesDefault(t *testing.T) {
 	require.Equal(t, "", builder.Header.Dataset)
 	require.NotNil(t, builder.Header.DataClasses)
 	require.Empty(t, builder.Header.DataClasses)
+}
+
+func TestCreateIgnoresStaleLockDeleteFailure(t *testing.T) {
+	const staleLockHostname = "stale-lock-host"
+
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	staleLockID := objects.MAC{0x16, 0x70}
+	staleLock := repository.NewSharedLock(staleLockHostname)
+	staleLock.Timestamp = time.Now().Add(-repository.LOCK_TTL)
+
+	var buf bytes.Buffer
+	require.NoError(t, staleLock.SerializeToStream(&buf))
+	_, err := repo.PutLock(staleLockID, &buf)
+	require.NoError(t, err)
+
+	mockStore, ok := repo.Store().(*ptesting.MockBackend)
+	require.True(t, ok)
+	mockStore.RefuseLockDeletes()
+
+	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+		Name:         "stale-lock-delete-test",
+		NoCheckpoint: true,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, builder)
+	require.NoError(t, builder.Close())
 }
