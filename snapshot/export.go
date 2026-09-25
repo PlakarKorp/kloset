@@ -153,12 +153,12 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		}
 
 		// emitted symlinks, to skip entries below them: an exporter can't tell
-		// from the record stream that a path component is a symlink. WalkDir
+		// from the record stream that a path component is a symlink. The walk
 		// yields parents before children, so a symlink is seen first.
 		symlinks := make(map[string]struct{})
 
 		i := 0
-		pvfs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
+		pvfs.WalkIndexOrder(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 			if i%1000 == 0 {
 				if err := snap.AppContext().Err(); err != nil {
 					return err

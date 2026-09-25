@@ -312,6 +312,11 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
 	}
 
+	return fsc.readDirpack(prefix, objectMac)
+}
+
+// readDirpack lists the directory prefix from its dirpack object.
+func (fsc *Filesystem) readDirpack(prefix string, objectMac objects.MAC) (iter.Seq2[*Entry, error], error) {
 	// LookupObject inlined
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
