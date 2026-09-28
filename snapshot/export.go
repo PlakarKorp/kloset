@@ -158,7 +158,7 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		symlinks := make(map[string]struct{})
 
 		i := 0
-		pvfs.WalkDir(pathname, func(entrypath string, e *vfs.Entry, err error) error {
+		pvfs.WalkDirpack(pathname, func(entrypath string, e *vfs.Entry, err error) error {
 			if i%1000 == 0 {
 				if err := snap.AppContext().Err(); err != nil {
 					return err
