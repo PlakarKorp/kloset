@@ -1,8 +1,13 @@
 package vfs
 
 import (
+	"bytes"
+	"context"
 	"io/fs"
+	"iter"
+	"os"
 	"path"
+	"strconv"
 	"strings"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -55,10 +60,27 @@ func (fsc *Filesystem) WalkDir(root string, fn WalkDirFunc) error {
 	return err
 }
 
+// dirpackWalkWindow is how many directories a walk fetches ahead of the
+// one being emitted, per batch.
+const dirpackWalkWindow = 1024
+
+func dirpackWalkWindowSize() int {
+	if s := os.Getenv("PLAKAR_DIRPACK_WALK_WINDOW"); s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			return n
+		}
+	}
+	return dirpackWalkWindow
+}
+
 // WalkDirpack visits a tree hierarchy like Walkdir but based on the dirpack
 // index. The guarantee your get is that parents are always visited before
 // children.
-func (fsc *Filesystem) WalkDirpack(root string, fn WalkDirFunc) error {
+//
+// Directory payloads are fetched one lookahead window at a time through
+// fetchDirpacks, so the reads coalesce instead of paying one round-trip per
+// directory.
+func (fsc *Filesystem) WalkDirpack(ctx context.Context, root string, fn WalkDirFunc) error {
 	if fsc.dirpack == nil {
 		return fsc.WalkDir(root, fn)
 	}
@@ -68,7 +90,7 @@ func (fsc *Filesystem) WalkDirpack(root string, fn WalkDirFunc) error {
 		return fn(root, nil, err)
 	}
 
-	if err = fsc.walkDirpack(entry.Path(), entry, fn); err != nil {
+	if err = fsc.walkDirpack(ctx, entry.Path(), entry, fn); err != nil {
 		if err == fs.SkipDir || err == fs.SkipAll {
 			err = nil
 		}
@@ -76,7 +98,17 @@ func (fsc *Filesystem) WalkDirpack(root string, fn WalkDirFunc) error {
 	return err
 }
 
-func (fsc *Filesystem) walkDirpack(root string, rootEntry *Entry, fn WalkDirFunc) error {
+type dirpackWalkRef struct {
+	path string
+	mac  objects.MAC
+}
+
+type dirpackWalkBatch struct {
+	dirs    []dirpackWalkRef
+	payload map[string][]byte
+}
+
+func (fsc *Filesystem) walkDirpack(ctx context.Context, root string, rootEntry *Entry, fn WalkDirFunc) error {
 	// the root's own record lives in its parent's payload, which is
 	// outside the scan; emit it from the entry already resolved.
 	if err := fn(root, rootEntry, nil); err != nil {
@@ -92,52 +124,116 @@ func (fsc *Filesystem) walkDirpack(root string, rootEntry *Entry, fn WalkDirFunc
 		prefix += "/"
 	}
 
-	iter, err := fsc.dirpack.ScanFrom(root)
+	cursor, err := fsc.dirpack.ScanFrom(root)
 	if err != nil {
 		return fn(root, nil, err)
 	}
+
+	windowSize := dirpackWalkWindowSize()
+
+	fctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// The feeder owns the cursor: it slices the scan into windows and
+	// fetches each window's payloads while the previous one is being
+	// emitted. It stops when the scan is done or fctx is cancelled, and
+	// its cursor error is read only after batches is closed.
+	batches := make(chan dirpackWalkBatch, 1)
+	var cursorErr error
+	go func() {
+		defer close(batches)
+
+		done := false
+		for !done {
+			var dirs []dirpackWalkRef
+			for len(dirs) < windowSize {
+				if !cursor.Next() {
+					cursorErr = cursor.Err()
+					done = true
+					break
+				}
+				dirpath, objectMac := cursor.Current()
+
+				if dirpath != root && !strings.HasPrefix(dirpath, prefix) {
+					// We are past the end, the index is lexical.
+					if dirpath > prefix {
+						done = true
+						break
+					}
+
+					// Special case due to the lexical nature of the index, one of the
+					// sibling of root sorts between root and root + "/" eg :
+					// /usr.bak sorts between /root and /root/ but is outside of the
+					// scope of this walkdir.
+					continue
+				}
+
+				dirs = append(dirs, dirpackWalkRef{path: dirpath, mac: objectMac})
+			}
+
+			if len(dirs) == 0 {
+				return
+			}
+
+			reqs := make(map[string]objects.MAC, len(dirs))
+			for _, d := range dirs {
+				reqs[d.path] = d.mac
+			}
+
+			batch := dirpackWalkBatch{dirs: dirs, payload: fsc.fetchDirpacks(fctx, reqs)}
+			select {
+			case batches <- batch:
+			case <-fctx.Done():
+				return
+			}
+		}
+	}()
 
 	// directories fn asked to skip: their descendants are separate
 	// index keys, so each key is checked against its ancestors.
 	skipped := make(map[string]struct{})
 
-	for iter.Next() {
-		dirpath, objectMac := iter.Current()
-
-		if dirpath != root && !strings.HasPrefix(dirpath, prefix) {
-			// We are past the end, the index is lexical.
-			if dirpath > prefix {
-				break
+	for batch := range batches {
+		for _, d := range batch.dirs {
+			if err := ctx.Err(); err != nil {
+				return err
 			}
 
-			// Special case due to the lexical nature of the index, one of the
-			// sibling of root sorts between root and root + "/" eg :
-			// /usr.bak sorts between /root and /root/ but is outside of the
-			// scope of this walkdir.
-			continue
-		}
+			if skippedAncestor(skipped, root, d.path) {
+				continue
+			}
 
-		if skippedAncestor(skipped, root, dirpath) {
-			continue
-		}
+			var dents iter.Seq2[*Entry, error]
+			if data, ok := batch.payload[d.path]; ok {
+				dents = dirpackEntriesIter(d.path, bytes.NewReader(data))
+			} else {
+				// fetchDirpacks is best effort: load this directory on
+				// demand, so a fetch failure surfaces its real error here.
+				dents, err = fsc.dirpackEntries(d.path, d.mac)
+				if err != nil {
+					if err := fn(d.path, nil, err); err != nil {
+						return err
+					}
+					continue
+				}
+			}
 
-		if err := fsc.walkDirpackPayload(dirpath, objectMac, skipped, fn); err != nil {
-			return err
+			if err := fsc.walkDirpackPayload(d.path, dents, skipped, fn); err != nil {
+				return err
+			}
 		}
 	}
 
-	if err := iter.Err(); err != nil {
-		return fn(root, nil, err)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if cursorErr != nil {
+		return fn(root, nil, cursorErr)
 	}
 	return nil
 }
 
-func (fsc *Filesystem) walkDirpackPayload(dirpath string, objectMac objects.MAC, skipped map[string]struct{}, fn WalkDirFunc) error {
-	dents, err := fsc.dirpackEntries(dirpath, objectMac)
-	if err != nil {
-		return fn(dirpath, nil, err)
-	}
-
+func (fsc *Filesystem) walkDirpackPayload(dirpath string, dents iter.Seq2[*Entry, error], skipped map[string]struct{}, fn WalkDirFunc) error {
 	for entry, err := range dents {
 		if err != nil {
 			// the payload iterator terminates itself after an error
