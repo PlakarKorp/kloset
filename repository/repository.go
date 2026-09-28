@@ -1283,6 +1283,13 @@ func (r *Repository) ListOrphanBlobs() iter.Seq2[state.DeltaEntry, error] {
 	return r.state.ListOrphanDeltas()
 }
 
+// ListBlobs iterates over the blobs of the given type recorded in the local
+// state, with the location of each in its packfile. It only reads the local
+// state and never touches the store.
+func (r *Repository) ListBlobs(Type resources.Type) iter.Seq2[state.DeltaEntry, error] {
+	return r.state.ListObjectsOfType(Type)
+}
+
 func (r *Repository) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	t0 := time.Now()
 	defer func() {
