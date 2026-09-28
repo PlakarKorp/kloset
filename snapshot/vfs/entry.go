@@ -312,6 +312,12 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
 	}
 
+	return fsc.dirpackEntries(prefix, objectMac)
+}
+
+// dirpackEntries iterates the direct children of the directory at prefix,
+// decoded from its dirpack payload object objectMac.
+func (fsc *Filesystem) dirpackEntries(prefix string, objectMac objects.MAC) (iter.Seq2[*Entry, error], error) {
 	// LookupObject inlined
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
