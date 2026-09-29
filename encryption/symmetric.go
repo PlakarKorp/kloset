@@ -21,7 +21,7 @@ const (
 	chunkSize          = 64 * 1024 // Size of each chunk for encryption/decryption
 	DEFAULT_KDF        = "ARGON2ID"
 	AESGCMSIVNonceSize = 12
-	AESGCMSIV_OVERHEAD  = AESGCMSIVNonceSize + aes.BlockSize
+	AESGCMSIV_OVERHEAD = AESGCMSIVNonceSize + aes.BlockSize
 )
 
 type Configuration struct {
