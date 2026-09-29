@@ -334,7 +334,12 @@ func (fsc *Filesystem) dirpackEntries(prefix string, objectMac objects.MAC) (ite
 		size += int64(c.Length)
 	}
 
-	rd := NewObjectReader(fsc.repo, obj, size, -1)
+	return dirpackEntriesIter(prefix, NewObjectReader(fsc.repo, obj, size, -1)), nil
+}
+
+// dirpackEntriesIter decodes the dirpack payload read from rd into the direct
+// children of the directory at prefix.
+func dirpackEntriesIter(prefix string, rd io.Reader) iter.Seq2[*Entry, error] {
 	return func(yield func(*Entry, error) bool) {
 		for {
 			_, siz, err := readDirPackHdr(rd)
@@ -375,7 +380,7 @@ func (fsc *Filesystem) dirpackEntries(prefix string, objectMac objects.MAC) (ite
 				return
 			}
 		}
-	}, nil
+	}
 }
 
 func (e *Entry) Stat() *objects.FileInfo {
