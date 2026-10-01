@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"fmt"
 	"iter"
 	"slices"
 	"sync"
@@ -209,4 +210,69 @@ func readPlanner(locs []blobLocation, maxRdSize uint32, _ float64) []*rangeRead 
 	}
 
 	return plan
+}
+
+func (r *Repository) CollectBlobs(ctx context.Context, reqs []BlobReq, opts *GetBlobsOpts) (map[objects.MAC][]byte, map[objects.MAC]error) {
+	data := make(map[objects.MAC][]byte, len(reqs))
+	errs := make(map[objects.MAC]error)
+	for resp, err := range r.GetBlobs(ctx, reqs, opts) {
+		if err != nil {
+			errs[resp.MAC] = err
+			continue
+		}
+		data[resp.MAC] = resp.Data
+	}
+
+	for _, req := range reqs {
+		if _, ok := data[req.MAC]; ok {
+			continue
+		}
+		if _, ok := errs[req.MAC]; ok {
+			continue
+		}
+		err := ctx.Err()
+		if err == nil {
+			err = fmt.Errorf("blob %x was not returned", req.MAC)
+		}
+		errs[req.MAC] = err
+	}
+	return data, errs
+}
+
+func (r *Repository) CollectObjects(ctx context.Context, macs []objects.MAC, opts *GetBlobsOpts) (map[objects.MAC]*objects.Object, map[objects.MAC]error) {
+	reqs := make([]BlobReq, 0, len(macs))
+	for _, mac := range macs {
+		reqs = append(reqs, BlobReq{Type: resources.RT_OBJECT, MAC: mac})
+	}
+	data, errs := r.CollectBlobs(ctx, reqs, opts)
+
+	objs := make(map[objects.MAC]*objects.Object, len(data))
+	for mac, buf := range data {
+		obj, err := objects.NewObjectFromBytes(buf)
+		if err != nil {
+			errs[mac] = err
+			continue
+		}
+		objs[mac] = obj
+	}
+	return objs, errs
+}
+
+func ChunkRequests(obj *objects.Object) []BlobReq {
+	reqs := make([]BlobReq, 0, len(obj.Chunks))
+	for _, c := range obj.Chunks {
+		reqs = append(reqs, BlobReq{Type: resources.RT_CHUNK, MAC: c.ContentMAC})
+	}
+	return reqs
+}
+
+func ObjectChunks(obj *objects.Object, data map[objects.MAC][]byte, errs map[objects.MAC]error) ([][]byte, error) {
+	chunks := make([][]byte, 0, len(obj.Chunks))
+	for _, c := range obj.Chunks {
+		if err := errs[c.ContentMAC]; err != nil {
+			return nil, err
+		}
+		chunks = append(chunks, data[c.ContentMAC])
+	}
+	return chunks, nil
 }

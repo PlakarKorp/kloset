@@ -137,3 +137,35 @@ func TestGetBlobsEmpty(t *testing.T) {
 		t.Fatalf("unexpected result %x (err %v)", res.MAC, err)
 	}
 }
+
+func TestCollectBlobs(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	reqs := chunkRequests(t, repo, "/a.txt", "/b.txt")
+
+	bogus := objects.MAC{0xDE, 0xAD, 0xBE, 0xEF}
+	data, errs := repo.CollectBlobs(context.Background(), append(reqs, repository.BlobReq{Type: resources.RT_CHUNK, MAC: bogus}), nil)
+
+	require.Len(t, errs, 1)
+	require.ErrorIs(t, errs[bogus], repository.ErrBlobNotFound)
+	for _, req := range reqs {
+		expected, err := repo.GetBlobBytes(req.Type, req.MAC)
+		require.NoError(t, err)
+		require.Equal(t, expected, data[req.MAC])
+	}
+}
+
+func TestCollectBlobsCancelled(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	reqs := chunkRequests(t, repo, "/a.txt")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	data, errs := repo.CollectBlobs(ctx, reqs, nil)
+
+	for _, req := range reqs {
+		_, ok := data[req.MAC]
+		if !ok {
+			require.Error(t, errs[req.MAC])
+		}
+	}
+}

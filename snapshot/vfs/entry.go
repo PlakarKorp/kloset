@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/PlakarKorp/kloset/connectors"
-	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/iterator"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -78,6 +77,21 @@ func isParentPathWindowsBug(p string) bool {
 	return len(p) == 3 && p[0] == '/' &&
 		'A' <= p[1] && p[1] <= 'Z' &&
 		p[2] == ':'
+}
+
+// validateDirpackEntry runs the checks common to every dirpack record read
+// path: field validation, then the windows-bug parent-path check.
+func validateDirpackEntry(entry *Entry, parentPath string) error {
+	if err := entry.validate(); err != nil {
+		return err
+	}
+
+	if entry.ParentPath != parentPath && parentPath == "/" && isParentPathWindowsBug(entry.ParentPath) {
+		return fmt.Errorf("%w: entry %q claims parent %q in dirpack for %q",
+			ErrMalformedEntry, entry.FileInfo.Lname, entry.ParentPath, parentPath)
+	}
+
+	return nil
 }
 
 func (e *Entry) validate() error {
@@ -234,13 +248,8 @@ func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
 		e.ResolvedObject = obj
 	}
 
-	mode, err := fs.repo.Store().Mode(fs.repo.AppContext())
-	if err != nil {
+	if err := fs.repo.CheckReadable(); err != nil {
 		return nil, err
-	}
-
-	if mode&storage.ModeRead == 0 {
-		return nil, repository.ErrNotReadable
 	}
 
 	return &vfile{
@@ -300,9 +309,56 @@ func readDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
 	return
 }
 
+func decodeDirpackRecord(rd io.Reader, parentPath string) (*Entry, error) {
+	_, siz, err := readDirPackHdr(rd)
+	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return nil, io.EOF
+		}
+		return nil, fmt.Errorf("failed to read: %w", err)
+	}
+
+	var entry Entry
+	lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
+	if err := msgpack.NewDecoder(lrd).Decode(&entry); err != nil {
+		return nil, fmt.Errorf("failed to read entry: %w", err)
+	}
+	if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
+		return nil, fmt.Errorf("failed to read entry mac: %w", err)
+	}
+
+	if err := validateDirpackEntry(&entry, parentPath); err != nil {
+		return nil, err
+	}
+
+	return &entry, nil
+}
+
 func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	prefix := e.Path()
 
+	if fsc.dirpackCache == nil {
+		return e.getdentsDirpackNoCache(fsc, prefix)
+	}
+
+	listing, err := fsc.getDirpackListing(prefix)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
+		}
+		return nil, err
+	}
+
+	return func(yield func(*Entry, error) bool) {
+		for _, entry := range listing.order {
+			if !yield(entry, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
+func (e *Entry) getdentsDirpackNoCache(fsc *Filesystem, prefix string) (iter.Seq2[*Entry, error], error) {
 	objectMac, ok, err := fsc.dirpack.Find(prefix)
 	if err != nil {
 		return nil, err
@@ -312,7 +368,6 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
 	}
 
-	// LookupObject inlined
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
 		return nil, err
@@ -331,41 +386,16 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 	rd := NewObjectReader(fsc.repo, obj, size, -1)
 	return func(yield func(*Entry, error) bool) {
 		for {
-			_, siz, err := readDirPackHdr(rd)
+			entry, err := decodeDirpackRecord(rd, prefix)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break
 				}
-
-				yield(nil, fmt.Errorf("failed to read: %w", err))
-				return
-			}
-
-			var entry Entry
-			lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
-			err = msgpack.NewDecoder(lrd).Decode(&entry)
-			if err != nil {
-				yield(nil, fmt.Errorf("failed to read entry: %w", err))
-				return
-			}
-			if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
-				yield(nil, fmt.Errorf("failed to read entry mac: %w", err))
-				return
-			}
-
-			if err := entry.validate(); err != nil {
 				yield(nil, err)
 				return
 			}
 
-			// a dirpack lists one directory: every record is a direct child.
-			if entry.ParentPath != prefix && prefix == "/" && isParentPathWindowsBug(entry.ParentPath) {
-				yield(nil, fmt.Errorf("%w: entry %q claims parent %q in dirpack for %q",
-					ErrMalformedEntry, entry.FileInfo.Lname, entry.ParentPath, prefix))
-				return
-			}
-
-			if !yield(&entry, nil) {
+			if !yield(entry, nil) {
 				return
 			}
 		}

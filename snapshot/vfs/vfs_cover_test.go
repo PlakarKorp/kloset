@@ -188,7 +188,7 @@ func TestGetEntryForBackup(t *testing.T) {
 
 // TestGetEntryForBackupWithCache drives the dirpack-cache path of
 // getEntryForBackup, which loads and caches a directory's entry map via
-// loadDirpackMap.
+// loadDirpackListing.
 func TestGetEntryForBackupWithCache(t *testing.T) {
 	_, snap := generateRichSnapshot(t)
 	defer snap.Close()

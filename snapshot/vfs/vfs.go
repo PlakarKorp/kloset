@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"golang.org/x/sync/singleflight"
 
@@ -47,14 +48,22 @@ type CustomMetadata struct {
 	Value []byte `msgpack:"value" json:"value"`
 }
 
+type dirpackListing struct {
+	order  []*Entry
+	byName map[string]*Entry
+}
+
 type Filesystem struct {
 	tree         *btree.BTree[string, objects.MAC, objects.MAC]
 	xattrs       *btree.BTree[string, objects.MAC, objects.MAC]
 	errors       *btree.BTree[string, objects.MAC, objects.MAC]
 	dirpack      *btree.BTree[string, objects.MAC, objects.MAC]
 	repo         *repository.Repository
-	dirpackCache *lru.Cache[string, map[string]*Entry]
+	dirpackCache *lru.Cache[string, *dirpackListing]
 	dirpackSF    singleflight.Group
+
+	pendingMu sync.Mutex
+	pending   map[string]*pendingDirpack
 
 	dirpackCacheSize int
 
@@ -135,14 +144,14 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	return fs, nil
 }
 
-// XXX - until we do refacto to remove object resolve from ResolveEntry, ONLY CALL IN SUBCOMMAND BACKUP
+// XXX - until we do refacto to remove object resolve from ResolveEntry
 func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
 	fs, err := NewFilesystem(repo, root, xattrs, errors, dirpackidx)
 	if err != nil {
 		return nil, err
 	}
 	fs.dirpackCacheSize = 256
-	fs.dirpackCache = lru.New[string, map[string]*Entry](fs.dirpackCacheSize, nil)
+	fs.dirpackCache = lru.New[string, *dirpackListing](fs.dirpackCacheSize, nil)
 
 	return fs, nil
 }
@@ -390,34 +399,43 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
 
+	listing, err := fsc.getDirpackListing(parentPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if entry, ok := listing.byName[base]; ok {
+		return entry, nil
+	}
+	return nil, fs.ErrNotExist
+}
+
+func (fsc *Filesystem) getDirpackListing(parentPath string) (*dirpackListing, error) {
 	if prefetcher := fsc.prefetcher; prefetcher != nil {
 		prefetcher.onConsume(parentPath)
 	}
 
-	// Fast path: if the prefetcher (or an earlier lookup) already warmed this
-	// directory, serve from cache without entering the singleflight group.
-	if m, exists := fsc.dirpackCache.Get(parentPath); exists {
-		if entry, ok := m[base]; ok {
-			return entry, nil
+	if listing, exists := fsc.dirpackCache.Get(parentPath); exists {
+		return listing, nil
+	}
+
+	if w := fsc.pendingDirpackLoad(parentPath); w != nil {
+		<-w.done
+		if w.listing != nil {
+			return w.listing, nil
 		}
-		return nil, fs.ErrNotExist
 	}
 
 	v, err, _ := fsc.dirpackSF.Do(parentPath, func() (any, error) {
-		if m, exists := fsc.dirpackCache.Get(parentPath); exists {
-			return m, nil
+		if listing, exists := fsc.dirpackCache.Get(parentPath); exists {
+			return listing, nil
 		}
-		return fsc.loadDirpackMap(parentPath)
+		return fsc.loadDirpackListing(parentPath)
 	})
 	if err != nil {
 		return nil, err
 	}
-	m := v.(map[string]*Entry)
-
-	if entry, ok := m[base]; ok {
-		return entry, nil
-	}
-	return nil, fs.ErrNotExist
+	return v.(*dirpackListing), nil
 }
 
 func (fsc *Filesystem) getEntryFollow(entrypath string) (*Entry, error) {
@@ -504,7 +522,7 @@ func (fsc *Filesystem) getEntryNoFollow(entrypath string) (*Entry, error) {
 	return entry, nil
 }
 
-func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, error) {
+func (fsc *Filesystem) loadDirpackListing(parentPath string) (*dirpackListing, error) {
 	objectMac, found, err := fsc.dirpack.Find(parentPath)
 	if err != nil {
 		return nil, err
@@ -513,13 +531,13 @@ func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, err
 		return nil, fs.ErrNotExist
 	}
 
-	return fsc.loadDirpackMapByMAC(parentPath, objectMac)
+	return fsc.loadDirpackListingByMAC(parentPath, objectMac)
 }
 
-// loadDirpackMapByMAC is loadDirpackMap with the dirpack object MAC already
+// loadDirpackListingByMAC is loadDirpackListing with the dirpack object MAC already
 // resolved; the prefetcher uses it to skip the redundant dirpack.Find since
 // its cursor already yields the MAC alongside the path.
-func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.MAC) (map[string]*Entry, error) {
+func (fsc *Filesystem) loadDirpackListingByMAC(parentPath string, objectMac objects.MAC) (*dirpackListing, error) {
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
 		return nil, err
@@ -538,53 +556,55 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 	//rd := NewObjectReader(fsc.repo, obj, size, -1)
 	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
 
-	cache := make(map[string]*Entry)
-	for {
-		_, siz, err := readDirPackHdr(rd)
-		if err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return nil, err
-		}
-
-		var entry Entry
-		lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
-		if err := msgpack.NewDecoder(lrd).Decode(&entry); err != nil {
-			return nil, err
-		}
-		if _, err := io.ReadFull(rd, entry.MAC[:]); err != nil {
-			return nil, err
-		}
-
-		// resolve object to extract content-type, nchunks and entropy
-		if entry.GetContentType() == "" && entry.HasObject() {
-			rd, err := fsc.repo.GetBlob(resources.RT_OBJECT, entry.Object)
-			if err != nil {
-				return nil, err
-			}
-
-			bytes, err := io.ReadAll(rd)
-			if err != nil {
-				return nil, err
-			}
-
-			obj, err := objects.NewObjectFromBytes(bytes)
-			if err != nil {
-				return nil, err
-			}
-
-			entry.ContentType = obj.ContentType
-			entry.Entropy = obj.Entropy
-			entry.Chunks = uint64(len(obj.Chunks))
-		}
-
-		cache[entry.Name()] = &entry
+	listing, err := decodeDirpackListing(parentPath, rd)
+	if err != nil {
+		return nil, err
 	}
 
-	_ = fsc.dirpackCache.Put(parentPath, cache)
+	for _, entry := range listing.order {
+		if !needsObjectMetadata(entry) {
+			continue
+		}
+		buf, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, entry.Object)
+		if err != nil {
+			return nil, err
+		}
+		obj, err := objects.NewObjectFromBytes(buf)
+		if err != nil {
+			return nil, err
+		}
+		setObjectMetadata(entry, obj)
+	}
 
-	return cache, nil
+	_ = fsc.dirpackCache.Put(parentPath, listing)
+
+	return listing, nil
+}
+
+func decodeDirpackListing(parentPath string, rd io.Reader) (*dirpackListing, error) {
+	listing := &dirpackListing{byName: make(map[string]*Entry)}
+	for {
+		entry, err := decodeDirpackRecord(rd, parentPath)
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return listing, nil
+			}
+			return nil, err
+		}
+		listing.order = append(listing.order, entry)
+		listing.byName[entry.Name()] = entry
+	}
+}
+
+func needsObjectMetadata(entry *Entry) bool {
+	return entry.GetContentType() == "" && entry.HasObject()
+}
+
+func setObjectMetadata(entry *Entry, obj *objects.Object) {
+	entry.ResolvedObject = obj
+	entry.ContentType = obj.ContentType
+	entry.Entropy = obj.Entropy
+	entry.Chunks = uint64(len(obj.Chunks))
 }
 
 func (fsc *Filesystem) Children(path string) (iter.Seq2[*Entry, error], error) {
