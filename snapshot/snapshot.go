@@ -148,6 +148,9 @@ func getPackfileForBlobWithErrorWithKey(snap *Snapshot, at string, res resources
 
 const batchSizeListPackfiles = 1024
 
+// Lists the packfile reachable from the snapshot (not deduplicated).
+// The loop doesn't abort on a failure, as a best effort listing, it's the
+// responsability of the caller to interrupt the iteration.
 func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 	pvfs, err := snap.Filesystem()
 	if err != nil {
@@ -208,6 +211,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
+		if err := fsIter.Err(); err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to walk the vfs: %w", err)) {
+				return
+			}
+		}
+
 		// Flush the remaining entries.
 		if !snap.batchVfsEntries(macs, yield) {
 			return
@@ -230,6 +239,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
+		if err := errIter.Err(); err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to walk the error tree: %w", err)) {
+				return
+			}
+		}
+
 		if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_BTREE, snap.Header.Sources[0].VFS.Xattrs)) {
 			return
 		}
@@ -244,6 +259,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_ENTRY, error)) {
 					return
 				}
+			}
+		}
+
+		if err := xattrIter.Err(); err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to walk the xattr tree: %w", err)) {
+				return
 			}
 		}
 
@@ -265,6 +286,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			for indexIter.Next() {
 				mac, _ := indexIter.Current()
 				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
+			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the content-type tree: %w", err)) {
 					return
 				}
 			}
@@ -309,6 +336,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 					}
 				}
 			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the dirpack tree: %w", err)) {
+					return
+				}
+			}
 		}
 
 		if !snap.batchObjectEntries(macs, yield) {
@@ -339,6 +372,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 					if !yield(getPackfileForBlobWithError(snap, resources.RT_VFS_SUMMARY, summaryItem)) {
 						return
 					}
+				}
+			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the summary tree: %w", err)) {
+					return
 				}
 			}
 		}
