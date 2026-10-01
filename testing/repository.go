@@ -21,6 +21,12 @@ import (
 )
 
 func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer, passphrase *[]byte) *repository.Repository {
+	return GenerateRepositoryWithConfig(t, bufout, buferr, passphrase, nil)
+}
+
+// GenerateRepositoryWithConfig is GenerateRepository with tweak applied to the
+// configuration before the repository is created.
+func GenerateRepositoryWithConfig(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer, passphrase *[]byte, tweak func(*storage.Configuration)) *repository.Repository {
 	// init temporary directories
 	tmpRepoDirRoot, err := os.MkdirTemp("", "tmp_repo")
 	require.NoError(t, err)
@@ -59,6 +65,9 @@ func GenerateRepository(t *testing.T, bufout *bytes.Buffer, buferr *bytes.Buffer
 		hasher = hashing.GetMACHasher(storage.DEFAULT_HASHING_ALGORITHM, key)
 	} else {
 		config.Encryption = nil
+	}
+	if tweak != nil {
+		tweak(config)
 	}
 	serialized, err := config.ToBytes()
 	require.NoError(t, err)
