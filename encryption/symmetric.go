@@ -301,7 +301,8 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 
 		// Encrypt and write data chunks, each as nonce || ciphertext || tag
 		chunk := make([]byte, config.ChunkSize)
-		out := make([]byte, 0, config.ChunkSize+AESGCMSIV_OVERHEAD)
+		out := make([]byte, AESGCMSIVNonceSize, config.ChunkSize+AESGCMSIV_OVERHEAD)				
+		nonce := out[:AESGCMSIVNonceSize]
 		for {
 			// Use ReadFull to read exactly chunkSize or less at EOF
 			n, err := io.ReadFull(r, chunk)
@@ -311,13 +312,13 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 			}
 
 			if n > 0 {
-				out = out[:AESGCMSIVNonceSize]
-				if _, err := rand.Read(out); err != nil {
+				if _, err := rand.Read(nonce); err != nil {
 					pw.CloseWithError(err)
 					return
 				}
-				out = dataGCM.Seal(out, out[:AESGCMSIVNonceSize], chunk[:n], nil)
-				if _, err := pw.Write(out); err != nil {
+
+				frame := dataGCM.Seal(out, nonce, chunk[:n], nil)
+				if _, err := pw.Write(frame); err != nil {
 					pw.CloseWithError(err)
 					return
 				}
