@@ -97,7 +97,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 
 		records <- connectors.NewRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
 			func() (io.ReadCloser, error) {
-				return p.fs.Open(path)
+				return entry.OpenSequential(p.fs)
 			})
 		return nil
 	})

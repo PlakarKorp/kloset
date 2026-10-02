@@ -9,6 +9,7 @@ import (
 	"hash"
 	"io"
 	"iter"
+	"math"
 	"math/big"
 	"math/bits"
 	"os"
@@ -1114,6 +1115,21 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 		r.Logger().Trace("repository", "GetObjectContent(%x, off=%d): %s", obj.ContentMAC, start, time.Since(t0))
 	}()
 
+	return r.getObjectContent(obj, start, len(obj.Chunks), maxSize)
+}
+
+// GetObjectChunks yields the decoded chunks [start, end) of obj, merging
+// reads of chunks that are contiguous in a packfile.
+func (r *Repository) GetObjectChunks(obj *objects.Object, start, end int) iter.Seq2[[]byte, error] {
+	t0 := time.Now()
+	defer func() {
+		r.Logger().Trace("repository", "GetObjectChunks(%x, %d-%d): %s", obj.ContentMAC, start, end, time.Since(t0))
+	}()
+
+	return r.getObjectContent(obj, start, end, math.MaxUint32)
+}
+
+func (r *Repository) getObjectContent(obj *objects.Object, start, end int, maxSize uint32) iter.Seq2[[]byte, error] {
 	return func(yield func([]byte, error) bool) {
 		var currPackfile objects.MAC
 		var offset, nextOffset uint64
@@ -1122,7 +1138,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 		var size uint32            // size of the current range.
 		var accumulatedSize uint32 // total size we got in this iteration, possibly spanning multiple ranges.
 
-		for i := start; i < len(obj.Chunks); i++ {
+		for i := start; i < end; i++ {
 			loc, exists, err := r.state.GetSubpartForBlob(resources.RT_CHUNK, obj.Chunks[i].ContentMAC)
 			if err != nil {
 				if !yield(nil, err) {

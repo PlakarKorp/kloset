@@ -215,7 +215,7 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 			}
 			records <- connectors.NewRecord(entrypath, e.SymlinkTarget, e.FileInfo, e.ExtendedAttributes,
 				func() (io.ReadCloser, error) {
-					f, err := e.Open(pvfs)
+					f, err := e.OpenSequential(pvfs)
 					if err != nil {
 						return nil, err
 					}
