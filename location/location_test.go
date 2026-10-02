@@ -42,6 +42,10 @@ func TestParseFlag(t *testing.T) {
 			wantFlag: location.FLAG_NOMERGE,
 		},
 		{
+			input:    "noignore",
+			wantFlag: location.FLAG_NOIGNORE,
+		},
+		{
 			input:    "unknown",
 			wantFlag: 0,
 			wantErr:  location.ErrUnknownFlag,
