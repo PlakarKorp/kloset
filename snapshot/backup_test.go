@@ -1,14 +1,19 @@
 package snapshot_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/snapshot"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
@@ -142,4 +147,51 @@ func TestBackupEmptyScan(t *testing.T) {
 
 	summary := snap.Header.GetSource(0).Summary
 	require.Equal(t, summary.Below.Directories, uint64(0))
+}
+
+// rudeImporter fails without closing the records channel, leaving records
+// buffered behind it. Closing records is only a convention that in-tree
+// importers happen to follow, so the backup has to cancel its workers
+// rather than wait on a close that may never come.
+type rudeImporter struct{ *ptesting.MockImporter }
+
+func (rudeImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
+	// Leave more records queued than the workers can retire before we
+	// return, so anything waiting on a close of records stays parked.
+	for i := range 256 {
+		f := ptesting.NewMockFile(fmt.Sprintf("f%d", i), 0644, "hello world!\n")
+		select {
+		case records <- f.ScanResult():
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return errors.New("importer gave up")
+}
+
+func TestBackupImporterErrorWithoutClose(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+
+	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac,
+		&snapshot.BuilderOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { builder.Close() })
+
+	base, err := ptesting.NewMockImporter(repo.AppContext(), &connectors.Options{},
+		"mock", map[string]string{"location": "mock://place"})
+	require.NoError(t, err)
+
+	src, err := snapshot.NewSource(repo.AppContext(),
+		rudeImporter{base.(*ptesting.MockImporter)})
+	require.NoError(t, err)
+
+	done := make(chan error, 1)
+	go func() { done <- builder.Backup(src) }()
+
+	select {
+	case err := <-done:
+		require.ErrorContains(t, err, "importer gave up")
+	case <-time.After(30 * time.Second):
+		t.Fatal("Backup hung after the importer failed without closing records")
+	}
 }
