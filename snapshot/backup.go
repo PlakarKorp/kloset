@@ -297,7 +297,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 	scanned := records
 	if sourceCtx.vfsCache != nil {
 		scanned = make(chan *connectors.Record, size)
-		go snap.warmVFSStage(ctx, sourceCtx.vfsCache, scanned, records, 8192)
+		go snap.warmVFSStage(ctx, sourceCtx.vfsCache, scanned, records, vfs.PrefetchWindow)
 	}
 
 	for i, cker := range ckers {

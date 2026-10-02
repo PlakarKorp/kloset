@@ -39,37 +39,6 @@ func (fsc *Filesystem) PrefetchDirs(ctx context.Context, dirs []string) error {
 		toFind = append(toFind, dir)
 	}
 
-	/*
-		var eg errgroup.Group
-		eg.SetLimit(16)
-
-
-		for _, dir := range dirs {
-			if _, ok := fsc.dirpackCache.Get(dir); ok {
-				cached++
-				continue
-			}
-
-			eg.Go(func() error {
-				mac, found, err := fsc.dirpack.Find(dir)
-				if err != nil || !found {
-					return nil
-				}
-
-				reqsMtx.Lock()
-				reqs[dir] = repository.BlobReq{
-					Type: resources.RT_OBJECT,
-					MAC:  mac,
-				}
-				reqsMtx.Unlock()
-
-				return nil
-			})
-		}
-
-		eg.Wait()
-	*/
-
 	const shards = 32
 	var wg sync.WaitGroup
 	per := (len(toFind) + shards - 1) / shards
@@ -99,7 +68,7 @@ func (fsc *Filesystem) PrefetchDirs(ctx context.Context, dirs []string) error {
 	// Phase 2 batch resolve RT_OBJECT->dirpack
 	objs := map[objects.MAC]*objects.Object{}
 	chunksReq := []repository.BlobReq{}
-	for b, err := range fsc.repo.GetBlobs(ctx, slices.Collect(maps.Values(reqs)), &repository.GetBlobsOpts{Concurrency: 32}) {
+	for b, err := range fsc.repo.GetBlobs(ctx, slices.Collect(maps.Values(reqs)), &repository.GetBlobsOpts{Concurrency: 16}) {
 		if err != nil {
 			// Soft error
 			continue
@@ -119,7 +88,7 @@ func (fsc *Filesystem) PrefetchDirs(ctx context.Context, dirs []string) error {
 
 	// Phase 3 batch resolve the Content of dirpacks
 	chunks := map[objects.MAC][]byte{}
-	for b, err := range fsc.repo.GetBlobs(ctx, chunksReq, &repository.GetBlobsOpts{Concurrency: 32}) {
+	for b, err := range fsc.repo.GetBlobs(ctx, chunksReq, &repository.GetBlobsOpts{Concurrency: 16}) {
 		if err != nil {
 			// Soft error
 			continue

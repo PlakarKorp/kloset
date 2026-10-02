@@ -131,13 +131,19 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	return fs, nil
 }
 
+// PrefetchWindow is the number of records the backup warm stage batches
+// before calling PrefetchDirs.
+const PrefetchWindow = 2048
+
 // XXX - until we do refacto to remove object resolve from ResolveEntry, ONLY CALL IN SUBCOMMAND BACKUP
 func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
 	fs, err := NewFilesystem(repo, root, xattrs, errors, dirpackidx)
 	if err != nil {
 		return nil, err
 	}
-	fs.dirpackCache = lru.New[string, map[string]*Entry](4096*2, nil)
+	// Up to three windows are live in the warm stage at once: one being
+	// consumed, one queued in the ready channel and one being warmed.
+	fs.dirpackCache = lru.New[string, map[string]*Entry](3*PrefetchWindow, nil)
 
 	return fs, nil
 }
