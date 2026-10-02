@@ -55,10 +55,6 @@ type Filesystem struct {
 	repo         *repository.Repository
 	dirpackCache *lru.Cache[string, map[string]*Entry]
 	dirpackSF    singleflight.Group
-
-	dirpackCacheSize int
-
-	prefetcher *dirpackPrefetcher
 }
 
 func PathCmp(a, b string) int {
@@ -135,14 +131,19 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	return fs, nil
 }
 
+// PrefetchWindow is the number of records the backup warm stage batches
+// before calling PrefetchDirs.
+const PrefetchWindow = 2048
+
 // XXX - until we do refacto to remove object resolve from ResolveEntry, ONLY CALL IN SUBCOMMAND BACKUP
 func NewFilesystemWithCache(repo *repository.Repository, root, xattrs, errors objects.MAC, dirpackidx *btree.BTree[string, objects.MAC, objects.MAC]) (*Filesystem, error) {
 	fs, err := NewFilesystem(repo, root, xattrs, errors, dirpackidx)
 	if err != nil {
 		return nil, err
 	}
-	fs.dirpackCacheSize = 256
-	fs.dirpackCache = lru.New[string, map[string]*Entry](fs.dirpackCacheSize, nil)
+	// Up to three windows are live in the warm stage at once: one being
+	// consumed, one queued in the ready channel and one being warmed.
+	fs.dirpackCache = lru.New[string, map[string]*Entry](3*PrefetchWindow, nil)
 
 	return fs, nil
 }
@@ -390,10 +391,6 @@ func (fsc *Filesystem) getEntryForBackup(entrypath string) (*Entry, error) {
 	parentPath := path.Dir(entrypath)
 	base := path.Base(entrypath)
 
-	if prefetcher := fsc.prefetcher; prefetcher != nil {
-		prefetcher.onConsume(parentPath)
-	}
-
 	// Fast path: if the prefetcher (or an earlier lookup) already warmed this
 	// directory, serve from cache without entering the singleflight group.
 	if m, exists := fsc.dirpackCache.Get(parentPath); exists {
@@ -538,6 +535,17 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 	//rd := NewObjectReader(fsc.repo, obj, size, -1)
 	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
 
+	m, err := fsc.decodeDirpackMap(rd)
+	if err != nil {
+		return nil, err
+	}
+
+	_ = fsc.dirpackCache.Put(parentPath, m)
+
+	return m, nil
+}
+
+func (fsc *Filesystem) decodeDirpackMap(rd io.Reader) (map[string]*Entry, error) {
 	cache := make(map[string]*Entry)
 	for {
 		_, siz, err := readDirPackHdr(rd)
@@ -581,8 +589,6 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 
 		cache[entry.Name()] = &entry
 	}
-
-	_ = fsc.dirpackCache.Put(parentPath, cache)
 
 	return cache, nil
 }
