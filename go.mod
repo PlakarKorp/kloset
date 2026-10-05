@@ -3,7 +3,7 @@ module github.com/PlakarKorp/kloset
 go 1.26.0
 
 require (
-	github.com/PlakarKorp/aes-gcm-siv v0.0.0-20260921114103-b2704f58f4a4
+	github.com/PlakarKorp/aes-gcm-siv v0.1.0
 	github.com/PlakarKorp/go-cdc-chunkers v1.1.0
 	github.com/PlakarKorp/go-human2duration v0.1.6
 	github.com/cockroachdb/pebble/v2 v2.1.7
