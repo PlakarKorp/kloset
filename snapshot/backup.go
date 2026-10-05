@@ -270,6 +270,11 @@ func (snap *Builder) warmVFSStage(ctx context.Context, pvfs *vfs.Filesystem, in 
 }
 
 func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
+	applyExcludes := imp.Flags()&location.FLAG_NOIGNORE == 0
+	if !applyExcludes && len(sourceCtx.source.excludes.Rules) != 0 {
+		snap.Logger().Warn("ignoring exclude rules for importer %q", imp.Type())
+	}
+
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
@@ -320,7 +325,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 							snap.emitter.PathError(record.Pathname, record.Err)
 							sourceCtx.recordError(idx, record.Pathname, record.Err)
 
-						} else if !snap.skipExcludedPathname(sourceCtx, record) {
+						} else if !applyExcludes || !snap.skipExcludedPathname(sourceCtx, record) {
 							snap.emitter.Path(record.Pathname)
 							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
 								sourceCtx.recordError(idx, record.Pathname, err)
