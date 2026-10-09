@@ -246,7 +246,7 @@ func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
 	return &vfile{
 		entry: e,
 		repo:  fs.repo,
-		rd:    NewObjectReader(fs.repo, e.ResolvedObject, e.Size(), -1),
+		rd:    NewReadaheadObjectReader(fs.repo, e.ResolvedObject, e.Size()),
 	}, nil
 }
 
@@ -497,7 +497,7 @@ func (vf *vfile) Close() error {
 		return fs.ErrClosed
 	}
 	vf.closed = true
-	return nil
+	return vf.rd.Close()
 }
 
 type vdir struct {
