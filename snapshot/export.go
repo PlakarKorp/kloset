@@ -158,8 +158,17 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		symlinks := make(map[string]struct{})
 
 		i := 0
-		walkOpts := &vfs.WalkDirpackOpts{ResolveObjects: true}
-		pvfs.WalkDirpack(snap.AppContext(), pathname, walkOpts, func(entrypath string, e *vfs.Entry, err error) error {
+
+		walkdirFn := func(fn vfs.WalkDirFunc) error {
+			if (exp.Flags() & location.FLAG_WALKDIRORDER) != 0 {
+				return pvfs.WalkDir(pathname, fn)
+			}
+
+			walkOpts := &vfs.WalkDirpackOpts{ResolveObjects: true}
+			return pvfs.WalkDirpack(snap.AppContext(), pathname, walkOpts, fn)
+		}
+
+		walkdirFn(func(entrypath string, e *vfs.Entry, err error) error {
 			if i%1000 == 0 {
 				if err := snap.AppContext().Err(); err != nil {
 					return err
