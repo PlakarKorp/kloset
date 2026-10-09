@@ -112,8 +112,7 @@ func (c *Cache[K, V]) Get(key K) (V, bool) {
 		return val, true
 	} else {
 		c.misses.Add(1)
-		var zero V
-		return zero, false
+		return val, false
 	}
 }
 
