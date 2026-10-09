@@ -2,16 +2,12 @@ package state
 
 import (
 	"bytes"
-	"fmt"
 	"io"
-	"iter"
-	"maps"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/caching/pebble"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
@@ -19,273 +15,54 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type stateEntry struct {
-	id   objects.MAC
-	data []byte
+// Test caches are the real backends in per-test temporary directories: the
+// aggregate (LocalState) runs on an SQLState, the unitary delta state (State)
+// runs on a ScanCache obtained through Derive, exactly as in production.
+
+func newSQLState(t *testing.T) *caching.SQLState {
+	t.Helper()
+
+	cache, err := caching.NewSQLState(t.TempDir(), false)
+	require.NoError(t, err)
+
+	return cache
 }
 
-// mockStateCache implements caching.StateCache for testing
-type mockStateCache struct {
-	states         []*stateEntry
-	deltas         map[string][]byte // key: "type:blob:packfile"
-	coloured       map[string][]byte // key: "type:blob"
-	deleted        map[string][]byte // key: "type:blob"
-	packfiles      map[objects.MAC][]byte
-	configurations map[string][]byte
+func newScanCache(t *testing.T) *caching.ScanCache {
+	t.Helper()
+
+	man := caching.NewManager(pebble.Constructor(t.TempDir()))
+	t.Cleanup(func() { man.Close() })
+
+	sc, err := man.Scan(objects.RandomMAC())
+	require.NoError(t, err)
+	t.Cleanup(func() { sc.Close() })
+
+	return sc
 }
 
-func newMockStateCache() *mockStateCache {
-	return &mockStateCache{
-		states:         make([]*stateEntry, 0),
-		deltas:         make(map[string][]byte),
-		coloured:       make(map[string][]byte),
-		deleted:        make(map[string][]byte),
-		packfiles:      make(map[objects.MAC][]byte),
-		configurations: make(map[string][]byte),
-	}
+func newAggregate(t *testing.T) (*LocalState, *caching.SQLState) {
+	t.Helper()
+
+	cache := newSQLState(t)
+	ls, err := NewLocalState(cache)
+	require.NoError(t, err)
+
+	return ls, cache
 }
 
-func (m *mockStateCache) PutState(stateID objects.MAC, data []byte) error {
-	m.states = append(m.states, &stateEntry{stateID, data})
-	return nil
-}
+func newDeltaState(t *testing.T) (*State, *caching.ScanCache) {
+	t.Helper()
 
-func (m *mockStateCache) GetLatestState() (objects.MAC, error) {
-	if len(m.states) == 0 {
-		return objects.NilMac, nil
-	}
+	ls, _ := newAggregate(t)
+	ls.Metadata.Serial = uuid.New()
 
-	return m.states[len(m.states)-1].id, nil
-}
-
-func (m *mockStateCache) HasState(stateID objects.MAC) (bool, error) {
-	for _, se := range m.states {
-		if se.id == stateID {
-			return true, nil
-		}
-	}
-	return false, nil
-}
-
-func (m *mockStateCache) GetState(stateID objects.MAC) ([]byte, error) {
-	for _, se := range m.states {
-		if se.id == stateID {
-			return se.data, nil
-		}
-	}
-
-	return nil, nil
-}
-
-func (m *mockStateCache) DelState(stateID objects.MAC) error {
-	for idx, se := range m.states {
-		if se.id == stateID {
-			m.states = slices.Delete(m.states, idx, idx+1)
-			return nil
-		}
-	}
-
-	return nil
-}
-
-func (m *mockStateCache) GetStates() (map[objects.MAC][]byte, error) {
-	ret := make(map[objects.MAC][]byte)
-
-	for _, se := range m.states {
-		ret[se.id] = se.data
-	}
-
-	return ret, nil
-}
-
-func (m *mockStateCache) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	key := fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfile)
-	m.deltas[key] = data
-	return nil
-}
-
-func (m *mockStateCache) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.deltas {
-			parts := strings.Split(key, ":")
-			if len(parts) == 3 {
-				// For testing purposes, we'll just yield all deltas
-				// since the MAC parsing is complex and not essential for these tests
-				var mac objects.MAC
-				if !yield(mac, data) {
-					return
-				}
-			}
-		}
-	}
-}
-
-func (m *mockStateCache) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.deltas {
-			parts := strings.Split(key, ":")
-			if len(parts) == 3 {
-				if parts[0] == fmt.Sprintf("%d", blobType) {
-					var mac objects.MAC
-					if !yield(mac, data) {
-						return
-					}
-				}
-			}
-		}
-	}
-}
-
-func (m *mockStateCache) GetDeltas() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.deltas {
-			parts := strings.Split(key, ":")
-			if len(parts) == 3 {
-				var mac objects.MAC
-				if !yield(mac, data) {
-					return
-				}
-			}
-		}
-	}
-}
-
-func (m *mockStateCache) DelDelta(blobType resources.Type, blobCsum objects.MAC, packfileMAC objects.MAC) error {
-	key := fmt.Sprintf("%d:%x:%x", blobType, blobCsum, packfileMAC)
-	delete(m.deltas, key)
-	return nil
-}
-
-func (m *mockStateCache) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
-	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
-	m.coloured[key] = data
-	return nil
-}
-
-func (m *mockStateCache) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
-	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
-	_, exists := m.coloured[key]
-	return exists, nil
-}
-
-func (m *mockStateCache) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
-	key := fmt.Sprintf("%d:%x", blobType, blobCsum)
-	delete(m.coloured, key)
-	return nil
-}
-
-func (m *mockStateCache) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.coloured {
-			parts := strings.Split(key, ":")
-			if len(parts) == 2 {
-				if parts[0] == fmt.Sprintf("%d", blobType) {
-					var mac objects.MAC
-					copy(mac[:], []byte(parts[1]))
-					if !yield(mac, data) {
-						return
-					}
-				}
-			}
-		}
-	}
-}
-
-func (m *mockStateCache) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		for key, data := range m.coloured {
-			parts := strings.Split(key, ":")
-			if len(parts) == 2 {
-				var mac objects.MAC
-				copy(mac[:], []byte(parts[1]))
-				if !yield(mac, data) {
-					return
-				}
-			}
-		}
-	}
-}
-
-func (m *mockStateCache) PutPackfile(packfile objects.MAC, data []byte) error {
-	m.packfiles[packfile] = data
-	return nil
-}
-
-func (m *mockStateCache) DelPackfile(packfile objects.MAC) error {
-	delete(m.packfiles, packfile)
-	return nil
-}
-
-func (m *mockStateCache) HasPackfile(packfile objects.MAC) (bool, error) {
-	_, exists := m.packfiles[packfile]
-	return exists, nil
-}
-
-func (m *mockStateCache) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		for mac, data := range m.packfiles {
-			if !yield(mac, data) {
-				return
-			}
-		}
-	}
-}
-
-func (m *mockStateCache) PutConfiguration(key string, data []byte) error {
-	m.configurations[key] = data
-	return nil
-}
-
-func (m *mockStateCache) GetConfiguration(key string) ([]byte, error) {
-	return m.configurations[key], nil
-}
-
-func (m *mockStateCache) GetConfigurations() iter.Seq[[]byte] {
-	return func(yield func([]byte) bool) {
-		for _, data := range m.configurations {
-			if !yield(data) {
-				return
-			}
-		}
-	}
-}
-
-func (c *mockStateCache) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
-	key := fmt.Sprintf("%d:%x", typ, blobCsum)
-	c.deleted[key] = data
-	return nil
-}
-
-func (c *mockStateCache) GetDeletedEntries() iter.Seq[[]byte] {
-	return maps.Values(c.deleted)
-}
-
-func (m *mockStateCache) NewBatch() caching.StateBatch {
-	return &mockStateBatch{cache: m}
-}
-
-type mockStateBatch struct {
-	cache *mockStateCache
-}
-
-func (b *mockStateBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	return b.cache.PutDelta(blobType, blobCsum, packfile, data)
-}
-
-func (b *mockStateBatch) Put(key, data []byte) error {
-	return nil
-}
-
-func (b *mockStateBatch) Commit() error {
-	return nil
-}
-
-func (b *mockStateBatch) Count() uint32 {
-	return 0
+	sc := newScanCache(t)
+	return ls.Derive(sc), sc
 }
 
 func TestNewLocalState(t *testing.T) {
-	cache := newMockStateCache()
+	cache := newSQLState(t)
 	state, err := NewLocalState(cache)
 
 	require.NoError(t, err)
@@ -296,68 +73,24 @@ func TestNewLocalState(t *testing.T) {
 	require.Equal(t, cache, state.cache)
 }
 
-func TestFromStream(t *testing.T) {
-	cache := newMockStateCache()
-
-	// Create a test state with some data
-	originalState, err := NewLocalState(cache)
-	require.NoError(t, err)
-	originalState.Metadata.Serial = uuid.New()
-
-	// Add some test data
-	deltaEntry := &DeltaEntry{
-		Type:    resources.RT_SNAPSHOT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    objects.MAC{1, 2, 3, 4},
-		Location: Location{
-			Packfile: objects.MAC{5, 6, 7, 8},
-			Offset:   1000,
-			Length:   500,
-		},
-		Flags: 0x1234,
-	}
-	originalState.PutDelta(deltaEntry)
-
-	// Serialize to stream
-	var buf bytes.Buffer
-	err = originalState.SerializeToStream(&buf)
-	require.NoError(t, err)
-
-	// Deserialize from stream
-	deserializedState, err := FromStream(&buf, versioning.FromString("1.1.0"), cache)
-	require.NoError(t, err)
-	require.NotNil(t, deserializedState)
-
-	// Verify metadata
-	require.Equal(t, originalState.Metadata.Version, deserializedState.Metadata.Version)
-	require.Equal(t, originalState.Metadata.Serial, deserializedState.Metadata.Serial)
-}
-
 func TestDerive(t *testing.T) {
-	cache1 := newMockStateCache()
-	cache2 := newMockStateCache()
-
-	originalState, err := NewLocalState(cache1)
-	require.NoError(t, err)
+	originalState, _ := newAggregate(t)
 	originalState.Metadata.Serial = uuid.New()
 
-	derivedState := originalState.Derive(cache2)
+	scanCache := newScanCache(t)
+	derivedState := originalState.Derive(scanCache)
 
 	require.NotNil(t, derivedState)
 	require.Equal(t, originalState.Metadata.Serial, derivedState.Metadata.Serial)
-	require.Equal(t, cache2, derivedState.cache)
-	// The caches should be different instances
-	require.NotEqual(t, fmt.Sprintf("%p", originalState.cache), fmt.Sprintf("%p", derivedState.cache))
+	require.Equal(t, scanCache, derivedState.cache)
 }
 
 func TestUpdateSerialOr(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Test with no existing states
 	testSerial := uuid.New()
-	err = state.UpdateSerialOr(testSerial)
+	err := state.UpdateSerialOr(testSerial)
 	require.NoError(t, err)
 	require.Equal(t, testSerial, state.Metadata.Serial)
 
@@ -380,21 +113,11 @@ func TestUpdateSerialOr(t *testing.T) {
 }
 
 func TestMergeState(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
-	// Test merging non-existent state
-	stateID := objects.MAC{1, 2, 3, 4}
+	// Build a delta state stream to merge.
+	src, _ := newDeltaState(t)
 
-	// Create test data for merging
-	testMetadata := Metadata{
-		Version:   versioning.FromString(VERSION),
-		Timestamp: time.Now(),
-		Serial:    uuid.New(),
-	}
-
-	// Add a delta entry to the stream
 	deltaEntry := &DeltaEntry{
 		Type:    resources.RT_SNAPSHOT,
 		Version: versioning.FromString("1.0.0"),
@@ -406,48 +129,39 @@ func TestMergeState(t *testing.T) {
 		},
 		Flags: 0x5678,
 	}
-
-	// Serialize the test state
-	testState, err := NewLocalState(cache)
-	require.NoError(t, err)
-	testState.Metadata = testMetadata
-	testState.PutDelta(deltaEntry)
+	require.NoError(t, src.PutDelta(deltaEntry))
 
 	var buf bytes.Buffer
-	err = testState.SerializeToStream(&buf)
+	err := src.SerializeToStream(&buf)
 	require.NoError(t, err)
 
 	// Merge the state
+	stateID := objects.MAC{1, 2, 3, 4}
 	err = state.MergeState(stateID, &buf, versioning.FromString("1.1.0"))
 	require.NoError(t, err)
 
 	// Verify the state was merged
-	hasState, err := state.HasState(stateID)
+	hasState, err := cache.HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, hasState)
 }
 
 func TestPutState(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 	state.Metadata.Serial = uuid.New()
 
 	stateID := objects.MAC{1, 2, 3, 4}
-	err = state.PutState(stateID)
+	err := state.PutState(stateID)
 	require.NoError(t, err)
 
 	// Verify state was stored
-	hasState, err := state.HasState(stateID)
+	hasState, err := cache.HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, hasState)
 }
 
 func TestSerializeToStream(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
-	state.Metadata.Serial = uuid.New()
+	state, scanCache := newDeltaState(t)
 
 	// Add test data
 	deltaEntry := &DeltaEntry{
@@ -461,7 +175,7 @@ func TestSerializeToStream(t *testing.T) {
 		},
 		Flags: 0x1234,
 	}
-	state.PutDelta(deltaEntry)
+	require.NoError(t, state.PutDelta(deltaEntry))
 
 	deletedEntry := &ColouredEntry{
 		Type: resources.RT_OBJECT,
@@ -482,11 +196,11 @@ func TestSerializeToStream(t *testing.T) {
 		Value:     []byte("test_value"),
 		CreatedAt: time.Now(),
 	}
-	state.SetConfiguration(configEntry.Key, configEntry.Value)
+	scanCache.PutConfiguration(configEntry.Key, configEntry.ToBytes())
 
 	// Serialize
 	var buf bytes.Buffer
-	err = state.SerializeToStream(&buf)
+	err := state.SerializeToStream(&buf)
 	require.NoError(t, err)
 
 	// Verify serialized data is not empty
@@ -585,9 +299,7 @@ func TestConfigurationEntrySerialization(t *testing.T) {
 }
 
 func TestBlobExists(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Test with non-existent blob
 	exists := state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
@@ -605,23 +317,22 @@ func TestBlobExists(t *testing.T) {
 		},
 		Flags: 0x1234,
 	}
-	state.PutDelta(deltaEntry)
+	putDeltaInCache(t, cache, deltaEntry)
 	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
 
-	// Since our mock returns all deltas regardless of MAC, this should work
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.True(t, exists)
 
-	// Test with deleted packfile
-	state.ColourResource(resources.RT_PACKFILE, deltaEntry.Location.Packfile)
+	// Test with deleted packfile. The aggregate receives coloured entries via
+	// merge, so seed the cache directly.
+	ce := ColouredEntry{Type: resources.RT_PACKFILE, Blob: deltaEntry.Location.Packfile, When: time.Now()}
+	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
 
 func TestGetSubpartForBlob(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Test with non-existent blob
 	location, exists, err := state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
@@ -642,10 +353,9 @@ func TestGetSubpartForBlob(t *testing.T) {
 		Location: expectedLocation,
 		Flags:    0x1234,
 	}
-	state.PutDelta(deltaEntry)
+	putDeltaInCache(t, cache, deltaEntry)
 	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
 
-	// Since our mock returns all deltas regardless of MAC, this should work
 	location, exists, err = state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.NoError(t, err)
 	require.True(t, exists)
@@ -653,9 +363,7 @@ func TestGetSubpartForBlob(t *testing.T) {
 }
 
 func TestListPackfiles(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Add some packfiles
 	packfile1 := objects.MAC{1, 2, 3, 4}
@@ -675,9 +383,7 @@ func TestListPackfiles(t *testing.T) {
 }
 
 func TestListSnapshots(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Add snapshot delta entries
 	snapshot1 := objects.MAC{1, 2, 3, 4}
@@ -707,8 +413,8 @@ func TestListSnapshots(t *testing.T) {
 		Flags: 0x5678,
 	}
 
-	state.PutDelta(delta1)
-	state.PutDelta(delta2)
+	putDeltaInCache(t, cache, delta1)
+	putDeltaInCache(t, cache, delta2)
 	cache.PutPackfile(packfile, []byte("packfile data"))
 
 	// List snapshots
@@ -723,59 +429,8 @@ func TestListSnapshots(t *testing.T) {
 	require.Contains(t, found, snapshot2)
 }
 
-func TestListObjectsOfType(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
-
-	// Add objects of different types
-	object1 := objects.MAC{1, 2, 3, 4}
-	object2 := objects.MAC{5, 6, 7, 8}
-	packfile := objects.MAC{9, 10, 11, 12}
-
-	delta1 := &DeltaEntry{
-		Type:    resources.RT_OBJECT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    object1,
-		Location: Location{
-			Packfile: packfile,
-			Offset:   1000,
-			Length:   500,
-		},
-		Flags: 0x1234,
-	}
-	delta2 := &DeltaEntry{
-		Type:    resources.RT_OBJECT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    object2,
-		Location: Location{
-			Packfile: packfile,
-			Offset:   1500,
-			Length:   500,
-		},
-		Flags: 0x5678,
-	}
-
-	state.PutDelta(delta1)
-	state.PutDelta(delta2)
-	cache.PutPackfile(packfile, []byte("packfile data"))
-
-	// List objects of type RT_OBJECT
-	var found []DeltaEntry
-	for delta, err := range state.ListObjectsOfType(resources.RT_OBJECT) {
-		require.NoError(t, err)
-		found = append(found, delta)
-	}
-
-	require.Len(t, found, 2)
-	require.Contains(t, found, *delta1)
-	require.Contains(t, found, *delta2)
-}
-
 func TestListOrphanDeltas(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Add delta with missing packfile (orphan)
 	orphanDelta := &DeltaEntry{
@@ -789,7 +444,7 @@ func TestListOrphanDeltas(t *testing.T) {
 		},
 		Flags: 0x1234,
 	}
-	state.PutDelta(orphanDelta)
+	putDeltaInCache(t, cache, orphanDelta)
 
 	// List orphan deltas
 	var found []DeltaEntry
@@ -802,25 +457,24 @@ func TestListOrphanDeltas(t *testing.T) {
 	require.Equal(t, *orphanDelta, found[0])
 }
 
-func TestDeleteResource(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+// putDeltaInCache seeds a delta entry directly in the aggregate's cache: the
+// aggregate receives deltas via merge, not through a method of its own.
+func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
+	t.Helper()
+	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.ToBytes()))
+}
 
-	resource := objects.MAC{1, 2, 3, 4}
-	err = state.ColourResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-
-	// Verify resource is marked as deleted
-	hasDeleted, err := state.HasColouredResource(resources.RT_OBJECT, resource)
-	require.NoError(t, err)
-	require.True(t, hasDeleted)
+// colourInCache seeds a coloured entry directly in the aggregate's cache: the
+// aggregate receives coloured entries via merge, not through a method of its
+// own.
+func colourInCache(t *testing.T, cache *caching.SQLState, rtype resources.Type, resource objects.MAC) {
+	t.Helper()
+	ce := ColouredEntry{Type: rtype, Blob: resource, When: time.Now()}
+	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
 }
 
 func TestHasDeletedResource(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	resource := objects.MAC{1, 2, 3, 4}
 
@@ -830,7 +484,7 @@ func TestHasDeletedResource(t *testing.T) {
 	require.False(t, hasDeleted)
 
 	// Delete the resource
-	state.ColourResource(resources.RT_OBJECT, resource)
+	colourInCache(t, cache, resources.RT_OBJECT, resource)
 
 	// Test existing deleted resource
 	hasDeleted, err = state.HasColouredResource(resources.RT_OBJECT, resource)
@@ -839,14 +493,12 @@ func TestHasDeletedResource(t *testing.T) {
 }
 
 func TestSetConfiguration(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	key := "test_key"
 	value := []byte("test_value")
 
-	err = state.SetConfiguration(key, value)
+	err := state.SetConfiguration(key, value)
 	require.NoError(t, err)
 
 	// Verify configuration was set
@@ -862,16 +514,14 @@ func TestSetConfiguration(t *testing.T) {
 }
 
 func TestListDeletedResources(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, cache := newAggregate(t)
 
 	// Delete some resources
 	resource1 := objects.MAC{1, 2, 3, 4}
 	resource2 := objects.MAC{5, 6, 7, 8}
 
-	state.ColourResource(resources.RT_OBJECT, resource1)
-	state.ColourResource(resources.RT_OBJECT, resource2)
+	colourInCache(t, cache, resources.RT_OBJECT, resource1)
+	colourInCache(t, cache, resources.RT_OBJECT, resource2)
 
 	// List deleted resources
 	var found []ColouredEntry
@@ -935,27 +585,23 @@ func TestDeletedEntryFromBytesError(t *testing.T) {
 }
 
 func TestDeserializeFromStreamError(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, _ := newAggregate(t)
 
 	// Test with invalid stream
 	invalidData := []byte{byte(ET_LOCATIONS), 0, 0, 0, 1} // Invalid length
 	reader := bytes.NewReader(invalidData)
 
-	err = state.deserializeFromStream(reader)
+	err := state.deserializeFromStream(reader)
 	require.Error(t, err)
 }
 
 func TestSerializeToStreamError(t *testing.T) {
-	cache := newMockStateCache()
-	state, err := NewLocalState(cache)
-	require.NoError(t, err)
+	state, _ := newDeltaState(t)
 
 	// Create a writer that will fail
 	failingWriter := &failingWriter{}
 
-	err = state.SerializeToStream(failingWriter)
+	err := state.SerializeToStream(failingWriter)
 	require.Error(t, err)
 }
 

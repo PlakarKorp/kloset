@@ -26,10 +26,6 @@ func newRepositoryCache(cons Constructor, repositoryID uuid.UUID) (*_RepositoryC
 	return &_RepositoryCache{kvcache{cache}}, nil
 }
 
-func (c *_RepositoryCache) NewBatch() StateBatch {
-	return &repoBatch{c.cache.NewBatch()}
-}
-
 func (c *_RepositoryCache) PutState(stateID objects.MAC, data []byte) error {
 	return c.put("__state__", fmt.Sprintf("%x", stateID), data)
 }
