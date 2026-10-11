@@ -87,6 +87,7 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 	// Now that everything is dedup'ed find the common root prefix eg:
 	// /etc/bar, /etc/baz would have /etc as the common root.
 	s.root = commonPathPrefixSlice(paths)
+	s.root = path.Clean(s.root)
 
 	return s, nil
 }
