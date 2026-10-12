@@ -73,11 +73,14 @@ func (e *Entry) HasObject() bool {
 var ErrMalformedEntry = errors.New("malformed vfs entry")
 
 // integration/fs up to v1.1.7 left parent path on "/" to "/<device>:"
-// on windows, instead of "/".  cope with it.
+// on windows, instead of "/".  cope with it.  The device letter is
+// recorded as the importer was given it, so it comes in either case.
 func isParentPathWindowsBug(p string) bool {
-	return len(p) == 3 && p[0] == '/' &&
-		'A' <= p[1] && p[1] <= 'Z' &&
-		p[2] == ':'
+	if len(p) != 3 || p[0] != '/' || p[2] != ':' {
+		return false
+	}
+	device := p[1]
+	return ('A' <= device && device <= 'Z') || ('a' <= device && device <= 'z')
 }
 
 func (e *Entry) validate() error {
