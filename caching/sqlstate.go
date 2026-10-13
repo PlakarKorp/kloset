@@ -2,7 +2,6 @@ package caching
 
 import (
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"iter"
@@ -17,24 +16,27 @@ type SQLState struct {
 	db *sqlite.SQLiteCache
 }
 
-// XXX: could we reuse something?!
-type sDelta struct {
-	mac     string
-	typ     int
-	pack    string
-	payload []byte
-}
-
-type sqlStateBatch struct {
-	parent *SQLState
-
-	deltas []sDelta
-}
-
 // Used to flatten a map, because go is go.
 type kv struct {
-	mac  string
+	mac  objects.MAC
 	data []byte
+}
+
+// Small scanner for objects.MAC so we avoid going through the []byte dance.
+type macScanner struct { dst *objects.MAC }
+
+func (m macScanner) Scan(src any) error {
+	b, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("mac: incompatible type %T", src)
+	}
+
+	if len(b) != len(m.dst) {
+		return fmt.Errorf("mac: wrong length %d expected %d", len(b), len(m.dst))
+	}
+
+	copy(m.dst[:], b)
+	return nil
 }
 
 func NewSQLState(path string, ro bool) (*SQLState, error) {
@@ -51,7 +53,7 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 	if !ro {
 		for _, typ := range []string{"states", "packfiles"} {
 			create := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			mac TEXT NOT NULL PRIMARY KEY,
+			mac BLOB NOT NULL PRIMARY KEY,
 			payload BLOB NOT NULL
 		);`, typ)
 
@@ -61,7 +63,7 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		}
 
 		create := `CREATE TABLE IF NOT EXISTS deltas (
-			mac TEXT NOT NULL,
+			mac BLOB NOT NULL,
 			type INTEGER NOT NULL,
 			packfile TEXT NOT NULL,
 			payload BLOB NOT NULL,
@@ -72,7 +74,7 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		}
 
 		create = `CREATE TABLE IF NOT EXISTS deleteds (
-			mac TEXT NOT NULL,
+			mac BLOB NOT NULL,
 			type INTEGER NOT NULL,
 			payload BLOB NOT NULL,
 			UNIQUE(type, mac)
@@ -101,20 +103,15 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 	return &SQLState{db}, nil
 }
 
-// States handling, mostly unused.
 func (c *SQLState) PutState(stateID objects.MAC, data []byte) error {
-	stateHex := hex.EncodeToString(stateID[:])
-
-	_, err := c.db.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateHex, data)
+	_, err := c.db.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateID[:], data)
 	return err
 }
 
 func (c *SQLState) HasState(stateID objects.MAC) (bool, error) {
-	stateHex := hex.EncodeToString(stateID[:])
-
 	query := "SELECT 1 FROM states WHERE mac = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, stateHex).Scan(&dummy)
+	err := c.db.QueryRow(query, stateID[:]).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -127,11 +124,9 @@ func (c *SQLState) HasState(stateID objects.MAC) (bool, error) {
 }
 
 func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
-	stateHex := hex.EncodeToString(stateID[:])
-
 	query := "SELECT payload FROM states WHERE mac = ? LIMIT 1;"
 	var payload []byte
-	err := c.db.QueryRow(query, stateHex).Scan(&payload)
+	err := c.db.QueryRow(query, stateID[:]).Scan(&payload)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -145,8 +140,8 @@ func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 
 func (c *SQLState) GetLatestState() (objects.MAC, error) {
 	query := "SELECT mac FROM states ORDER BY ROWID DESC LIMIT 1"
-	var strMac string
-	err := c.db.QueryRow(query).Scan(&strMac)
+	var mac objects.MAC
+	err := c.db.QueryRow(query).Scan(macScanner{&mac})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return objects.NilMac, nil
@@ -155,12 +150,7 @@ func (c *SQLState) GetLatestState() (objects.MAC, error) {
 		return objects.NilMac, err
 	}
 
-	mac, err := hex.DecodeString(strMac)
-	if err != nil {
-		return objects.NilMac, err
-	}
-
-	return objects.MAC(mac), nil
+	return mac, nil
 }
 
 func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
@@ -175,41 +165,33 @@ func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 
 	result := make(map[objects.MAC][]byte)
 	for rows.Next() {
-		var strMac string
+		var mac objects.MAC
 		var payload []byte
 
-		if err := rows.Scan(&strMac, &payload); err != nil {
+		if err := rows.Scan(macScanner{&mac}, &payload); err != nil {
 			return nil, err
 		}
 
-		mac, err := hex.DecodeString(strMac)
-		if err != nil {
-			return nil, err
-		}
-
-		result[objects.MAC(mac)] = payload
+		result[mac] = payload
 	}
 
 	return result, nil
 }
 
 func (c *SQLState) DelState(stateID objects.MAC) error {
-	stateHex := hex.EncodeToString(stateID[:])
-	_, err := c.db.Exec("DELETE FROM states WHERE mac = ?;", stateHex)
+	_, err := c.db.Exec("DELETE FROM states WHERE mac = ?;", stateID[:])
 
 	return err
 }
 
-// Deltas handling
-func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.Seq2[objects.MAC, []byte] {
+func (c *SQLState) GetDelta(blobType resources.Type, blobMAC objects.MAC) iter.Seq2[objects.MAC, []byte] {
 	return func(yield func(objects.MAC, []byte) bool) {
 		query := `SELECT mac, payload
 					FROM deltas
 					WHERE mac = ? AND type = ?;
 				`
 
-		blobMACHex := hex.EncodeToString(blobCsum[:])
-		rows, err := c.db.Query(query, blobMACHex, blobType)
+		rows, err := c.db.Query(query, blobMAC[:], blobType)
 		if err != nil {
 			// XXX :/
 			return
@@ -218,21 +200,19 @@ func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 		result := make([]kv, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			var kv kv
 
-			if err := rows.Scan(&mac, &payload); err != nil {
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
 				// XXX: who the f designed that interface :(
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, kv)
 		}
 		rows.Close()
 
 		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
@@ -240,11 +220,8 @@ func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.
 	}
 }
 
-func (c *SQLState) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	packMACHex := hex.EncodeToString(packfile[:])
-
-	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?);", blobMACHex, blobType, packMACHex, data)
+func (c *SQLState) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, data []byte) error {
+	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?);", blobMAC[:], blobType, packfileMAC[:], data)
 
 	return err
 }
@@ -261,21 +238,19 @@ func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MA
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 		result := make([]kv, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			var kv kv
 
-			if err := rows.Scan(&mac, &payload); err != nil {
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
 				// XXX: who the f designed that interface :(
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, kv)
 		}
 		rows.Close()
 
 		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
@@ -294,47 +269,39 @@ func (c *SQLState) GetDeltas() iter.Seq2[objects.MAC, []byte] {
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 		result := make([]kv, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			var kv kv
 
-			if err := rows.Scan(&mac, &payload); err != nil {
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
 				// XXX: who the f designed that interface :(
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, kv)
 		}
 		rows.Close()
 
 		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
 	}
 }
 
-func (c *SQLState) DelDelta(blobType resources.Type, blobCsum, packfileMAC objects.MAC) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	packMACHex := hex.EncodeToString(packfileMAC[:])
-	_, err := c.db.Exec("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;", blobMACHex, blobType, packMACHex)
+func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
+	_, err := c.db.Exec("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;", blobMAC[:], blobType, packfileMAC[:])
 	return err
 }
 
-func (c *SQLState) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-
-	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
+func (c *SQLState) PutColoured(blobType resources.Type, blobMAC objects.MAC, data []byte) error {
+	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMAC[:], blobType, data)
 	return err
 }
 
-func (c *SQLState) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-
+func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bool, error) {
 	query := "SELECT 1 FROM deleteds WHERE mac = ? AND type = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, blobMACHex, blobType).Scan(&dummy)
+	err := c.db.QueryRow(query, blobMAC[:], blobType).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -358,21 +325,19 @@ func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 		result := make([]kv, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			var kv kv
 
-			if err := rows.Scan(&mac, &payload); err != nil {
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
 				// XXX: who the f designed that interface :(
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, kv)
 		}
 		rows.Close()
 
 		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
@@ -391,48 +356,39 @@ func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[o
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 		result := make([]kv, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			var kv kv
 
-			if err := rows.Scan(&mac, &payload); err != nil {
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
 				// XXX: who the f designed that interface :(
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, kv)
 		}
-
 		rows.Close()
 
 		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
 	}
 }
 
-func (c *SQLState) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ?;", blobMACHex, blobType)
+func (c *SQLState) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
+	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ?;", blobMAC[:], blobType)
 	return err
 }
 
-// Packfile handling
-func (c *SQLState) PutPackfile(packfile objects.MAC, data []byte) error {
-	packMACHex := hex.EncodeToString(packfile[:])
-
-	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, payload) VALUES(?,  ?)", packMACHex, data)
+func (c *SQLState) PutPackfile(packfileMAC objects.MAC, data []byte) error {
+	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, payload) VALUES(?,  ?)", packfileMAC[:], data)
 	return err
 }
 
-func (c *SQLState) HasPackfile(packfile objects.MAC) (bool, error) {
-	packMACHex := hex.EncodeToString(packfile[:])
-
+func (c *SQLState) HasPackfile(packfileMAC objects.MAC) (bool, error) {
 	query := "SELECT 1 FROM packfiles WHERE mac = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, packMACHex).Scan(&dummy)
+	err := c.db.QueryRow(query, packfileMAC[:]).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -444,9 +400,8 @@ func (c *SQLState) HasPackfile(packfile objects.MAC) (bool, error) {
 	return true, nil
 }
 
-func (c *SQLState) DelPackfile(packfile objects.MAC) error {
-	packMACHex := hex.EncodeToString(packfile[:])
-	_, err := c.db.Exec("DELETE FROM packfiles WHERE mac = ?;", packMACHex)
+func (c *SQLState) DelPackfile(packfileMAC objects.MAC) error {
+	_, err := c.db.Exec("DELETE FROM packfiles WHERE mac = ?;", packfileMAC[:])
 
 	if err != nil {
 		return err
@@ -456,7 +411,7 @@ func (c *SQLState) DelPackfile(packfile objects.MAC) error {
 	// out of hand. When we end up splitting the various State implementation
 	// the local state will deal with cascading deletion of packfiles into the
 	// blob it contained. For now we do it here to ease the implementation.
-	_, err = c.db.Exec("DELETE FROM deltas WHERE packfile = ?;", packMACHex)
+	_, err = c.db.Exec("DELETE FROM deltas WHERE packfile = ?;", packfileMAC[:])
 
 	return err
 }
@@ -473,22 +428,20 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
 		result := make([]kv, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			var kv kv
 
-			if err := rows.Scan(&mac, &payload); err != nil {
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
 				// XXX: who the f designed that interface :(
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, kv)
 		}
 
 		rows.Close()
 
 		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
