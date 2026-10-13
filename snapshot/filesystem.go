@@ -20,6 +20,10 @@ func (s *Snapshot) Filesystem() (*vfs.Filesystem, error) {
 		return nil, err
 	}
 
+	if err := fs.DetectUncleanImporterRoot(s.Header.GetSource(0).Importer.Directory); err != nil {
+		return nil, err
+	}
+
 	s.filesystem = fs
 	return fs, nil
 }
@@ -37,6 +41,10 @@ func (s *Snapshot) FilesystemWithCache() (*vfs.Filesystem, error) {
 	v := s.Header.GetSource(0).VFS
 	fs, err := vfs.NewFilesystemWithCache(s.repository, v.Root, v.Xattrs, v.Errors, didx)
 	if err != nil {
+		return nil, err
+	}
+
+	if err := fs.DetectUncleanImporterRoot(s.Header.GetSource(0).Importer.Directory); err != nil {
 		return nil, err
 	}
 

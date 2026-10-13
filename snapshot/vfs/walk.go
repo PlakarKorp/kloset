@@ -140,6 +140,10 @@ func (fsc *Filesystem) walkDirpack(ctx context.Context, root string, rootEntry *
 			continue
 		}
 
+		if fsc.isUncleanImporterRoot(dirpath) {
+			continue
+		}
+
 		window = append(window, &dirpackDir{path: dirpath, mac: objectMac})
 		if len(window) < opts.Window {
 			continue
@@ -328,10 +332,10 @@ func (d *dirpackDir) decode(chunks map[objects.MAC]blobResult) {
 
 func (fsc *Filesystem) dirpackDirEntries(d *dirpackDir) iter.Seq2[*Entry, error] {
 	if d.obj != nil && !d.buffered() {
-		return dirpackEntriesIter(d.path, NewObjectReader(fsc.repo, d.obj, d.size, -1))
+		return fsc.skipUncleanImporterRoot(d.path, dirpackEntriesIter(d.path, NewObjectReader(fsc.repo, d.obj, d.size, -1)))
 	}
 
-	return func(yield func(*Entry, error) bool) {
+	return fsc.skipUncleanImporterRoot(d.path, func(yield func(*Entry, error) bool) {
 		for _, e := range d.entries {
 			if !yield(e, nil) {
 				return
@@ -340,7 +344,7 @@ func (fsc *Filesystem) dirpackDirEntries(d *dirpackDir) iter.Seq2[*Entry, error]
 		if d.err != nil {
 			yield(nil, d.err)
 		}
-	}
+	})
 }
 
 // resolveObjects fetches the objects of the files of the batch. It is best

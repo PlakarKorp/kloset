@@ -55,6 +55,8 @@ type Filesystem struct {
 	repo         *repository.Repository
 	dirpackCache *lru.Cache[string, map[string]*Entry]
 	dirpackSF    singleflight.Group
+
+	uncleanImporterRoot *uncleanImporterRoot
 }
 
 func PathCmp(a, b string) int {
@@ -304,7 +306,11 @@ func (fsc *Filesystem) Files(prefix string) iter.Seq2[*Entry, error] {
 		}
 
 		for iter.Next() {
-			_, csum := iter.Current()
+			key, csum := iter.Current()
+			if fsc.isUncleanImporterRoot(key) {
+				continue
+			}
+
 			entry, err := fsc.ResolveEntry(csum)
 			if err != nil {
 				if !yield(nil, err) {
@@ -333,6 +339,10 @@ func (fsc *Filesystem) Pathnames() iter.Seq2[string, error] {
 
 		for iter.Next() {
 			path, _ := iter.Current()
+			if fsc.isUncleanImporterRoot(path) {
+				continue
+			}
+
 			if !yield(path, nil) {
 				return
 			}
