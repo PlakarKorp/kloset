@@ -337,7 +337,7 @@ func (fsc *Filesystem) dirpackEntries(prefix string, objectMac objects.MAC) (ite
 		size += int64(c.Length)
 	}
 
-	return dirpackEntriesIter(prefix, NewObjectReader(fsc.repo, obj, size, -1)), nil
+	return fsc.skipUncleanImporterRoot(prefix, dirpackEntriesIter(prefix, NewObjectReader(fsc.repo, obj, size, -1))), nil
 }
 
 // dirpackEntriesIter decodes the dirpack payload read from rd into the direct
