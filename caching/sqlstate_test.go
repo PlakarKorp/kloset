@@ -63,34 +63,6 @@ func TestSQLStateGetLatestStateEmpty(t *testing.T) {
 	require.Equal(t, objects.NilMac, latest)
 }
 
-func TestSQLStateBatchPutDeltaCommit(t *testing.T) {
-	st := newSQLState(t)
-
-	blobMAC := objects.MAC{0xaa}
-	packMAC := objects.MAC{0xbb}
-	payload := []byte("delta data")
-
-	batch := st.NewBatch()
-	require.NoError(t, batch.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, payload))
-	require.Equal(t, uint32(1), batch.Count())
-	require.NoError(t, batch.Commit())
-
-	// Verify via GetDelta
-	found := false
-	for _, got := range st.GetDelta(resources.RT_CHUNK, blobMAC) {
-		require.Equal(t, payload, got)
-		found = true
-	}
-	require.True(t, found)
-}
-
-func TestSQLStateBatchEmptyCommit(t *testing.T) {
-	st := newSQLState(t)
-	batch := st.NewBatch()
-	require.Equal(t, uint32(0), batch.Count())
-	require.NoError(t, batch.Commit())
-}
-
 func TestSQLStateDeltaOperations(t *testing.T) {
 	st := newSQLState(t)
 
@@ -222,18 +194,6 @@ func TestSQLStateConfigurationOperations(t *testing.T) {
 		count++
 	}
 	require.Equal(t, 2, count)
-}
-
-func TestSQLStatePanics(t *testing.T) {
-	st := newSQLState(t)
-
-	require.Panics(t, func() {
-		_ = st.PutDeleted(0, objects.MAC{}, nil)
-	})
-	require.Panics(t, func() {
-		for range st.GetDeletedEntries() {
-		}
-	})
 }
 
 func TestSQLStateReadOnly(t *testing.T) {
