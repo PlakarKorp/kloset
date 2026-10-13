@@ -23,7 +23,7 @@ type kv struct {
 }
 
 // Small scanner for objects.MAC so we avoid going through the []byte dance.
-type macScanner struct { dst *objects.MAC }
+type macScanner struct{ dst *objects.MAC }
 
 func (m macScanner) Scan(src any) error {
 	b, ok := src.([]byte)
@@ -185,39 +185,11 @@ func (c *SQLState) DelState(stateID objects.MAC) error {
 }
 
 func (c *SQLState) GetDelta(blobType resources.Type, blobMAC objects.MAC) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := `SELECT mac, payload
+	query := `SELECT mac, payload
 					FROM deltas
 					WHERE mac = ? AND type = ?;
 				`
-
-		rows, err := c.db.Query(query, blobMAC[:], blobType)
-		if err != nil {
-			// XXX :/
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-
-	}
+	return c.normalizeQueryIter(query, blobMAC[:], blobType)
 }
 
 func (c *SQLState) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, data []byte) error {
@@ -227,65 +199,12 @@ func (c *SQLState) PutDelta(blobType resources.Type, blobMAC, packfileMAC object
 }
 
 func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload  FROM deltas WHERE type = ?;"
-
-		rows, err := c.db.Query(query, blobType)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-	}
+	query := "SELECT mac, payload  FROM deltas WHERE type = ?;"
+	return c.normalizeQueryIter(query, blobType)
 }
 
 func (c *SQLState) GetDeltas() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM deltas;"
-
-		rows, err := c.db.Query(query)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-	}
+	return c.normalizeQueryIter("SELECT mac, payload FROM deltas;")
 }
 
 func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
@@ -314,65 +233,12 @@ func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bo
 }
 
 func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM deleteds;"
-
-		rows, err := c.db.Query(query)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-	}
+	return c.normalizeQueryIter("SELECT mac, payload FROM deleteds;")
 }
 
 func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload  FROM deleteds WHERE type = ?;"
-
-		rows, err := c.db.Query(query, blobType)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-	}
+	query := "SELECT mac, payload  FROM deleteds WHERE type = ?;"
+	return c.normalizeQueryIter(query, blobType)
 }
 
 func (c *SQLState) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
@@ -417,36 +283,9 @@ func (c *SQLState) DelPackfile(packfileMAC objects.MAC) error {
 }
 
 func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM packfiles;"
-
-		rows, err := c.db.Query(query)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-	}
+	return c.normalizeQueryIter("SELECT mac, payload FROM packfiles;")
 }
+
 
 // Configuration handling
 func (c *SQLState) PutConfiguration(key string, data []byte) error {
@@ -494,6 +333,36 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 
 		for _, d := range result {
 			if !yield(d) {
+				return
+			}
+		}
+	}
+}
+
+func (c *SQLState) normalizeQueryIter(query string, args ...any) iter.Seq2[objects.MAC, []byte] {
+	return func(yield func(objects.MAC, []byte) bool) {
+		rows, err := c.db.Query(query, args...)
+		if err != nil {
+			return
+		}
+
+		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
+		result := make([]kv, 0)
+		for rows.Next() {
+			var kv kv
+
+			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
+				// XXX: who the f designed that interface :(
+				continue
+			}
+
+			result = append(result, kv)
+		}
+
+		rows.Close()
+
+		for _, r := range result {
+			if !yield(r.mac, r.data) {
 				return
 			}
 		}
