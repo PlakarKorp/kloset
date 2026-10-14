@@ -115,3 +115,37 @@ func TestSynchronizeRich(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "note value", string(data))
 }
+
+// TestSynchronizeLeavesSourceHeaderAlone checks that synchronizing does not
+// alter the source snapshot's header, which the destination builder used to
+// share and append its own source to.
+func TestSynchronizeLeavesSourceHeaderAlone(t *testing.T) {
+	srcRepo := ptesting.GenerateRepository(t, nil, nil, nil)
+	dstRepo := ptesting.GenerateRepository(t, nil, nil, nil)
+
+	srcSnap := ptesting.GenerateSnapshot(t, srcRepo, []ptesting.MockFile{
+		ptesting.NewMockFile("hello.txt", 0644, "world"),
+	})
+	defer srcSnap.Close()
+
+	before, err := srcSnap.Header.Serialize()
+	require.NoError(t, err)
+
+	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+		Name: "sync-header",
+	})
+	require.NoError(t, err)
+
+	require.NoError(t, srcSnap.Synchronize(dstBuilder))
+	require.NoError(t, dstBuilder.Close())
+
+	after, err := srcSnap.Header.Serialize()
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+
+	// the source must still be readable through its own header
+	fs, err := srcSnap.Filesystem()
+	require.NoError(t, err)
+	_, err = fs.GetEntry("/hello.txt")
+	require.NoError(t, err)
+}
