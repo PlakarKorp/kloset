@@ -301,7 +301,7 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 
 	db.Commit()
 
-	return r.currentDeltaState().PutPackfile(r.currentStateID, mac)
+	return r.currentDeltaState().PutPackfile(r.currentStateID, mac, uint64(nbytes))
 }
 
 func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
@@ -351,5 +351,5 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 		}
 	}
 
-	return r.currentDeltaState().PutPackfile(r.currentStateID, mac)
+	return r.currentDeltaState().PutPackfile(r.currentStateID, mac, uint64(nbytes))
 }
