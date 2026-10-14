@@ -272,13 +272,9 @@ func TestRepositoryStateOperations(t *testing.T) {
 func TestRepositoryCreation(t *testing.T) {
 	t.Run("Inexistent", func(t *testing.T) {
 		ctx := ptesting.GenerateRepository(t, nil, nil, nil).AppContext()
-		storeConfig := map[string]string{
-			"type":     "mock",
-			"location": "mock://test",
-		}
-		repo, err := repository.Inexistent(ctx, storeConfig)
-		require.NoError(t, err)
-		require.NotNil(t, repo)
+		store := ptesting.NewMockBackend(map[string]string{"location": "mock://test"})
+		repo := repository.Inexistent(ctx, store)
+		require.Same(t, store, repo.Store())
 		size, err := repo.StorageSize()
 		require.NoError(t, err)
 		require.Equal(t, int64(0), size)

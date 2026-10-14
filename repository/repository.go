@@ -98,14 +98,9 @@ type Repository struct {
 	NoStateToLocalDisk bool
 }
 
-func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
-	st, err := storage.New(ctx, storeConfig)
-	if err != nil {
-		return nil, err
-	}
-
+func Inexistent(ctx *kcontext.KContext, store storage.Store) *Repository {
 	return &Repository{
-		store:            st,
+		store:            store,
 		configuration:    *storage.NewConfiguration(),
 		appContext:       ctx,
 		storageSize:      -1,
@@ -113,7 +108,7 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 		ioStats:          iostat.New(),
 		ImportStats:      iostat.New(),
 		ExportStats:      iostat.New(),
-	}, nil
+	}
 }
 
 type RepositoryOpts struct {
