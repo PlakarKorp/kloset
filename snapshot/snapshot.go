@@ -159,7 +159,7 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 
 	// Sanity check, first let's verify that we know about everything in this
 	// snapshot otherwise we abort.
-	expected := []string{"content-type", "dirpack", "summary"}
+	expected := []string{"content-type", "dirpack", "summary", "classification"}
 	for idx := range snap.ListIndexes() {
 		if !slices.Contains(expected, idx) {
 			return nil, fmt.Errorf("Unexpected index %s found, snapshot might have been created with a more recent version.", idx)
@@ -292,6 +292,35 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 
 			if err := indexIter.Err(); err != nil {
 				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the content-type tree: %w", err)) {
+					return
+				}
+			}
+		}
+
+		clsTree, err := snap.ClassificationIdx()
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("Failed to deserialize root entry %s", err)) {
+				return
+			}
+		}
+
+		// values are VFS entries, already listed with the VFS
+		if clsTree != nil {
+			clsRoot, _ := snap.ClassificationIdxRoot()
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, clsRoot)) {
+				return
+			}
+
+			indexIter := clsTree.IterDFS()
+			for indexIter.Next() {
+				mac, _ := indexIter.Current()
+				if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_NODE, mac)) {
+					return
+				}
+			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the classification tree: %w", err)) {
 					return
 				}
 			}

@@ -93,6 +93,11 @@ func createSchema(db *sqlite.SQLiteCache) error {
 
 	CREATE INDEX IF NOT EXISTS pathmacs_parent_idx
 	ON pathmacs(kind, parent, path);
+
+	CREATE TABLE IF NOT EXISTS classes (
+		key     TEXT NOT NULL PRIMARY KEY, -- /<analyzer>/<class><path>
+		mac     BLOB NOT NULL
+	) WITHOUT ROWID;
 	`
 
 	_, err := db.Exec(schema)
@@ -446,4 +451,38 @@ func (s *ScanLog) CountDirectPathMACs(kind PathMACKind, parent string) (uint64, 
 		return 0, err
 	}
 	return n, nil
+}
+
+// PutClass records that the entry at mac carries a classification.  The key
+// is built by the caller, see snapshot.classificationKey.
+func (s *ScanLog) PutClass(key string, mac objects.MAC) error {
+	_, err := s.db.Exec(
+		`INSERT OR REPLACE INTO classes (key, mac) VALUES (?, ?)`,
+		key, mac[:],
+	)
+	return err
+}
+
+func (s *ScanLog) ListClasses() iter.Seq[PathMACEntry] {
+	return func(yield func(PathMACEntry) bool) {
+		rows, err := s.db.Query(`SELECT key, mac FROM classes ORDER BY key ASC`)
+		if err != nil {
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var k string
+			var stored []byte
+			if err := rows.Scan(&k, &stored); err != nil {
+				return
+			}
+			if len(stored) != 32 {
+				return
+			}
+			if !yield(PathMACEntry{Path: k, MAC: objects.MAC(stored[:])}) {
+				return
+			}
+		}
+	}
 }

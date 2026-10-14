@@ -10,6 +10,7 @@ import (
 	"mime"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,7 @@ import (
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/connectors/analyzer"
 	"github.com/PlakarKorp/kloset/connectors/importer"
 	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/location"
@@ -40,6 +42,7 @@ type sourceIndexes struct {
 	xattridx   *btree.BTree[string, int, objects.MAC]
 	ctidx      *btree.BTree[string, int, objects.MAC]
 	dirpackidx *btree.BTree[string, int, objects.MAC]
+	clsidx     *btree.BTree[string, int, objects.MAC]
 }
 
 type sourceContext struct {
@@ -54,6 +57,9 @@ type sourceContext struct {
 	indexes *sourceIndexes
 
 	scanLog *scanlog.ScanLog
+
+	// number of keys in the classification index
+	classified int
 }
 
 type scanStats struct {
@@ -78,6 +84,10 @@ type BuilderOptions struct {
 	NoXattr         bool
 	ForcedTimestamp time.Time
 	StateRefresher  func(objects.MAC, bool) error
+
+	// Analyzers classify files as they are ingested.  Once the builder is
+	// created, it owns them and closes them.
+	Analyzers []analyzer.Analyzer
 }
 
 var (
@@ -574,7 +584,7 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Rea
 	return objectMAC, nil
 }
 
-func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader, isXattr bool) (*objects.Object, objects.MAC, int64, error) {
+func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader, isXattr bool, run *analyzer.FileRun) (*objects.Object, objects.MAC, int64, error) {
 	object := objects.NewObject()
 
 	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
@@ -600,7 +610,9 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 			if object.ContentType == "" {
 				object.ContentType = mimetype.Detect(data).String()
 			}
+			run.Begin(object.ContentType)
 		}
+		run.Write(data)
 
 		chunkHasher.Write(data)
 		copy(chunk_t32[:], chunkHasher.Sum(nil))
@@ -733,6 +745,12 @@ func (bi *sourceIndexes) Close(log *logging.Logger) {
 			log.Warn("Failed to close content dirpack btree: %s", err)
 		}
 	}
+
+	if bi.clsidx != nil {
+		if err := bi.clsidx.Close(); err != nil {
+			log.Warn("Failed to close classification btree: %s", err)
+		}
+	}
 }
 
 // XXX: Small layer violation, but this helps us steer away from the caching
@@ -774,6 +792,11 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 		return nil, err
 	}
 
+	clsstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "classification")
+	if err != nil {
+		return nil, err
+	}
+
 	bi.vfsidx, err = btree.New(vfsstore, vfs.PathCmp, 50)
 	if err != nil {
 		return nil, err
@@ -796,6 +819,10 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	}
 
 	if bi.dirpackidx, err = btree.New(dirpackstore, strings.Compare, 50); err != nil {
+		return nil, err
+	}
+
+	if bi.clsidx, err = btree.New(clsstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
@@ -825,7 +852,7 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 	return sourceCtx, nil
 }
 
-func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.Record) (*objects.CachedPath, error) {
+func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.Record) (*cachedPath, error) {
 	if sourceCtx.vfsCache == nil {
 		return nil, nil
 	}
@@ -855,33 +882,37 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 
 	if record.FileInfo.Mode()&os.ModeSymlink != 0 {
 		snap.emitter.SymlinkCached(record.Pathname)
-		return &objects.CachedPath{
+		return &cachedPath{CachedPath: &objects.CachedPath{
 			MAC:         entry.MAC,
 			FileInfo:    entry.FileInfo,
 			ContentType: "application/x-not-regular-file",
-		}, nil
+		}}, nil
 	}
 
 	snap.emitter.FileCached(record.Pathname, entry.FileInfo)
-	return &objects.CachedPath{
-		MAC:         entry.MAC,
-		ObjectMAC:   entry.Object,
-		FileInfo:    entry.FileInfo,
-		Chunks:      entry.GetChunks(),
-		Entropy:     entry.GetEntropy(),
-		ContentType: entry.GetContentType(),
+	return &cachedPath{
+		CachedPath: &objects.CachedPath{
+			MAC:         entry.MAC,
+			ObjectMAC:   entry.Object,
+			FileInfo:    entry.FileInfo,
+			Chunks:      entry.GetChunks(),
+			Entropy:     entry.GetEntropy(),
+			ContentType: entry.GetContentType(),
+		},
+		classifications: entry.Classifications,
 	}, nil
 }
 
 type contentMeta struct {
-	ObjectMAC   objects.MAC
-	Size        int64
-	Chunks      uint64
-	Entropy     float64
-	ContentType string
+	ObjectMAC       objects.MAC
+	Size            int64
+	Chunks          uint64
+	Entropy         float64
+	ContentType     string
+	Classifications []vfs.Classification
 }
 
-func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *connectors.Record) (*contentMeta, error) {
+func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *cachedPath, record *connectors.Record) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
 		return &contentMeta{
 			ContentType: "application/x-not-regular-file",
@@ -902,7 +933,12 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 		}, nil
 	}
 
-	obj, objMAC, dataSize, err := snap.chunkify(idx, chunker, record.Pathname, record.Reader, record.IsXattr)
+	var run *analyzer.FileRun
+	if !record.IsXattr {
+		run = snap.analysis.Start(snap.AppContext(), record.Pathname, record.FileInfo.Size(), record.ExtendedAttributes)
+	}
+
+	obj, objMAC, dataSize, err := snap.chunkify(idx, chunker, record.Pathname, record.Reader, record.IsXattr, run)
 	if err != nil {
 		return nil, err
 	}
@@ -911,15 +947,16 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 	record.FileInfo.Lsize = dataSize
 
 	return &contentMeta{
-		ObjectMAC:   objMAC,
-		Size:        dataSize,
-		Chunks:      uint64(len(obj.Chunks)),
-		Entropy:     obj.Entropy,
-		ContentType: obj.ContentType,
+		ObjectMAC:       objMAC,
+		Size:            dataSize,
+		Chunks:          uint64(len(obj.Chunks)),
+		Entropy:         obj.Entropy,
+		ContentType:     obj.ContentType,
+		Classifications: toVFSClassifications(run.Finish(obj.ContentType)),
 	}, nil
 }
 
-func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cachedPath *objects.CachedPath, record *connectors.Record) error {
+func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cachedPath *cachedPath, record *connectors.Record) error {
 	dirEntry := vfs.NewEntry(path.Dir(record.Pathname), record)
 	var dirEntryMAC objects.MAC
 
@@ -950,7 +987,7 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 	}
 }
 
-func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *objects.CachedPath, record *connectors.Record) error {
+func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *contentMeta, cachedPath *cachedPath, record *connectors.Record) error {
 	if meta.ContentType == "" {
 		return fmt.Errorf("content type cannot be empty!")
 	}
@@ -960,45 +997,47 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 		fileEntry.Object = meta.ObjectMAC
 	}
 
-	var fileEntryMAC objects.MAC
-	var serializedFileEntry []byte
-	var err error
+	classifications, err := snap.entryClassifications(cachedPath, meta, record.Pathname)
+	if err != nil {
+		return err
+	}
 
 	if cachedPath != nil {
-		fileEntryMAC = cachedPath.MAC
 		if fileEntry.Object == (objects.MAC{}) && cachedPath.ObjectMAC != (objects.MAC{}) {
 			fileEntry.Object = cachedPath.ObjectMAC
 		}
 		fileEntry.Chunks = cachedPath.Chunks
 		fileEntry.ContentType = cachedPath.ContentType
 		fileEntry.Entropy = cachedPath.Entropy
-		serializedFileEntry, err = fileEntry.ToBytes()
-		if err != nil {
-			return err
-		}
 	} else {
-
 		fileEntry.Chunks = meta.Chunks
 		fileEntry.ContentType = meta.ContentType
 		fileEntry.Entropy = meta.Entropy
+	}
+	fileEntry.Classifications = classifications
 
-		serialized, err := fileEntry.ToBytes()
-		if err != nil {
-			return err
-		}
+	serializedFileEntry, err := fileEntry.ToBytes()
+	if err != nil {
+		return err
+	}
 
-		fileEntryMAC = snap.repository.ComputeMAC(serialized)
+	// the cached entry can only be reused if it is the one we would write
+	var fileEntryMAC objects.MAC
+	if cachedPath != nil && slices.EqualFunc(classifications, cachedPath.classifications, classificationEqual) {
+		fileEntryMAC = cachedPath.MAC
+	} else {
+		fileEntryMAC = snap.repository.ComputeMAC(serializedFileEntry)
 
-		if snap.vfsCache == nil || record.IsXattr {
-			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized, true); err != nil {
+		// a rewritten cached entry may already be stored
+		if snap.vfsCache == nil || record.IsXattr || cachedPath != nil {
+			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serializedFileEntry, true); err != nil {
 				return err
 			}
 		} else {
-			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized, true); err != nil {
+			if err := snap.repository.PutBlobWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serializedFileEntry, true); err != nil {
 				return err
 			}
 		}
-		serializedFileEntry = serialized
 	}
 
 	fileSummary := &vfs.FileSummary{
@@ -1014,6 +1053,10 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 	}
 	serializedSummary, err := fileSummary.Serialize()
 	if err != nil {
+		return err
+	}
+
+	if err := sourceCtx.recordClassifications(fileEntry.Path(), fileEntryMAC, fileEntry.Classifications); err != nil {
 		return err
 	}
 
@@ -1403,6 +1446,23 @@ func (sourceCtx *sourceContext) buildErrorIndex() error {
 	return nil
 }
 
+func (sourceCtx *sourceContext) buildClassificationIndex() error {
+	itemsCount := 0
+	t0 := time.Now()
+	defer func() {
+		sourceCtx.builder.appContext.GetLogger().Trace("import", "building classification index took %s for %d entries", time.Since(t0), itemsCount)
+	}()
+
+	for e := range sourceCtx.scanLog.ListClasses() {
+		if err := sourceCtx.indexes.clsidx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
+			return err
+		}
+		itemsCount++
+	}
+	sourceCtx.classified = itemsCount
+	return nil
+}
+
 func (sourceCtx *sourceContext) buildXattrIndex() error {
 	itemsCount := 0
 	t0 := time.Now()
@@ -1499,6 +1559,10 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 		return sourceCtx.buildXattrIndex()
 	})
 
+	g.Go(func() error {
+		return sourceCtx.buildClassificationIndex()
+	})
+
 	if err := g.Wait(); err != nil {
 		return nil, err
 	}
@@ -1524,6 +1588,7 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 		xattrmac     objects.MAC
 		ctmac        objects.MAC
 		dirpackmac   objects.MAC
+		clsmac       objects.MAC
 		summariesmac objects.MAC
 	)
 
@@ -1614,6 +1679,30 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 	})
 
 	g.Go(func() error {
+		// older versions refuse snapshots with an index they do not know,
+		// only snapshots that do carry classifications should require
+		// a version that knows about it
+		if sourceCtx.classified == 0 {
+			return nil
+		}
+
+		t0 := time.Now()
+		defer func() {
+			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting classification index took %s", time.Since(t0))
+		}()
+
+		m, err := persistIndex(snap, sourceCtx.indexes.clsidx,
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
+			})
+		if err != nil {
+			return err
+		}
+		clsmac = m
+		return nil
+	})
+
+	g.Go(func() error {
 		t0 := time.Now()
 		defer func() {
 			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting summary index took %s", time.Since(t0))
@@ -1656,6 +1745,13 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 			Type:  "btree",
 			Value: summariesmac,
 		},
+	}
+	if sourceCtx.classified != 0 {
+		vfsIndexes = append(vfsIndexes, header.Index{
+			Name:  "classification",
+			Type:  "btree",
+			Value: clsmac,
+		})
 	}
 
 	return vfsHeader, vfsIndexes, nil

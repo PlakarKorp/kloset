@@ -35,6 +35,7 @@ type Identity struct {
 type Class struct {
 	Name        string  `msgpack:"name" json:"name"`
 	Probability float64 `msgpack:"probability" json:"probability"`
+	Count       uint64  `msgpack:"count,omitempty" json:"count,omitempty"`
 }
 
 type Classification struct {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
+	"github.com/PlakarKorp/kloset/connectors/analyzer"
 	"github.com/PlakarKorp/kloset/events"
 	"github.com/PlakarKorp/kloset/kcontext"
 	"github.com/PlakarKorp/kloset/logging"
@@ -51,6 +52,12 @@ type Builder struct {
 	noSkipSelf bool
 
 	throttler *throttle.Throttler
+
+	analysis *analyzer.Runner
+
+	// set when synchronizing a snapshot whose entries carry classifications,
+	// which are copied from it instead of being computed
+	syncSource *vfs.Filesystem
 }
 
 func (snap *Builder) Emitter(workflow string) *events.Emitter {
@@ -58,6 +65,11 @@ func (snap *Builder) Emitter(workflow string) *events.Emitter {
 }
 
 func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOptions *BuilderOptions) (*Builder, error) {
+	analysis, err := analyzer.NewRunner(appContext.GetLogger(), builderOptions.Analyzers)
+	if err != nil {
+		return nil, err
+	}
+
 	scanCache, err := appContext.GetCache().Scan(identifier)
 	if err != nil {
 		return nil, err
@@ -76,6 +88,8 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 		flushEnded:     make(chan error),
 
 		beginTime: time.Now(),
+
+		analysis: analysis,
 	}
 
 	snap.Header.SetContext("Hostname", appContext.Hostname)
@@ -225,6 +239,10 @@ func (snap *Builder) Close() error {
 
 	if err := snap.Unlock(); err != nil {
 		snap.Logger().Warn("failed to release lock %x (%s), you might need to remove it manually", snap.Header.Identifier, err)
+	}
+
+	if err := snap.analysis.Close(snap.AppContext()); err != nil {
+		snap.Logger().Warn("failed to close analyzers: %s", err)
 	}
 
 	if snap.scanCache != nil {
@@ -487,6 +505,9 @@ func (snap *Builder) Commit() error {
 	defer snap.emitter.Info("snapshot.commit.end", map[string]any{})
 
 	snap.Header.Duration = time.Since(snap.beginTime)
+
+	results := snap.analysis.Finalize(snap.AppContext())
+	snap.Header.Classifications = append(snap.Header.Classifications, toHeaderClassifications(results)...)
 
 	var serializedHdr []byte
 	var err error

@@ -123,9 +123,18 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		}
 	}
 
+	// a copy must be identical: nothing is re-analyzed
+	if !dst.analysis.Empty() {
+		return fmt.Errorf("analyzers cannot be used when synchronizing")
+	}
+
 	fs, err := src.Filesystem()
 	if err != nil {
 		return err
+	}
+
+	if _, found := src.ClassificationIdxRoot(); found {
+		dst.syncSource = fs
 	}
 
 	// Do not do the "is store part of the import" detection, we are in a sync,
