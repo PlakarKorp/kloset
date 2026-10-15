@@ -13,10 +13,14 @@ import (
 
 func init() {
 	storage.Register("fake+state", 0, func(ctx context.Context, name string, conf map[string]string) (storage.Store, error) {
-		return &store{
-			states: make(map[objects.MAC][]byte),
-		}, nil
+		return newStore(), nil
 	})
+}
+
+func newStore() *store {
+	return &store{
+		states: make(map[objects.MAC][]byte),
+	}
 }
 
 type store struct {

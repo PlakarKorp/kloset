@@ -45,9 +45,7 @@ func GenerateRepositoryWithConfig(t *testing.T, bufout *bytes.Buffer, buferr *by
 
 	// create a storage
 
-	r, err := storage.New(ctx, map[string]string{"location": "mock://" + tmpRepoDir})
-	require.NotNil(t, r)
-	require.NoError(t, err)
+	r := NewMockBackend(map[string]string{"location": "mock://" + tmpRepoDir})
 
 	config := storage.NewConfiguration()
 	config.Compression = nil

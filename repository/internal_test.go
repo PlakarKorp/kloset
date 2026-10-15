@@ -12,19 +12,14 @@ import (
 // TestEncodeBufferRoundtrip exercises the unexported encodeBuffer helper. We
 // build a minimal Repository (no compression, no encryption) via the
 // Inexistent constructor so the encode path becomes a pass-through and we
-// don't need a real on-disk store.
+// don't need a store.
 func TestEncodeBufferRoundtrip(t *testing.T) {
 	ctx := kcontext.NewKContext()
 	ctx.Client = "encodebuffer-test/1.0"
 	ctx.SetLogger(logging.NewLogger(nil, nil))
 	t.Cleanup(func() { ctx.Close() })
 
-	repo, err := Inexistent(ctx, map[string]string{
-		"type":     "mock",
-		"location": "mock:///encodebuffer",
-	})
-	require.NoError(t, err)
-	require.NotNil(t, repo)
+	repo := Inexistent(ctx, nil)
 
 	original := []byte("encode buffer round-trip test data")
 	encoded, err := repo.encodeBuffer(original)
@@ -42,11 +37,7 @@ func TestEncodeBufferEmpty(t *testing.T) {
 	ctx.SetLogger(logging.NewLogger(nil, nil))
 	t.Cleanup(func() { ctx.Close() })
 
-	repo, err := Inexistent(ctx, map[string]string{
-		"type":     "mock",
-		"location": "mock:///encodebuffer-empty",
-	})
-	require.NoError(t, err)
+	repo := Inexistent(ctx, nil)
 
 	encoded, err := repo.encodeBuffer(nil)
 	require.NoError(t, err)

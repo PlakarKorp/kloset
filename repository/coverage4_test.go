@@ -47,17 +47,6 @@ func TestGetPackfileBlobMissing(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestInexistentBadLocation drives the storage.New error branch of Inexistent
-// by passing a store configuration with an unknown backend scheme.
-func TestInexistentBadLocation(t *testing.T) {
-	ctx := ptesting.GenerateRepository(t, nil, nil, nil).AppContext()
-
-	_, err := repository.Inexistent(ctx, map[string]string{
-		"location": "this-scheme-does-not-exist://nowhere",
-	})
-	require.Error(t, err)
-}
-
 // TestGetPackfileForBlobAfterBackup resolves a real blob location after a
 // backup, exercising the found branch of GetPackfileForBlob (the existing
 // tests only cover the not-found case).
