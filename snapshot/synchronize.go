@@ -84,7 +84,9 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 	}
 
 	i = 0
-	err = p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
+	err = p.fs.WalkDirpack(ctx, "/", &vfs.WalkDirpackOpts{
+		ResolveObjects: true,
+	}, func(path string, entry *vfs.Entry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -98,7 +100,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 
 		records <- connectors.NewRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
 			func() (io.ReadCloser, error) {
-				return p.fs.Open(path)
+				return entry.Open(p.fs)
 			})
 		return nil
 	})
