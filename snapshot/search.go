@@ -41,7 +41,34 @@ func matchmime(matches []string, target string) bool {
 	return false
 }
 
-func visitmimes(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq2[*vfs.Entry, error], error) {
+// nameFilter matches base names against a search pattern: the exact name, a
+// glob, or a regular expression, whichever matches first.
+type nameFilter struct {
+	pattern string
+	re      *regexp.Regexp
+}
+
+func newNameFilter(pattern string) *nameFilter {
+	if pattern == "" {
+		return nil
+	}
+	// A pattern that is not a valid regular expression may still be a valid
+	// glob, so a compile error only disables the regexp arm.
+	re, _ := regexp.Compile(pattern)
+	return &nameFilter{pattern: pattern, re: re}
+}
+
+func (f *nameFilter) match(name string) bool {
+	if f == nil || name == f.pattern {
+		return true
+	}
+	if matched, err := path.Match(f.pattern, name); err == nil && matched {
+		return true
+	}
+	return f.re != nil && f.re.MatchString(name)
+}
+
+func visitmimes(ctx context.Context, snap *Snapshot, opts *SearchOpts, names *nameFilter) (iter.Seq2[*vfs.Entry, error], error) {
 	idx, err := snap.ContentTypeIdx()
 	if err != nil {
 		return nil, err
@@ -93,20 +120,8 @@ func visitmimes(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq
 					continue
 				}
 
-				if opts.NameFilter != "" {
-					matched := false
-					if path.Base(entryPath) == opts.NameFilter {
-						matched = true
-					}
-					if !matched {
-						matched, err := path.Match(opts.NameFilter, path.Base(entryPath))
-						if err != nil {
-							continue
-						}
-						if !matched {
-							continue
-						}
-					}
+				if !names.match(path.Base(entryPath)) {
+					continue
 				}
 
 				if !yield(entry, nil) {
@@ -120,9 +135,9 @@ func visitmimes(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq
 	}, nil
 }
 
-func visitfiles(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq2[*vfs.Entry, error], error) {
+func visitfiles(ctx context.Context, snap *Snapshot, opts *SearchOpts, names *nameFilter) (iter.Seq2[*vfs.Entry, error], error) {
 	if opts.Recursive && len(opts.Mimes) > 0 {
-		it, err := visitmimes(ctx, snap, opts)
+		it, err := visitmimes(ctx, snap, opts, names)
 		if it != nil || err != nil {
 			return it, err
 		}
@@ -165,26 +180,8 @@ func visitfiles(ctx context.Context, snap *Snapshot, opts *SearchOpts) (iter.Seq
 				continue
 			}
 
-			if opts.NameFilter != "" {
-				matched := false
-				if path.Base(entryPath) == opts.NameFilter {
-					matched = true
-				}
-				if !matched {
-					matched, err = path.Match(opts.NameFilter, path.Base(entryPath))
-					if err != nil {
-						continue
-					}
-				}
-				if !matched {
-					matched, err = regexp.Match(opts.NameFilter, []byte(path.Base(entryPath)))
-					if err != nil {
-						continue
-					}
-					if !matched {
-						continue
-					}
-				}
+			if !names.match(path.Base(entryPath)) {
+				continue
 			}
 
 			if !yield(entry, nil) {
@@ -202,7 +199,7 @@ func (snap *Snapshot) Search(ctx context.Context, opts *SearchOpts) (iter.Seq2[*
 		}
 	}
 
-	it, err := visitfiles(ctx, snap, opts)
+	it, err := visitfiles(ctx, snap, opts, newNameFilter(opts.NameFilter))
 	if err != nil {
 		return nil, err
 	}
