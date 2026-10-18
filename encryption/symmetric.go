@@ -9,9 +9,9 @@ import (
 	"hash"
 	"io"
 
+	siv "github.com/PlakarKorp/aes-gcm-siv"
 	"github.com/PlakarKorp/kloset/hashing"
 	aeskw "github.com/nickball/go-aes-key-wrap"
-	"github.com/tink-crypto/tink-go/v2/aead/subtle"
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/crypto/scrypt"
@@ -21,7 +21,7 @@ const (
 	chunkSize          = 64 * 1024 // Size of each chunk for encryption/decryption
 	DEFAULT_KDF        = "ARGON2ID"
 	AESGCMSIVNonceSize = 12
-	AESGMSIV_OVERHEAD  = AESGCMSIVNonceSize + aes.BlockSize
+	AESGCMSIV_OVERHEAD = AESGCMSIVNonceSize + aes.BlockSize
 )
 
 type Configuration struct {
@@ -281,7 +281,7 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 		return nil, err
 	}
 
-	dataGCM, err := subtle.NewAESGCMSIV(subkey)
+	dataGCM, err := siv.NewGCM(subkey)
 	if err != nil {
 		return nil, err
 	}
@@ -299,8 +299,10 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 			return
 		}
 
-		// Encrypt and write data chunks
+		// Encrypt and write data chunks, each as nonce || ciphertext || tag
 		chunk := make([]byte, config.ChunkSize)
+		out := make([]byte, AESGCMSIVNonceSize, config.ChunkSize+AESGCMSIV_OVERHEAD)				
+		nonce := out[:AESGCMSIVNonceSize]
 		for {
 			// Use ReadFull to read exactly chunkSize or less at EOF
 			n, err := io.ReadFull(r, chunk)
@@ -310,12 +312,13 @@ func EncryptStream(config *Configuration, key []byte, r io.Reader) (io.Reader, e
 			}
 
 			if n > 0 {
-				encryptedChunk, err := dataGCM.Encrypt(chunk[:n], nil)
-				if err != nil {
+				if _, err := rand.Read(nonce); err != nil {
 					pw.CloseWithError(err)
 					return
 				}
-				if _, err := pw.Write(encryptedChunk); err != nil {
+
+				frame := dataGCM.Seal(out, nonce, chunk[:n], nil)
+				if _, err := pw.Write(frame); err != nil {
 					pw.CloseWithError(err)
 					return
 				}
@@ -351,7 +354,7 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 	}
 
 	// Set up AES-GCM for actual data decryption using the subkey
-	dataGCM, err := subtle.NewAESGCMSIV(subkey)
+	dataGCM, err := siv.NewGCM(subkey)
 	if err != nil {
 		return nil, err
 	}
@@ -362,21 +365,23 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 	go func() {
 		defer pw.Close()
 
-		// EncryptStream emits fixed-size frames with no length prefix: the
-		// decrypt side must consume exactly one frame per Decrypt call, so
-		// read with ReadFull rather than trusting the reader's boundaries.
-		// Only the final frame may be shorter (ErrUnexpectedEOF).
-		buffer := make([]byte, config.ChunkSize+AESGMSIV_OVERHEAD)
+		// Each frame is nonce || ciphertext || tag, ChunkSize+AESGCMSIV_OVERHEAD
+		// bytes except the last one, which may be shorter. The reader is free
+		// to return frames in arbitrary fragments, so reassemble with ReadFull.
+		buffer := make([]byte, config.ChunkSize+AESGCMSIV_OVERHEAD)
 		for {
-			n, err := io.ReadFull(r, buffer)
-			if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
-				pw.CloseWithError(fmt.Errorf("failed to read encrypted chunk: %w", err))
+			n, rerr := io.ReadFull(r, buffer)
+			if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
+				pw.CloseWithError(fmt.Errorf("failed to read encrypted chunk: %w", rerr))
 				return
 			}
 
 			if n > 0 {
-				// Decrypt each chunk and write it to the pipe
-				decryptedChunk, err := dataGCM.Decrypt(buffer[:n], nil)
+				if n < AESGCMSIV_OVERHEAD {
+					pw.CloseWithError(fmt.Errorf("encrypted chunk too short: %d bytes", n))
+					return
+				}
+				decryptedChunk, err := dataGCM.Open(nil, buffer[:AESGCMSIVNonceSize], buffer[AESGCMSIVNonceSize:n], nil)
 				if err != nil {
 					pw.CloseWithError(err)
 					return
@@ -387,7 +392,7 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 				}
 			}
 
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
+			if rerr == io.EOF || rerr == io.ErrUnexpectedEOF {
 				return
 			}
 		}

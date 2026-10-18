@@ -98,14 +98,9 @@ type Repository struct {
 	NoStateToLocalDisk bool
 }
 
-func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Repository, error) {
-	st, err := storage.New(ctx, storeConfig)
-	if err != nil {
-		return nil, err
-	}
-
+func Inexistent(ctx *kcontext.KContext, store storage.Store) *Repository {
 	return &Repository{
-		store:            st,
+		store:            store,
 		configuration:    *storage.NewConfiguration(),
 		appContext:       ctx,
 		storageSize:      -1,
@@ -113,7 +108,7 @@ func Inexistent(ctx *kcontext.KContext, storeConfig map[string]string) (*Reposit
 		ioStats:          iostat.New(),
 		ImportStats:      iostat.New(),
 		ExportStats:      iostat.New(),
-	}, nil
+	}
 }
 
 type RepositoryOpts struct {
@@ -516,6 +511,17 @@ func (r *Repository) AppContext() *kcontext.KContext {
 
 func (r *Repository) Store() storage.Store {
 	return r.store
+}
+
+func (r *Repository) CheckReadable() error {
+	mode, err := r.store.Mode(r.appContext)
+	if err != nil {
+		return err
+	}
+	if mode&storage.ModeRead == 0 {
+		return ErrNotReadable
+	}
+	return nil
 }
 
 func (r *Repository) StorageSize() (int64, error) {
@@ -1281,6 +1287,13 @@ func (r *Repository) ListOrphanBlobs() iter.Seq2[state.DeltaEntry, error] {
 		r.Logger().Trace("repository", "ListSnapshots(): %s", time.Since(t0))
 	}()
 	return r.state.ListOrphanDeltas()
+}
+
+// ListBlobs iterates over the blobs of the given type recorded in the local
+// state, with the location of each in its packfile. It only reads the local
+// state and never touches the store.
+func (r *Repository) ListBlobs(Type resources.Type) iter.Seq2[state.DeltaEntry, error] {
+	return r.state.ListObjectsOfType(Type)
 }
 
 func (r *Repository) ListSnapshots() iter.Seq2[objects.MAC, error] {

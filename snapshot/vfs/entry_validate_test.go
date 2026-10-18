@@ -22,6 +22,8 @@ func TestEntryValidate(t *testing.T) {
 		{"file at root", "/", "passwd", false},
 		{"root entry, empty parent", "", "/", false},
 		{"root entry, slash parent", "/", "/", false},
+		{"root entry, windows device parent", "/C:", "/", false},
+		{"root entry, lowercase windows device parent", "/c:", "/", false},
 		{"dotfile is fine", "/home/user", ".bashrc", false},
 		{"name with dots is fine", "/tmp", "..hidden", false},
 
@@ -34,6 +36,9 @@ func TestEntryValidate(t *testing.T) {
 		{"unclean parent", "/tmp/../etc", "passwd", true},
 		{"parent with trailing slash", "/tmp/", "file", true},
 		{"empty parent non-root name", "", "file", true},
+		{"root entry, digit as device", "/1:", "/", true},
+		{"root entry, two letter device", "/cd:", "/", true},
+		{"root entry, device without colon", "/c", "/", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := &Entry{

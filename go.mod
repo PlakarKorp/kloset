@@ -3,25 +3,30 @@ module github.com/PlakarKorp/kloset
 go 1.26.0
 
 require (
+	github.com/PlakarKorp/aes-gcm-siv v0.1.0
 	github.com/PlakarKorp/go-cdc-chunkers v1.1.0
 	github.com/PlakarKorp/go-human2duration v0.1.6
 	github.com/cockroachdb/pebble/v2 v2.1.7
 	github.com/dustin/go-humanize v1.1.0
 	github.com/gabriel-vasile/mimetype v1.4.15
-	github.com/go-git/go-git/v5 v5.19.2
+	github.com/go-git/go-git/v5 v5.19.3
 	github.com/golang/snappy v1.0.0
 	github.com/google/uuid v1.6.0
-	github.com/klauspost/compress v1.20.0
+	github.com/klauspost/compress v1.20.1
 	github.com/nickball/go-aes-key-wrap v0.0.0-20170929221519-1c3aa3e4dfc5
-	github.com/pierrec/lz4/v4 v4.1.29
+	github.com/pierrec/lz4/v4 v4.1.33
 	github.com/stretchr/testify v1.12.1
-	github.com/tink-crypto/tink-go/v2 v2.8.0
 	github.com/vmihailenco/msgpack/v5 v5.4.1
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.57.0
 	golang.org/x/mod v0.41.0
 	golang.org/x/sync v0.23.0
-	modernc.org/sqlite v1.59.0
+	modernc.org/sqlite v1.60.1
+)
+
+require (
+	github.com/ericlagergren/polyval v0.0.0-20220411101811-e25bc10ba391 // indirect
+	github.com/ericlagergren/subtle v0.0.0-20220507045147-890d697da010 // indirect
 )
 
 require (
@@ -39,7 +44,7 @@ require (
 	github.com/cockroachdb/tokenbucket v0.0.0-20230807174530-cc333fc44b06 // indirect
 	github.com/getsentry/sentry-go v0.31.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
-	github.com/go-git/go-billy/v5 v5.9.0 // indirect
+	github.com/go-git/go-billy/v5 v5.9.2 // indirect
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 // indirect
 	github.com/jstemmer/go-junit-report/v2 v2.1.0 // indirect
@@ -66,7 +71,7 @@ require (
 	golang.org/x/text v0.42.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	modernc.org/libc v1.75.7 // indirect
+	modernc.org/libc v1.77.1 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )

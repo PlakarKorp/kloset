@@ -1,12 +1,16 @@
 package vfs_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
 	iofs "io/fs"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/repository"
 	"github.com/stretchr/testify/require"
 )
 
@@ -312,4 +316,134 @@ func TestBigFile(t *testing.T) {
 	require.Equal(t, 12, n)
 	require.Equal(t, "hello\nhello\n", string(buf[:n]))
 
+}
+
+// bigFileContent is the content of /subdir/big in generateSnapshot.
+func bigFileContent() []byte {
+	return bytes.Repeat([]byte("hello\n"), 10*1024*1024)
+}
+
+func TestReadaheadSequential(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	fs, err := snap.Filesystem()
+	require.NoError(t, err)
+
+	entry, err := fs.GetEntry("/subdir/big")
+	require.NoError(t, err)
+
+	f, err := entry.Open(fs)
+	require.NoError(t, err)
+	defer f.Close()
+
+	// 60MB ramps the windows up to the cap: 4, 8, 16 then 32MB.
+	data, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(bigFileContent(), data))
+}
+
+func TestReadaheadSeekHandsOff(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	fs, err := snap.Filesystem()
+	require.NoError(t, err)
+
+	entry, err := fs.GetEntry("/subdir/big")
+	require.NoError(t, err)
+
+	f, err := entry.Open(fs)
+	require.NoError(t, err)
+	defer f.Close()
+
+	want := bigFileContent()
+
+	// past the first window, mid-chunk.
+	off := 10<<20 + 3
+	head := make([]byte, off)
+	_, err = io.ReadFull(f, head)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(want[:off], head))
+
+	pos, err := f.(io.Seeker).Seek(0, io.SeekCurrent)
+	require.NoError(t, err)
+	require.Equal(t, int64(off), pos)
+
+	rest, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(want[off:], rest))
+}
+
+func TestReadaheadSeekToStartBeforeRead(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	fs, err := snap.Filesystem()
+	require.NoError(t, err)
+
+	entry, err := fs.GetEntry("/subdir/big")
+	require.NoError(t, err)
+
+	f, err := entry.Open(fs)
+	require.NoError(t, err)
+	defer f.Close()
+
+	// http.ServeContent style: size probe, then rewind before reading.
+	_, err = f.(io.Seeker).Seek(0, io.SeekEnd)
+	require.NoError(t, err)
+
+	_, err = f.(io.Seeker).Seek(0, io.SeekStart)
+	require.NoError(t, err)
+
+	data, err := io.ReadAll(f)
+	require.NoError(t, err)
+	require.True(t, bytes.Equal(bigFileContent(), data))
+}
+
+func TestReadaheadFetchErrorFallsBack(t *testing.T) {
+	_, snap := generateSnapshot(t)
+	defer snap.Close()
+
+	fs, err := snap.Filesystem()
+	require.NoError(t, err)
+
+	entry, err := fs.GetEntry("/subdir/big")
+	require.NoError(t, err)
+
+	// a chunk missing from the repository, mid-file so windows follow it.
+	obj := *entry.ResolvedObject
+	missing := len(obj.Chunks) / 2
+	obj.Chunks = slices.Insert(slices.Clone(obj.Chunks), missing, objects.Chunk{ContentMAC: objects.MAC{0xff}, Length: 6})
+	bad := *entry
+	bad.ResolvedObject = &obj
+
+	var missingOff int
+	for _, c := range obj.Chunks[:missing] {
+		missingOff += int(c.Length)
+	}
+
+	f, err := bad.Open(fs)
+	require.NoError(t, err)
+	defer f.Close()
+
+	want := bigFileContent()
+
+	// the failed window delivers nothing, the ones before are intact.
+	data, err := io.ReadAll(f)
+	require.ErrorIs(t, err, repository.ErrBlobNotFound)
+	require.NotEmpty(t, data)
+	require.True(t, bytes.HasPrefix(want, data))
+
+	// a retry resumes where the failed window starts, on the plain path,
+	// and fails again on the missing chunk rather than skipping past it.
+	rest, err := io.ReadAll(f)
+	require.Error(t, err)
+	got := append(data, rest...)
+	require.LessOrEqual(t, len(got), missingOff)
+	require.True(t, bytes.HasPrefix(want, got))
+
+	pos, err := f.(io.Seeker).Seek(0, io.SeekCurrent)
+	require.NoError(t, err)
+	require.Equal(t, int64(len(got)), pos)
 }

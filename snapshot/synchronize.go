@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/iostat"
@@ -83,7 +84,9 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 	}
 
 	i = 0
-	err = p.fs.WalkDir("/", func(path string, entry *vfs.Entry, err error) error {
+	err = p.fs.WalkDirpack(ctx, "/", &vfs.WalkDirpackOpts{
+		ResolveObjects: true,
+	}, func(path string, entry *vfs.Entry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -97,7 +100,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 
 		records <- connectors.NewRecord(path, entry.SymlinkTarget, entry.FileInfo, entry.ExtendedAttributes,
 			func() (io.ReadCloser, error) {
-				return p.fs.Open(path)
+				return entry.Open(p.fs)
 			})
 		return nil
 	})
@@ -139,23 +142,17 @@ func (src *Snapshot) Synchronize(dst *Builder) error {
 		src:    src,
 	}
 
-	// grab the summary before dst.Header aliases it and nils Sources.
 	srcSummary := src.Header.GetSource(0).Summary
 
-	dst.Header = src.Header
-	dst.Header.Sources = nil
-
-	dst.Header.Timestamp = src.Header.Timestamp
-	dst.Header.Duration = src.Header.Duration
-	dst.Header.Name = src.Header.Name
-	dst.Header.Category = src.Header.Category
-	dst.Header.Environment = src.Header.Environment
-	dst.Header.Perimeter = src.Header.Perimeter
-	dst.Header.Job = src.Header.Job
-	dst.Header.Replicas = src.Header.Replicas
-	dst.Header.Classifications = src.Header.Classifications
-	dst.Header.Tags = src.Header.Tags
-	dst.Header.Context = src.Header.Context
+	// copy rather than alias the source header: the builder appends its own
+	// source to it, which must not leak into src
+	hdr := *src.Header
+	hdr.DataClasses = slices.Clone(src.Header.DataClasses)
+	hdr.Classifications = slices.Clone(src.Header.Classifications)
+	hdr.Tags = slices.Clone(src.Header.Tags)
+	hdr.Context = slices.Clone(src.Header.Context)
+	hdr.Sources = nil
+	dst.Header = &hdr
 
 	source, err := NewSource(dst.AppContext(), imp)
 	if err != nil {

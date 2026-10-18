@@ -13,7 +13,6 @@ import (
 	"strings"
 
 	"github.com/PlakarKorp/kloset/connectors"
-	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/iterator"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -73,11 +72,14 @@ func (e *Entry) HasObject() bool {
 var ErrMalformedEntry = errors.New("malformed vfs entry")
 
 // integration/fs up to v1.1.7 left parent path on "/" to "/<device>:"
-// on windows, instead of "/".  cope with it.
+// on windows, instead of "/".  cope with it.  The device letter is
+// recorded as the importer was given it, so it comes in either case.
 func isParentPathWindowsBug(p string) bool {
-	return len(p) == 3 && p[0] == '/' &&
-		'A' <= p[1] && p[1] <= 'Z' &&
-		p[2] == ':'
+	if len(p) != 3 || p[0] != '/' || p[2] != ':' {
+		return false
+	}
+	device := p[1]
+	return ('A' <= device && device <= 'Z') || ('a' <= device && device <= 'z')
 }
 
 func (e *Entry) validate() error {
@@ -234,19 +236,14 @@ func (e *Entry) Open(fs *Filesystem) (fs.File, error) {
 		e.ResolvedObject = obj
 	}
 
-	mode, err := fs.repo.Store().Mode(fs.repo.AppContext())
-	if err != nil {
+	if err := fs.repo.CheckReadable(); err != nil {
 		return nil, err
-	}
-
-	if mode&storage.ModeRead == 0 {
-		return nil, repository.ErrNotReadable
 	}
 
 	return &vfile{
 		entry: e,
 		repo:  fs.repo,
-		rd:    NewObjectReader(fs.repo, e.ResolvedObject, e.Size(), -1),
+		rd:    NewReadaheadObjectReader(fs.repo, e.ResolvedObject, e.Size()),
 	}, nil
 }
 
@@ -312,6 +309,12 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		return nil, fmt.Errorf("%w: %s", fs.ErrNotExist, prefix)
 	}
 
+	return fsc.dirpackEntries(prefix, objectMac)
+}
+
+// dirpackEntries iterates the direct children of the directory at prefix,
+// decoded from its dirpack payload object objectMac.
+func (fsc *Filesystem) dirpackEntries(prefix string, objectMac objects.MAC) (iter.Seq2[*Entry, error], error) {
 	// LookupObject inlined
 	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
 	if err != nil {
@@ -328,7 +331,12 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 		size += int64(c.Length)
 	}
 
-	rd := NewObjectReader(fsc.repo, obj, size, -1)
+	return fsc.skipUncleanImporterRoot(prefix, dirpackEntriesIter(prefix, NewObjectReader(fsc.repo, obj, size, -1))), nil
+}
+
+// dirpackEntriesIter decodes the dirpack payload read from rd into the direct
+// children of the directory at prefix.
+func dirpackEntriesIter(prefix string, rd io.Reader) iter.Seq2[*Entry, error] {
 	return func(yield func(*Entry, error) bool) {
 		for {
 			_, siz, err := readDirPackHdr(rd)
@@ -369,7 +377,7 @@ func (e *Entry) getdentsDirpack(fsc *Filesystem) (iter.Seq2[*Entry, error], erro
 				return
 			}
 		}
-	}, nil
+	}
 }
 
 func (e *Entry) Stat() *objects.FileInfo {
@@ -486,7 +494,7 @@ func (vf *vfile) Close() error {
 		return fs.ErrClosed
 	}
 	vf.closed = true
-	return nil
+	return vf.rd.Close()
 }
 
 type vdir struct {

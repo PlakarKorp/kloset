@@ -146,6 +146,11 @@ func getPackfileForBlobWithErrorWithKey(snap *Snapshot, at string, res resources
 	}
 }
 
+const batchSizeListPackfiles = 1024
+
+// Lists the packfile reachable from the snapshot (not deduplicated).
+// The loop doesn't abort on a failure, as a best effort listing, it's the
+// responsability of the caller to interrupt the iteration.
 func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 	pvfs, err := snap.Filesystem()
 	if err != nil {
@@ -176,6 +181,8 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			return
 		}
 
+		var macs []repository.BlobReq
+
 		/* Iterate over all the VFS, resolving both Nodes and actual VFS entries. */
 		fsIter := pvfs.IterNodes()
 		for fsIter.Next() {
@@ -189,28 +196,30 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 					return
 				}
 
-				vfsEntry, err := pvfs.ResolveEntry(entry)
-				if err != nil {
-					if !yield(objects.MAC{}, fmt.Errorf("Failed to resolve entry %x", entry)) {
+				macs = append(macs, repository.BlobReq{
+					Type: resources.RT_VFS_ENTRY,
+					MAC:  entry,
+				})
+
+				if len(macs) >= batchSizeListPackfiles {
+					if !snap.batchVfsEntries(macs, yield) {
 						return
 					}
+
+					macs = macs[:0]
 				}
-
-				if vfsEntry.HasObject() {
-					if !yield(getPackfileForBlobWithError(snap, resources.RT_OBJECT, vfsEntry.Object)) {
-						return
-					}
-
-					for _, chunk := range vfsEntry.ResolvedObject.Chunks {
-						if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
-							return
-						}
-					}
-
-				}
-
 			}
+		}
 
+		if err := fsIter.Err(); err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to walk the vfs: %w", err)) {
+				return
+			}
+		}
+
+		// Flush the remaining entries.
+		if !snap.batchVfsEntries(macs, yield) {
+			return
 		}
 
 		if !yield(getPackfileForBlobWithError(snap, resources.RT_ERROR_BTREE, snap.Header.Sources[0].VFS.Errors)) {
@@ -230,6 +239,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
+		if err := errIter.Err(); err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to walk the error tree: %w", err)) {
+				return
+			}
+		}
+
 		if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_BTREE, snap.Header.Sources[0].VFS.Xattrs)) {
 			return
 		}
@@ -244,6 +259,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 				if !yield(getPackfileForBlobWithError(snap, resources.RT_XATTR_ENTRY, error)) {
 					return
 				}
+			}
+		}
+
+		if err := xattrIter.Err(); err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to walk the xattr tree: %w", err)) {
+				return
 			}
 		}
 
@@ -268,6 +289,12 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 					return
 				}
 			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the content-type tree: %w", err)) {
+					return
+				}
+			}
 		}
 
 		dirpack, err := snap.DirPack()
@@ -277,6 +304,7 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 			}
 		}
 
+		macs = macs[:0]
 		if dirpack != nil {
 			dirpackRoot, _ := snap.DirPackRoot()
 			if !yield(getPackfileForBlobWithError(snap, resources.RT_BTREE_ROOT, dirpackRoot)) {
@@ -295,20 +323,29 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 						return
 					}
 
-					obj, err := snap.LookupObject(dirpackObject)
-					if err != nil {
-						if !yield(objects.MAC{}, fmt.Errorf("Failed to lookup dirpack object %x: %s", dirpackObject, err)) {
-							return
-						}
-					}
+					macs = append(macs, repository.BlobReq{
+						Type: resources.RT_OBJECT,
+						MAC:  dirpackObject,
+					})
 
-					for _, chunk := range obj.Chunks {
-						if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
+					if len(macs) >= batchSizeListPackfiles {
+						if !snap.batchObjectEntries(macs, yield) {
 							return
 						}
+						macs = macs[:0]
 					}
 				}
 			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the dirpack tree: %w", err)) {
+					return
+				}
+			}
+		}
+
+		if !snap.batchObjectEntries(macs, yield) {
+			return
 		}
 
 		summary, err := snap.SummaryIdx()
@@ -337,9 +374,91 @@ func (snap *Snapshot) ListPackfiles() (iter.Seq2[objects.MAC, error], error) {
 					}
 				}
 			}
+
+			if err := indexIter.Err(); err != nil {
+				if !yield(objects.MAC{}, fmt.Errorf("failed to walk the summary tree: %w", err)) {
+					return
+				}
+			}
 		}
 
 	}, nil
+}
+
+// Looks up a batch of vfs entries, then batch lookup their objects if
+// any. Returns false on iteration stop.
+func (snap *Snapshot) batchVfsEntries(macs []repository.BlobReq, yield func(objects.MAC, error) bool) bool {
+	var objectMacs []repository.BlobReq
+	for b, err := range snap.repository.GetBlobs(snap.AppContext(), macs, nil) {
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to resolve vfs entry %x: %w", b.MAC, err)) {
+				return false
+			}
+
+			continue
+		}
+
+		vfsEntry, err := vfs.EntryFromBytes(b.Data)
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to decode vfs entry %x: %w", b.MAC, err)) {
+				return false
+			}
+
+			continue
+		}
+
+		if vfsEntry.HasObject() {
+			objectMacs = append(objectMacs, repository.BlobReq{
+				Type: resources.RT_OBJECT,
+				MAC:  vfsEntry.Object,
+			})
+
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_OBJECT, vfsEntry.Object)) {
+				return false
+			}
+		}
+	}
+
+	if err := snap.AppContext().Err(); err != nil {
+		yield(objects.MAC{}, err)
+		return false
+	}
+
+	return snap.batchObjectEntries(objectMacs, yield)
+}
+
+func (snap *Snapshot) batchObjectEntries(macs []repository.BlobReq, yield func(objects.MAC, error) bool) bool {
+	for b, err := range snap.repository.GetBlobs(snap.AppContext(), macs, nil) {
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to resolve object %x: %w", b.MAC, err)) {
+				return false
+			}
+
+			continue
+		}
+
+		object, err := objects.NewObjectFromBytes(b.Data)
+		if err != nil {
+			if !yield(objects.MAC{}, fmt.Errorf("failed to decode object %x: %w", b.MAC, err)) {
+				return false
+			}
+
+			continue
+		}
+
+		for _, chunk := range object.Chunks {
+			if !yield(getPackfileForBlobWithError(snap, resources.RT_CHUNK, chunk.ContentMAC)) {
+				return false
+			}
+		}
+	}
+
+	if err := snap.AppContext().Err(); err != nil {
+		yield(objects.MAC{}, err)
+		return false
+	}
+
+	return true
 }
 
 func (snap *Snapshot) Logger() *logging.Logger {

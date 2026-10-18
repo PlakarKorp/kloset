@@ -15,7 +15,5 @@ func NewRepository(local, remote map[objects.MAC][]byte) (*repository.Repository
 	ctx := kcontext.NewKContext()
 	ctx.SetLogger(logger)
 
-	return repository.Inexistent(ctx, map[string]string{
-		"location": "fake+state://xyz",
-	})
+	return repository.Inexistent(ctx, newStore()), nil
 }
