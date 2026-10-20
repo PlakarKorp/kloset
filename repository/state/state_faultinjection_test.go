@@ -135,36 +135,10 @@ func TestDeserializeFromStreamReadErrorsAtEveryOffset(t *testing.T) {
 	require.NoError(t, st.deserializeFromStream(bytes.NewReader(valid)))
 }
 
-// TestListIteratorsParseError stores corrupt delta payloads through the real
-// cache (payloads are opaque bytes for the cache) and asserts the
-// DeltaEntryFromBytes error is surfaced by the List* iterators.
-func TestListIteratorsParseError(t *testing.T) {
-	st, cache := newAggregate(t)
-
-	garbage := []byte{0x00, 0x01}
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, objects.MAC{0x01}, objects.MAC{0x10}, garbage))
-	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, objects.MAC{0x02}, objects.MAC{0x20}, garbage))
-
-	t.Run("ListSnapshots", func(t *testing.T) {
-		var sawErr bool
-		for _, err := range st.ListSnapshots() {
-			if err != nil {
-				sawErr = true
-			}
-		}
-		require.True(t, sawErr)
-	})
-
-	t.Run("ListOrphanDeltas", func(t *testing.T) {
-		var sawErr bool
-		for _, err := range st.ListOrphanDeltas() {
-			if err != nil {
-				sawErr = true
-			}
-		}
-		require.True(t, sawErr)
-	})
-}
+// Note: the former TestListIteratorsParseError is gone for a good reason: the
+// aggregate's delta reads no longer parse a serialized payload (deltas are
+// typed columns now), so the DeltaEntryFromBytes error branch it exercised no
+// longer exists on the LocalState List* paths.
 
 // TestDeletedEntriesRoundTrip exercises the ET_DELETE serialize loop and every
 // arm of the ET_DELETE dispatch in deserializeFromStream by recording a delete

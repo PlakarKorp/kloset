@@ -277,7 +277,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize delta entry %w", err)
 			}
 
-			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
+			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
 				return err
 			}
 
@@ -416,7 +416,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize delta entry %w", err)
 			}
 
-			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
+			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
 				return err
 			}
 
@@ -506,7 +506,7 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 			return fmt.Errorf("failed to deserialize delta entry %w", err)
 		}
 
-		if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, entry); err != nil {
+		if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
 			return err
 		}
 	}
@@ -553,18 +553,17 @@ func (ls *LocalState) DelState(stateID objects.MAC) error {
 }
 
 func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool {
-	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
-		de, err := DeltaEntryFromBytes(buf)
+	for b, err := range ls.cache.GetDelta(Type, blobMAC) {
 		if err != nil {
 			continue
 		}
 
-		ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+		ok, err := ls.cache.HasPackfile(b.Packfile)
 		if err != nil {
 			continue
 		}
 
-		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, de.Location.Packfile)
+		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, b.Packfile)
 		if ok && !coloured {
 			return true
 		}
@@ -574,30 +573,33 @@ func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool 
 }
 
 func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC) (Location, bool, error) {
-	var delta *DeltaEntry
-	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
-		de, err := DeltaEntryFromBytes(buf)
-
+	var blob *caching.Blob
+	for b, err := range ls.cache.GetDelta(Type, blobMAC) {
 		if err != nil {
 			return Location{}, false, err
 		}
 
-		ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+		ok, err := ls.cache.HasPackfile(b.Packfile)
 		if err != nil {
 			return Location{}, false, err
 		}
 
-		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, de.Location.Packfile)
+		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, b.Packfile)
 		if ok && !coloured {
-			delta = &de
+			blob = &b
 			break
 		}
 	}
 
-	if delta == nil {
+	if blob == nil {
 		return Location{}, false, nil
 	} else {
-		return delta.Location, true, nil
+		l := Location{
+			Packfile: blob.Packfile,
+			Offset:   blob.Offset,
+			Length:   blob.Length,
+		}
+		return l, true, nil
 	}
 }
 
@@ -624,15 +626,14 @@ func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
 
 func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	return func(yield func(objects.MAC, error) bool) {
-		for _, buf := range ls.cache.GetDeltasByType(resources.RT_SNAPSHOT) {
-			de, err := DeltaEntryFromBytes(buf)
+		for b, err := range ls.cache.GetDeltasByType(resources.RT_SNAPSHOT) {
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
 				}
 			}
 
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			ok, err := ls.cache.HasPackfile(b.Packfile)
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
@@ -642,7 +643,7 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 				continue
 			}
 
-			has, err := ls.cache.HasColoured(resources.RT_SNAPSHOT, de.Blob)
+			has, err := ls.cache.HasColoured(resources.RT_SNAPSHOT, b.MAC)
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
@@ -652,7 +653,7 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 				continue
 			}
 
-			if !yield(de.Blob, nil) {
+			if !yield(b.MAC, nil) {
 				return
 			}
 		}
@@ -661,16 +662,14 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 
 func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 	return func(yield func(DeltaEntry, error) bool) {
-		for _, buf := range ls.cache.GetDeltas() {
-			de, err := DeltaEntryFromBytes(buf)
-
+		for b, err := range ls.cache.GetDeltas() {
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
 			}
 
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			ok, err := ls.cache.HasPackfile(b.Packfile)
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
@@ -678,6 +677,16 @@ func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 			}
 
 			if !ok {
+				de := DeltaEntry{
+					Type: b.Type,
+					Blob: b.MAC,
+					Location: Location{
+						Packfile: b.Packfile,
+						Offset:   b.Offset,
+						Length:   b.Length,
+					},
+				}
+
 				if !yield(de, nil) {
 					return
 				}
@@ -745,15 +754,14 @@ func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[Colo
 
 func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntry, error] {
 	return func(yield func(DeltaEntry, error) bool) {
-		for _, buf := range ls.cache.GetDeltasByType(Type) {
-			de, err := DeltaEntryFromBytes(buf)
+		for b, err := range ls.cache.GetDeltasByType(Type) {
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
 			}
 
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			ok, err := ls.cache.HasPackfile(b.Packfile)
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
@@ -764,6 +772,15 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 				continue
 			}
 
+			de := DeltaEntry{
+				Type: b.Type,
+				Blob: b.MAC,
+				Location: Location{
+					Packfile: b.Packfile,
+					Offset:   b.Offset,
+					Length:   b.Length,
+				},
+			}
 			if !yield(de, err) {
 				return
 			}

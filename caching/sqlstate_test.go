@@ -68,21 +68,27 @@ func TestSQLStateDeltaOperations(t *testing.T) {
 
 	blobMAC := objects.MAC{0x01}
 	packMAC := objects.MAC{0x02}
-	data := []byte("delta payload")
 
 	// Direct PutDelta
-	require.NoError(t, st.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, data))
+	require.NoError(t, st.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, 42, 1337))
 
-	// GetDeltasByType
+	// GetDeltasByType round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetDeltasByType(resources.RT_CHUNK) {
+	for b, err := range st.GetDeltasByType(resources.RT_CHUNK) {
+		require.NoError(t, err)
+		require.Equal(t, blobMAC, b.MAC)
+		require.Equal(t, resources.RT_CHUNK, b.Type)
+		require.Equal(t, packMAC, b.Packfile)
+		require.Equal(t, uint64(42), b.Offset)
+		require.Equal(t, uint32(1337), b.Length)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// GetDeltas
 	count = 0
-	for _, _ = range st.GetDeltas() {
+	for _, err := range st.GetDeltas() {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 1, count)
@@ -91,7 +97,8 @@ func TestSQLStateDeltaOperations(t *testing.T) {
 	require.NoError(t, st.DelDelta(resources.RT_CHUNK, blobMAC, packMAC))
 
 	count = 0
-	for _, _ = range st.GetDeltas() {
+	for _, err := range st.GetDeltas() {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 0, count)
