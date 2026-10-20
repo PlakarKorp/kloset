@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"runtime"
+	"time"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
 	"github.com/PlakarKorp/kloset/objects"
@@ -42,10 +43,10 @@ var stateSchema = []string{
 		PRIMARY KEY(type, mac, packfile)
 	) WITHOUT ROWID, STRICT;`,
 
-	`CREATE TABLE IF NOT EXISTS deleteds (
+	`CREATE TABLE IF NOT EXISTS coloured (
 		mac BLOB NOT NULL,
 		type INTEGER NOT NULL,
-		payload BLOB NOT NULL,
+		timestamp INTEGER NOT NULL,
 		UNIQUE(type, mac)
 	);`,
 
@@ -79,6 +80,12 @@ type Blob struct {
 	Packfile objects.MAC
 	Offset   uint64
 	Length   uint32
+}
+
+type ColouredBlob struct {
+	MAC  objects.MAC
+	Type resources.Type
+	When time.Time
 }
 
 func NewSQLState(path string, ro bool) (*SQLState, error) {
@@ -249,13 +256,13 @@ func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC object
 	return err
 }
 
-func (c *SQLState) PutColoured(blobType resources.Type, blobMAC objects.MAC, data []byte) error {
-	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMAC[:], blobType, data)
+func (c *SQLState) PutColoured(blobType resources.Type, blobMAC objects.MAC, when time.Time) error {
+	_, err := c.db.Exec("INSERT OR IGNORE INTO coloured(mac, type, timestamp) VALUES(?, ?, ?)", blobMAC[:], blobType, when.UnixNano())
 	return err
 }
 
 func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bool, error) {
-	query := "SELECT 1 FROM deleteds WHERE mac = ? AND type = ? LIMIT 1;"
+	query := "SELECT 1 FROM coloured WHERE mac = ? AND type = ? LIMIT 1;"
 	var dummy int
 	err := c.db.QueryRow(query, blobMAC[:], blobType).Scan(&dummy)
 	if err != nil {
@@ -269,70 +276,56 @@ func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bo
 	return true, nil
 }
 
-func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM deleteds;"
+func (c *SQLState) getColouredEntries(query string, args ...any) iter.Seq2[ColouredBlob, error] {
+	return func(yield func(ColouredBlob, error) bool) {
 
-		rows, err := c.db.Query(query)
+		rows, err := c.db.Query(query, args...)
 		if err != nil {
+			// We can't proceed here. Ideally this should be pre-iteration.
+			yield(ColouredBlob{}, err)
 			return
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
+		result := make([]ColouredBlob, 0)
 		for rows.Next() {
-			var kv kv
+			cb := ColouredBlob{}
+			var when int64
 
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
+			if err := rows.Scan(macScanner{&cb.MAC}, &cb.Type, &when); err != nil {
+				if !yield(ColouredBlob{}, err) {
+					return
+				}
+
 				continue
 			}
 
-			result = append(result, kv)
+			cb.When = time.Unix(0, when)
+
+			result = append(result, cb)
 		}
 		rows.Close()
 
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
+		for _, cb := range result {
+			if !yield(cb, nil) {
 				return
 			}
 		}
 	}
 }
 
-func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload  FROM deleteds WHERE type = ?;"
+func (c *SQLState) GetColouredEntries() iter.Seq2[ColouredBlob, error] {
+	query := "SELECT mac, type, timestamp FROM coloured ;"
+	return c.getColouredEntries(query)
+}
 
-		rows, err := c.db.Query(query, blobType)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var kv kv
-
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv)
-		}
-		rows.Close()
-
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
-				return
-			}
-		}
-	}
+func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[ColouredBlob, error] {
+	query := "SELECT mac, type, timestamp FROM coloured WHERE type = ?;"
+	return c.getColouredEntries(query, blobType)
 }
 
 func (c *SQLState) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
-	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ?;", blobMAC[:], blobType)
+	_, err := c.db.Exec("DELETE FROM coloured WHERE mac = ? AND type = ?;", blobMAC[:], blobType)
 	return err
 }
 

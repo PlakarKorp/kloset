@@ -295,7 +295,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize coloured entry %w", err)
 			}
 
-			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
 				return err
 			}
 		case ET_PACKFILE:
@@ -434,7 +434,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize coloured entry %w", err)
 			}
 
-			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
 				return err
 			}
 		case ET_PACKFILE:
@@ -517,7 +517,7 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 			return fmt.Errorf("failed to deserialize coloured entry %w", err)
 		}
 
-		if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+		if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
 			return err
 		}
 	}
@@ -742,10 +742,19 @@ func (ls *LocalState) insertOrUpdateConfiguration(ce ConfigurationEntry) error {
 
 func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[ColouredEntry, error] {
 	return func(yield func(ColouredEntry, error) bool) {
-		for _, buf := range ls.cache.GetColouredEntriesByType(rtype) {
-			de, err := ColouredEntryFromBytes(buf)
+		for ce, err := range ls.cache.GetColouredEntriesByType(rtype) {
+			if err != nil {
+				if !yield(ColouredEntry{}, err) {
+					return
+				}
+			}
 
-			if !yield(de, err) {
+			de := ColouredEntry {
+				Type: ce.Type,
+				Blob: ce.MAC,
+				When: ce.When,
+			}
+			if !yield(de, nil) {
 				return
 			}
 		}
