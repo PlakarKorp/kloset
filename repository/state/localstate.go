@@ -742,3 +742,31 @@ func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[Colo
 		}
 	}
 }
+
+func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntry, error] {
+	return func(yield func(DeltaEntry, error) bool) {
+		for _, buf := range ls.cache.GetDeltasByType(Type) {
+			de, err := DeltaEntryFromBytes(buf)
+			if err != nil {
+				if !yield(DeltaEntry{}, err) {
+					return
+				}
+			}
+
+			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			if err != nil {
+				if !yield(DeltaEntry{}, err) {
+					return
+				}
+			}
+
+			if !ok {
+				continue
+			}
+
+			if !yield(de, err) {
+				return
+			}
+		}
+	}
+}
