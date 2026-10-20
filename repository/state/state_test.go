@@ -454,14 +454,18 @@ func TestListOrphanDeltas(t *testing.T) {
 	}
 
 	require.Len(t, found, 1)
-	require.Equal(t, *orphanDelta, found[0])
+	// The aggregate does not store Version/Flags; ListOrphanDeltas
+	// reconstructs entries with only the queryable fields set.
+	require.Equal(t, orphanDelta.Blob, found[0].Blob)
+	require.Equal(t, orphanDelta.Type, found[0].Type)
+	require.Equal(t, orphanDelta.Location, found[0].Location)
 }
 
 // putDeltaInCache seeds a delta entry directly in the aggregate's cache: the
 // aggregate receives deltas via merge, not through a method of its own.
 func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
 	t.Helper()
-	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.ToBytes()))
+	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.Location.Offset, de.Location.Length))
 }
 
 // colourInCache seeds a coloured entry directly in the aggregate's cache: the

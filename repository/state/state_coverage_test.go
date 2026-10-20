@@ -78,8 +78,8 @@ func TestListSnapshotsWithMissingPackfile(t *testing.T) {
 		Blob:     objects.MAC{0x02},
 		Location: Location{Packfile: pfPresent},
 	}
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaMissing.Blob, pfMissing, deltaMissing.ToBytes()))
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaPresent.Blob, pfPresent, deltaPresent.ToBytes()))
+	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaMissing.Blob, pfMissing, deltaMissing.Location.Offset, deltaMissing.Location.Length))
+	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaPresent.Blob, pfPresent, deltaPresent.Location.Offset, deltaPresent.Location.Length))
 
 	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf-data")))
 
@@ -107,7 +107,7 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 		Blob:     snapID,
 		Location: Location{Packfile: pf},
 	}
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, snapID, pf, delta.ToBytes()))
+	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, snapID, pf, delta.Location.Offset, delta.Location.Length))
 
 	// Mark the snapshot as coloured (deleted); the aggregate receives coloured
 	// entries via merge, so seed the cache directly.
@@ -139,8 +139,8 @@ func TestListOrphanDeltasWithMixedState(t *testing.T) {
 		Blob:     objects.MAC{0x8E},
 		Location: Location{Packfile: pfPresent},
 	}
-	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, orphan.Blob, orphan.Location.Packfile, orphan.ToBytes()))
-	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, healthy.Blob, pfPresent, healthy.ToBytes()))
+	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, orphan.Blob, orphan.Location.Packfile, orphan.Location.Offset, orphan.Location.Length))
+	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, healthy.Blob, pfPresent, healthy.Location.Offset, healthy.Location.Length))
 
 	var found []DeltaEntry
 	for de, err := range st.ListOrphanDeltas() {

@@ -125,29 +125,6 @@ func newLocalState(t *testing.T) (*state.LocalState, *caching.SQLState) {
 	return ls, cache
 }
 
-// listObjectsOfType reproduces the aggregate's removed ListObjectsOfType on
-// top of the public cache API: deltas of a type whose packfile is present.
-// The HasPackfile filtering is part of what the golden fixtures pin
-// (gChunkOrphan must stay excluded).
-func listObjectsOfType(t *testing.T, cache *caching.SQLState, typ resources.Type) []state.DeltaEntry {
-	t.Helper()
-
-	var out []state.DeltaEntry
-	for _, buf := range cache.GetDeltasByType(typ) {
-		de, err := state.DeltaEntryFromBytes(buf)
-		require.NoError(t, err)
-
-		ok, err := cache.HasPackfile(de.Location.Packfile)
-		require.NoError(t, err)
-		if !ok {
-			continue
-		}
-
-		out = append(out, de)
-	}
-	return out
-}
-
 // Backup-like state: delta entries plus their packfiles. gChunkOrphan
 // deliberately points to a packfile absent from the state to pin the
 // HasPackfile filtering in the List* methods.
@@ -388,15 +365,16 @@ func assertBackupMerged(t *testing.T, ls *state.LocalState, cache *caching.SQLSt
 	}
 	require.Equal(t, map[objects.MAC]bool{gPack1: true, gPack2: true, gPack3: true}, seenPacks)
 
-	chunks := listObjectsOfType(t, cache, resources.RT_CHUNK)
+	chunks := collect2(t, ls.ListObjectsOfType(resources.RT_CHUNK))
 	require.ElementsMatch(t,
 		[]objects.MAC{gChunk1, gChunk2},
 		[]objects.MAC{chunks[0].Blob, chunks[1].Blob})
 	for _, de := range chunks {
 		if de.Blob == gChunk1 {
+			// The aggregate keeps only the queryable fields (Location); the
+			// entry's Version and Flags are pinned on the wire by
+			// TestGoldenSerialize instead.
 			require.Equal(t, state.Location{Packfile: gPack1, Offset: 100, Length: 50}, de.Location)
-			require.Equal(t, uint32(7), de.Flags)
-			require.Equal(t, gBlobVersion, de.Version)
 		}
 	}
 
@@ -472,7 +450,7 @@ func TestGoldenMergeBackupUnknownEntry(t *testing.T) {
 // and pins the aggregate's view after each stage, including the ET_DELETE
 // application and the packfile-deletion cascade over its deltas.
 func TestGoldenMergeLifecycle(t *testing.T) {
-	ls, cache := newLocalState(t)
+	ls, _ := newLocalState(t)
 
 	require.NoError(t, ls.MergeState(gState1, bytes.NewReader(readFixture(t, "backup-v110.state")), gV110))
 	require.NoError(t, ls.MergeState(gState2, bytes.NewReader(readFixture(t, "rm-v110.state")), gV110))
@@ -521,7 +499,7 @@ func TestGoldenMergeLifecycle(t *testing.T) {
 
 	// Deleting a packfile cascades over its remaining deltas: snap2's delta
 	// lived in pack2 and must be gone entirely (not even orphaned).
-	chunks := listObjectsOfType(t, cache, resources.RT_CHUNK)
+	chunks := collect2(t, ls.ListObjectsOfType(resources.RT_CHUNK))
 	require.Len(t, chunks, 1)
 	require.Equal(t, gChunk1, chunks[0].Blob)
 
