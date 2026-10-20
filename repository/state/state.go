@@ -230,5 +230,4 @@ func (ls *State) SerializeToStream(w io.Writer) error {
 	}
 
 	return nil
-
 }
