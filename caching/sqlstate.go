@@ -183,56 +183,16 @@ func (c *SQLState) DelState(stateID objects.MAC) error {
 
 	return err
 }
-
-func (c *SQLState) GetDelta(blobType resources.Type, blobMAC objects.MAC) iter.Seq2[Blob, error] {
-	return func(yield func(Blob, error) bool) {
-		query := `SELECT mac, type, packfile, offset, length
-					FROM deltas
-					WHERE mac = ? AND type = ?;`
-
-		rows, err := c.db.Query(query, blobMAC[:], blobType)
-		if err != nil {
-			// We can't proceed here. Ideally this should be pre-iteration.
-			yield(Blob{}, err)
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]Blob, 0)
-		for rows.Next() {
-			b := Blob{}
-
-			if err := rows.Scan(macScanner{&b.MAC}, &b.Type, macScanner{&b.Packfile}, &b.Offset, &b.Length); err != nil {
-				if !yield(Blob{}, err) {
-					return
-				}
-			}
-
-			result = append(result, b)
-		}
-		rows.Close()
-
-		for _, b := range result {
-			if !yield(b, nil) {
-				return
-			}
-		}
-	}
-}
-
 func (c *SQLState) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
 	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, offset, length) VALUES(?, ?, ?, ?, ?);", blobMAC[:], blobType, packfileMAC[:], offset, length)
 
 	return err
 }
 
-func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[Blob, error] {
+// Internal helper, the layout of the query must follow the Scan obviously
+func (c *SQLState) getDeltas(query string, args ...any) iter.Seq2[Blob, error] {
 	return func(yield func(Blob, error) bool) {
-		query := `SELECT mac, type, packfile, offset, length
-					FROM deltas
-					WHERE type = ?;`
-		rows, err := c.db.Query(query, blobType)
-
+		rows, err := c.db.Query(query, args...)
 		if err != nil {
 			// We can't proceed here. Ideally this should be pre-iteration.
 			yield(Blob{}, err)
@@ -262,39 +222,26 @@ func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[Blob, erro
 	}
 }
 
+func (c *SQLState) GetDelta(blobType resources.Type, blobMAC objects.MAC) iter.Seq2[Blob, error] {
+	query := `SELECT mac, type, packfile, offset, length
+					FROM deltas
+					WHERE mac = ? AND type = ?;`
+
+	return c.getDeltas(query, blobMAC[:], blobType)
+}
+
+func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[Blob, error] {
+	query := `SELECT mac, type, packfile, offset, length
+					FROM deltas
+					WHERE type = ?;`
+	return c.getDeltas(query, blobType)
+}
+
 func (c *SQLState) GetDeltas() iter.Seq2[Blob, error] {
-	return func(yield func(Blob, error) bool) {
-		query := `SELECT mac, type, packfile, offset, length
+	query := `SELECT mac, type, packfile, offset, length
 					FROM deltas;`
 
-		rows, err := c.db.Query(query)
-		if err != nil {
-			// We can't proceed here. Ideally this should be pre-iteration.
-			yield(Blob{}, err)
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]Blob, 0)
-		for rows.Next() {
-			b := Blob{}
-
-			if err := rows.Scan(macScanner{&b.MAC}, &b.Type, macScanner{&b.Packfile}, &b.Offset, &b.Length); err != nil {
-				if !yield(Blob{}, err) {
-					return
-				}
-			}
-
-			result = append(result, b)
-		}
-		rows.Close()
-
-		for _, b := range result {
-			if !yield(b, nil) {
-				return
-			}
-		}
-	}
+	return c.getDeltas(query)
 }
 
 func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
