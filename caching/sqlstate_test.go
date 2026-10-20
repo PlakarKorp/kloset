@@ -2,6 +2,7 @@ package caching_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
@@ -108,7 +109,7 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	blobMAC := objects.MAC{0xcc}
-	data := []byte("coloured data")
+	when := time.Unix(0, 1700000000000000000).UTC()
 
 	// Not present yet
 	ok, err := st.HasColoured(resources.RT_CHUNK, blobMAC)
@@ -116,29 +117,35 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	require.False(t, ok)
 
 	// Put
-	require.NoError(t, st.PutColoured(resources.RT_CHUNK, blobMAC, data))
+	require.NoError(t, st.PutColoured(resources.RT_CHUNK, blobMAC, when))
 
 	ok, err = st.HasColoured(resources.RT_CHUNK, blobMAC)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// GetColouredEntries
+	// GetColouredEntries round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetColouredEntries() {
+	for cb, err := range st.GetColouredEntries() {
+		require.NoError(t, err)
+		require.Equal(t, blobMAC, cb.MAC)
+		require.Equal(t, resources.RT_CHUNK, cb.Type)
+		require.Equal(t, when.UnixNano(), cb.When.UnixNano())
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// GetColouredEntriesByType
 	count = 0
-	for _, _ = range st.GetColouredEntriesByType(resources.RT_CHUNK) {
+	for _, err := range st.GetColouredEntriesByType(resources.RT_CHUNK) {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// Wrong type returns nothing
 	count = 0
-	for _, _ = range st.GetColouredEntriesByType(resources.RT_PACKFILE) {
+	for _, err := range st.GetColouredEntriesByType(resources.RT_PACKFILE) {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 0, count)

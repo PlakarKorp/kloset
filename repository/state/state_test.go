@@ -325,8 +325,7 @@ func TestBlobExists(t *testing.T) {
 
 	// Test with deleted packfile. The aggregate receives coloured entries via
 	// merge, so seed the cache directly.
-	ce := ColouredEntry{Type: resources.RT_PACKFILE, Blob: deltaEntry.Location.Packfile, When: time.Now()}
-	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
+	require.NoError(t, cache.PutColoured(resources.RT_PACKFILE, deltaEntry.Location.Packfile, time.Now()))
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
@@ -473,8 +472,7 @@ func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
 // own.
 func colourInCache(t *testing.T, cache *caching.SQLState, rtype resources.Type, resource objects.MAC) {
 	t.Helper()
-	ce := ColouredEntry{Type: rtype, Blob: resource, When: time.Now()}
-	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
+	require.NoError(t, cache.PutColoured(rtype, resource, time.Now()))
 }
 
 func TestHasDeletedResource(t *testing.T) {
