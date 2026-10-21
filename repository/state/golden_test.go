@@ -14,15 +14,12 @@
 // goes through public API and the real caches (SQLState for the aggregate,
 // ScanCache for delta construction), never the mock, so it should survive the
 // refactor with minimal churn. The derived state's concrete type is never
-// named; only `Derive` and the state.FromStream call below are expected to
-// need a mechanical rename.
+// named.
 //
-// Fixtures intentionally contain no ET_CONFIGURATION entry in the streams that
-// get merged into the sqlite aggregate: SQLState.GetConfiguration returns
-// sql.ErrNoRows for a missing key and PutConfiguration is a plain INSERT, so
-// merging configuration entries into the aggregate fails today. The
-// configuration wire format is still pinned through full-v110.state, which is
-// byte-compared and loaded into a ScanCache only.
+// The streams merged into the sqlite aggregate contain no ET_CONFIGURATION
+// entry: they were generated while SQLState could not ingest one. The
+// configuration wire format is pinned through full-v110.state, which is
+// byte-compared and loaded into a ScanCache through LegacyFromStream.
 //
 // Regenerate with:
 //
@@ -543,41 +540,40 @@ func TestGoldenReadHeader(t *testing.T) {
 	require.Equal(t, gState1, hdr.Parent)
 }
 
-// TestGoldenLoadFull loads the kitchen-sink fixture into a scratch ScanCache
-// (the diag path) and pins what a loaded unitary state exposes, including the
-// configuration entry the aggregate cannot ingest today.
+// TestGoldenLoadFull loads the kitchen-sink fixture through LegacyFromStream
+// into a scratch ScanCache (the `plakar diag state` path) and pins what a
+// loaded unitary state exposes, including its configuration entry.
 func TestGoldenLoadFull(t *testing.T) {
-	// TODO: re-enable when FromStream comes back on the State type (it is
-	// commented out in state.go pending the loading-path rework).
-	t.Skip("state.FromStream is pending rework")
+	data := readFixture(t, "full-v110.state")
 
-	/*
-			data := readFixture(t, "full-v110.state")
+	sc := newScanCache(t)
+	st, err := state.LegacyFromStream(bytes.NewReader(data), gV110, sc)
+	require.NoError(t, err)
 
-			sc := newScanCache(t)
-			st, err := state.FromStream(bytes.NewReader(data), gV110, sc)
-			require.NoError(t, err)
+	requireMetadata(t, st.Metadata, gState3, gV110, gT3, gSerial)
 
-		requireMetadata(t, st.Metadata, gState3, gV110, gT3, gSerial)
+	objs := collect2(t, st.ListObjectsOfType(resources.RT_OBJECT))
+	require.Len(t, objs, 1)
+	require.Equal(t, gObjF, objs[0].Blob)
+	require.Equal(t, state.Location{Packfile: gPackF, Offset: 0, Length: 40}, objs[0].Location)
 
-		objs := collect2(t, st.ListObjectsOfType(resources.RT_OBJECT))
-		require.Len(t, objs, 1)
-		require.Equal(t, gObjF, objs[0].Blob)
-		require.Equal(t, state.Location{Packfile: gPackF, Offset: 0, Length: 40}, objs[0].Location)
+	colouredSnaps := collect2(t, st.ListColouredResources(resources.RT_SNAPSHOT))
+	require.Len(t, colouredSnaps, 1)
+	require.Equal(t, gSnapX, colouredSnaps[0].Blob)
+	require.Equal(t, gT3.UnixNano(), colouredSnaps[0].When.UnixNano())
 
-		colouredSnaps := collect2(t, st.ListColouredResources(resources.RT_SNAPSHOT))
-		require.Len(t, colouredSnaps, 1)
-		require.Equal(t, gSnapX, colouredSnaps[0].Blob)
-		require.Equal(t, gT3.UnixNano(), colouredSnaps[0].When.UnixNano())
+	// LegacyState has no BlobExists; assert its two halves directly: the
+	// object is listed (so its packfile is present) and that packfile is not
+	// coloured.
+	coloured, err := sc.HasColoured(resources.RT_PACKFILE, gPackF)
+	require.NoError(t, err)
+	require.False(t, coloured)
 
-		require.True(t, st.BlobExists(resources.RT_OBJECT, gObjF))
-
-		raw, err := sc.GetConfiguration("fixture-key")
-		require.NoError(t, err)
-		cfg, err := state.ConfigurationEntryFromBytes(raw)
-		require.NoError(t, err)
-			require.Equal(t, "fixture-key", cfg.Key)
-			require.Equal(t, []byte("fixture-value"), cfg.Value)
-			require.Equal(t, gT3.UnixNano(), cfg.CreatedAt.UnixNano())
-	*/
+	raw, err := sc.GetConfiguration("fixture-key")
+	require.NoError(t, err)
+	cfg, err := state.ConfigurationEntryFromBytes(raw)
+	require.NoError(t, err)
+	require.Equal(t, "fixture-key", cfg.Key)
+	require.Equal(t, []byte("fixture-value"), cfg.Value)
+	require.Equal(t, gT3.UnixNano(), cfg.CreatedAt.UnixNano())
 }
