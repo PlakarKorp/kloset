@@ -216,6 +216,8 @@ func (c *SQLState) getDeltas(query string, args ...any) iter.Seq2[Blob, error] {
 				if !yield(Blob{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			result = append(result, b)
