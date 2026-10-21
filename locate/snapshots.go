@@ -72,7 +72,12 @@ func buildPolicyItems(repo *repository.Repository) []Item {
 		sem      = make(chan struct{}, max(1, repo.AppContext().MaxConcurrency))
 	)
 
-	for snapshotID := range repo.ListSnapshots() {
+	for snapshotID, err := range repo.ListSnapshots() {
+		if err != nil {
+			repo.Logger().Error("failed to list snapshot %s", err)
+			continue
+		}
+
 		id := snapshotID // capture
 		sem <- struct{}{}
 		wg.Add(1)
@@ -140,7 +145,12 @@ func ParseSnapshotPath(snapshotPath string) (string, string) {
 
 func LookupSnapshotByPrefix(repo *repository.Repository, prefix string) []objects.MAC {
 	ret := make([]objects.MAC, 0)
-	for snapshotID := range repo.ListSnapshots() {
+	for snapshotID, err := range repo.ListSnapshots() {
+		if err != nil {
+			repo.Logger().Error("failed to list snapshot %s", err)
+			continue
+		}
+
 		if strings.HasPrefix(hex.EncodeToString(snapshotID[:]), prefix) {
 			ret = append(ret, snapshotID)
 		}

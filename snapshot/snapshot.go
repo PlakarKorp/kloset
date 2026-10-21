@@ -39,9 +39,15 @@ func (snap *Snapshot) Emitter(workflow string) *events.Emitter {
 func LogicalSize(repo *repository.Repository) (int, int64, error) {
 	nSnapshots := 0
 	totalSize := int64(0)
-	for snapshotID := range repo.ListSnapshots() {
+	for snapshotID, err := range repo.ListSnapshots() {
+		if err != nil {
+			repo.Logger().Error("failed to list snapshot %s", err)
+			continue
+		}
+
 		snap, err := Load(repo, snapshotID)
 		if err != nil {
+			repo.Logger().Error("failed to load snapshot %s", err)
 			continue
 		}
 		nSnapshots++
