@@ -492,7 +492,8 @@ func TestGoldenMergeLifecycle(t *testing.T) {
 	require.True(t, coloured)
 
 	var packs []objects.MAC
-	for pf := range ls.ListPackfiles() {
+	for pf, err := range ls.ListPackfiles() {
+		require.NoError(t, err)
 		packs = append(packs, pf)
 	}
 	require.ElementsMatch(t, []objects.MAC{gPack1, gPack3}, packs)

@@ -372,7 +372,8 @@ func TestListPackfiles(t *testing.T) {
 
 	// List packfiles
 	var found []objects.MAC
-	for packfile := range state.ListPackfiles() {
+	for packfile, err := range state.ListPackfiles() {
+		require.NoError(t, err)
 		found = append(found, packfile)
 	}
 
