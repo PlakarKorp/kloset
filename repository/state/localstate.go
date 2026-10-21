@@ -610,6 +610,8 @@ func (ls *LocalState) ListPackfiles() iter.Seq2[objects.MAC, error] {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 
 			if !yield(p.MAC, nil) {
@@ -626,6 +628,8 @@ func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
 				if !yield(PackfileEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			pe := PackfileEntry{
@@ -647,6 +651,8 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 
 			ok, err := ls.cache.HasPackfile(b.Packfile)
@@ -654,6 +660,8 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 			if !ok {
 				continue
@@ -664,6 +672,8 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 			if has {
 				continue
@@ -683,6 +693,8 @@ func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			ok, err := ls.cache.HasPackfile(b.Packfile)
@@ -690,6 +702,8 @@ func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			if !ok {
@@ -763,6 +777,8 @@ func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[Colo
 				if !yield(ColouredEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			de := ColouredEntry {
@@ -784,6 +800,8 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			ok, err := ls.cache.HasPackfile(b.Packfile)
@@ -791,6 +809,8 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			if !ok {
@@ -806,7 +826,7 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 					Length:   b.Length,
 				},
 			}
-			if !yield(de, err) {
+			if !yield(de, nil) {
 				return
 			}
 		}
