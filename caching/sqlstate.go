@@ -214,6 +214,7 @@ func (c *SQLState) getDeltas(query string, args ...any) iter.Seq2[Blob, error] {
 
 			if err := rows.Scan(macScanner{&b.MAC}, &b.Type, macScanner{&b.Packfile}, &b.Offset, &b.Length); err != nil {
 				if !yield(Blob{}, err) {
+					rows.Close()
 					return
 				}
 
@@ -304,6 +305,7 @@ func (c *SQLState) getColouredEntries(query string, args ...any) iter.Seq2[Colou
 
 			if err := rows.Scan(macScanner{&cb.MAC}, &cb.Type, &when); err != nil {
 				if !yield(ColouredBlob{}, err) {
+					rows.Close()
 					return
 				}
 
@@ -400,6 +402,7 @@ func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
 
 			if err := rows.Scan(macScanner{&p.MAC}, macScanner{&p.State}, &t); err != nil {
 				if !yield(Packfile{}, err) {
+					rows.Close()
 					return
 				}
 
