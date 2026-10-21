@@ -183,7 +183,7 @@ func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 		result[mac] = payload
 	}
 
-	return result, nil
+	return result, rows.Err()
 }
 
 func (c *SQLState) DelState(stateID objects.MAC) error {
@@ -221,6 +221,13 @@ func (c *SQLState) getDeltas(query string, args ...any) iter.Seq2[Blob, error] {
 			result = append(result, b)
 		}
 		rows.Close()
+
+		// partial result let the consummer choose to continue or not.
+		if err := rows.Err(); err != nil {
+			if !yield(Blob{}, err) {
+				return
+			}
+		}
 
 		for _, b := range result {
 			if !yield(b, nil) {
@@ -306,6 +313,13 @@ func (c *SQLState) getColouredEntries(query string, args ...any) iter.Seq2[Colou
 			result = append(result, cb)
 		}
 		rows.Close()
+
+		// partial result let the consummer choose to continue or not.
+		if err := rows.Err(); err != nil {
+			if !yield(ColouredBlob{}, err) {
+				return
+			}
+		}
 
 		for _, cb := range result {
 			if !yield(cb, nil) {
@@ -393,8 +407,14 @@ func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
 			p.Timestamp = time.Unix(0, t)
 			result = append(result, p)
 		}
-
 		rows.Close()
+
+		// partial result let the consummer choose to continue or not.
+		if err := rows.Err(); err != nil {
+			if !yield(Packfile{}, err) {
+				return
+			}
+		}
 
 		for _, p := range result {
 			if !yield(p, nil) {
@@ -445,8 +465,11 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 
 			result = append(result, data)
 		}
-
 		rows.Close()
+
+		if err := rows.Err(); err != nil {
+			return
+		}
 
 		for _, d := range result {
 			if !yield(d) {
