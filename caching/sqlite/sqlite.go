@@ -25,6 +25,21 @@ type Options struct {
 	Compressed    bool
 	ReadOnly      bool
 	Shared        bool
+
+	// Schema statements, run on every read-write open, and when a read-only
+	// open has to create the database file. They must be idempotent
+	// (CREATE ... IF NOT EXISTS).
+	Schema []string
+}
+
+func initSchema(db *sql.DB, schema []string) error {
+	for _, stmt := range schema {
+		if _, err := db.Exec(stmt); err != nil {
+			return fmt.Errorf("schema init: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func makeDefaultOptions() *Options {
@@ -48,6 +63,11 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 		if err != nil {
 			return nil, err
 		}
+
+		if err := initSchema(db, opts.Schema); err != nil {
+			db.Close()
+			return nil, err
+		}
 	} else {
 		if err := os.MkdirAll(dir, 0700); err != nil {
 			return nil, err
@@ -62,8 +82,8 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 			"&_pragma=cache_size(-20000)" +
 			"&_pragma=busy_timeout(5000)"
 
-		// If ro and the file does not exist, we need to open the db rw close it
-		// and reopen it.
+		// If ro and the file does not exist, we need to open the db rw, apply
+		// the schema, close it and reopen it.
 		if opts.ReadOnly {
 			if _, err := os.Stat(dbpath); errors.Is(err, os.ErrNotExist) {
 				tmpDb, err := sql.Open("sqlite", "file:"+dbpath)
@@ -79,8 +99,14 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 
 				for _, p := range pragmas {
 					if _, err := tmpDb.Exec(p); err != nil {
+						tmpDb.Close()
 						return nil, fmt.Errorf("pragma %q failed: %w", p, err)
 					}
+				}
+
+				if err := initSchema(tmpDb, opts.Schema); err != nil {
+					tmpDb.Close()
+					return nil, err
 				}
 				tmpDb.Close()
 			}
@@ -91,6 +117,13 @@ func New(dir, name string, opts *Options) (*SQLiteCache, error) {
 		db, err = sql.Open("sqlite", "file:"+dbpath+pragmas)
 		if err != nil {
 			return nil, err
+		}
+
+		if !opts.ReadOnly {
+			if err := initSchema(db, opts.Schema); err != nil {
+				db.Close()
+				return nil, err
+			}
 		}
 	}
 

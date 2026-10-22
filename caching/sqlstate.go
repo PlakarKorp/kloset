@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
-	"fmt"
 	"iter"
 	"runtime"
 	"sync"
@@ -41,60 +40,50 @@ type kv struct {
 	data []byte
 }
 
+var stateSchema = []string{
+	`CREATE TABLE IF NOT EXISTS states (
+		mac TEXT NOT NULL PRIMARY KEY,
+		payload BLOB NOT NULL
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS packfiles (
+		mac TEXT NOT NULL PRIMARY KEY,
+		payload BLOB NOT NULL
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS deltas (
+		mac TEXT NOT NULL,
+		type INTEGER NOT NULL,
+		packfile TEXT NOT NULL,
+		payload BLOB NOT NULL,
+		UNIQUE(type, mac, packfile)
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS deleteds (
+		mac TEXT NOT NULL,
+		type INTEGER NOT NULL,
+		payload BLOB NOT NULL,
+		UNIQUE(type, mac)
+	);`,
+
+	`CREATE TABLE IF NOT EXISTS configurations (
+		key TEXT NOT NULL PRIMARY KEY,
+		data BLOB NOT NULL
+	);`,
+}
+
 func NewSQLState(path string, ro bool) (*SQLState, error) {
 	db, err := sqlite.New(path, "state.db", &sqlite.Options{
 		DeleteOnClose: false,
 		Compressed:    true,
 		ReadOnly:      ro,
 		Shared:        true,
+		Schema:        stateSchema,
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	if !ro {
-		for _, typ := range []string{"states", "packfiles"} {
-			create := fmt.Sprintf(`CREATE TABLE IF NOT EXISTS %s (
-			mac TEXT NOT NULL PRIMARY KEY,
-			payload BLOB NOT NULL
-		);`, typ)
-
-			if _, err := db.Exec(create); err != nil {
-				return nil, err
-			}
-		}
-
-		create := `CREATE TABLE IF NOT EXISTS deltas (
-			mac TEXT NOT NULL,
-			type INTEGER NOT NULL,
-			packfile TEXT NOT NULL,
-			payload BLOB NOT NULL,
-			UNIQUE(type, mac, packfile)
-		);`
-		if _, err := db.Exec(create); err != nil {
-			return nil, err
-		}
-
-		create = `CREATE TABLE IF NOT EXISTS deleteds (
-			mac TEXT NOT NULL,
-			type INTEGER NOT NULL,
-			payload BLOB NOT NULL,
-			UNIQUE(type, mac)
-		);`
-
-		if _, err := db.Exec(create); err != nil {
-			return nil, err
-		}
-
-		create = `CREATE TABLE IF NOT EXISTS configurations (
-		key TEXT NOT NULL PRIMARY KEY,
-		data BLOB NOT NULL
-	);`
-
-		if _, err := db.Exec(create); err != nil {
-			return nil, err
-		}
-	}
 	if ro {
 		// This should be ctx.MaxConcurrency, but this is an import cycle and
 		// breaking it is out of the scope.
