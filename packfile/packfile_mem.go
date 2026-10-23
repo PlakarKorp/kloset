@@ -89,6 +89,14 @@ func NewPackfileInMemoryFromBytes(hasher hash.Hash, version versioning.Version, 
 		return nil, err
 	}
 
+	// The footer comes from untrusted bytes: the blob data it claims plus
+	// Count index records must fit exactly before it, otherwise IndexOffset
+	// would size an allocation out of thin air.
+	dataEnd := uint64(len(serialized) - FOOTER_SIZE)
+	if footer.IndexOffset > dataEnd || uint64(footer.Count)*BLOB_RECORD_SIZE != dataEnd-footer.IndexOffset {
+		return nil, fmt.Errorf("packfile footer does not match its length: index offset %d, %d index records, %d bytes before the footer", footer.IndexOffset, footer.Count, dataEnd)
+	}
+
 	_, err = reader.Seek(0, io.SeekStart)
 	if err != nil {
 		return nil, err
@@ -112,7 +120,8 @@ func NewPackfileInMemoryFromBytes(hasher hash.Hash, version versioning.Version, 
 			return nil, err
 		}
 
-		if blob.Offset+uint64(blob.Length) > p.Footer.IndexOffset {
+		// Offset comes from the input: a huge value would wrap Offset+Length below IndexOffset.
+		if blob.Offset > p.Footer.IndexOffset || uint64(blob.Length) > p.Footer.IndexOffset-blob.Offset {
 			return nil, fmt.Errorf("blob offset + blob length exceeds total length of packfile")
 		}
 
