@@ -81,7 +81,7 @@ func TestListSnapshotsWithMissingPackfile(t *testing.T) {
 	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaMissing.Blob, pfMissing, deltaMissing.Location.Offset, deltaMissing.Location.Length))
 	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaPresent.Blob, pfPresent, deltaPresent.Location.Offset, deltaPresent.Location.Length))
 
-	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf-data")))
+	require.NoError(t, cache.PutPackfile(pfPresent, objects.NilMac, time.Now()))
 
 	// ListSnapshots must produce exactly the entry whose packfile is present
 	// in the cache.
@@ -99,7 +99,7 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 	st, cache := newAggregate(t)
 
 	pf := objects.MAC{0xCC}
-	require.NoError(t, cache.PutPackfile(pf, []byte("pf")))
+	require.NoError(t, cache.PutPackfile(pf, objects.NilMac, time.Now()))
 
 	snapID := objects.MAC{0xDD}
 	delta := DeltaEntry{
@@ -127,7 +127,7 @@ func TestListOrphanDeltasWithMixedState(t *testing.T) {
 	st, cache := newAggregate(t)
 
 	pfPresent := objects.MAC{0xA1}
-	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf")))
+	require.NoError(t, cache.PutPackfile(pfPresent, objects.NilMac, time.Now()))
 
 	orphan := DeltaEntry{
 		Type:     resources.RT_CHUNK,
