@@ -1288,7 +1288,7 @@ func (r *Repository) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	return r.state.ListSnapshots()
 }
 
-func (r *Repository) ListPackfiles() iter.Seq[objects.MAC] {
+func (r *Repository) ListPackfiles() iter.Seq2[objects.MAC, error] {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "ListPackfiles(): %s", time.Since(t0))

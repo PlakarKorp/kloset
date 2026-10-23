@@ -318,15 +318,14 @@ func TestBlobExists(t *testing.T) {
 		Flags: 0x1234,
 	}
 	putDeltaInCache(t, cache, deltaEntry)
-	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
+	cache.PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
 
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.True(t, exists)
 
 	// Test with deleted packfile. The aggregate receives coloured entries via
 	// merge, so seed the cache directly.
-	ce := ColouredEntry{Type: resources.RT_PACKFILE, Blob: deltaEntry.Location.Packfile, When: time.Now()}
-	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
+	require.NoError(t, cache.PutColoured(resources.RT_PACKFILE, deltaEntry.Location.Packfile, time.Now()))
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
@@ -354,7 +353,7 @@ func TestGetSubpartForBlob(t *testing.T) {
 		Flags:    0x1234,
 	}
 	putDeltaInCache(t, cache, deltaEntry)
-	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
+	cache.PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
 
 	location, exists, err = state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.NoError(t, err)
@@ -368,12 +367,13 @@ func TestListPackfiles(t *testing.T) {
 	// Add some packfiles
 	packfile1 := objects.MAC{1, 2, 3, 4}
 	packfile2 := objects.MAC{5, 6, 7, 8}
-	cache.PutPackfile(packfile1, []byte("data1"))
-	cache.PutPackfile(packfile2, []byte("data2"))
+	cache.PutPackfile(packfile1, objects.NilMac, time.Now())
+	cache.PutPackfile(packfile2, objects.NilMac, time.Now())
 
 	// List packfiles
 	var found []objects.MAC
-	for packfile := range state.ListPackfiles() {
+	for packfile, err := range state.ListPackfiles() {
+		require.NoError(t, err)
 		found = append(found, packfile)
 	}
 
@@ -415,7 +415,7 @@ func TestListSnapshots(t *testing.T) {
 
 	putDeltaInCache(t, cache, delta1)
 	putDeltaInCache(t, cache, delta2)
-	cache.PutPackfile(packfile, []byte("packfile data"))
+	cache.PutPackfile(packfile, objects.NilMac, time.Now())
 
 	// List snapshots
 	var found []objects.MAC
@@ -454,14 +454,18 @@ func TestListOrphanDeltas(t *testing.T) {
 	}
 
 	require.Len(t, found, 1)
-	require.Equal(t, *orphanDelta, found[0])
+	// The aggregate does not store Version/Flags; ListOrphanDeltas
+	// reconstructs entries with only the queryable fields set.
+	require.Equal(t, orphanDelta.Blob, found[0].Blob)
+	require.Equal(t, orphanDelta.Type, found[0].Type)
+	require.Equal(t, orphanDelta.Location, found[0].Location)
 }
 
 // putDeltaInCache seeds a delta entry directly in the aggregate's cache: the
 // aggregate receives deltas via merge, not through a method of its own.
 func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
 	t.Helper()
-	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.ToBytes()))
+	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.Location.Offset, de.Location.Length))
 }
 
 // colourInCache seeds a coloured entry directly in the aggregate's cache: the
@@ -469,8 +473,7 @@ func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
 // own.
 func colourInCache(t *testing.T, cache *caching.SQLState, rtype resources.Type, resource objects.MAC) {
 	t.Helper()
-	ce := ColouredEntry{Type: rtype, Blob: resource, When: time.Now()}
-	require.NoError(t, cache.PutColoured(ce.Type, ce.Blob, ce.ToBytes()))
+	require.NoError(t, cache.PutColoured(rtype, resource, time.Now()))
 }
 
 func TestHasDeletedResource(t *testing.T) {

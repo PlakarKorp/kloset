@@ -2,6 +2,7 @@ package caching_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
@@ -68,21 +69,27 @@ func TestSQLStateDeltaOperations(t *testing.T) {
 
 	blobMAC := objects.MAC{0x01}
 	packMAC := objects.MAC{0x02}
-	data := []byte("delta payload")
 
 	// Direct PutDelta
-	require.NoError(t, st.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, data))
+	require.NoError(t, st.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, 42, 1337))
 
-	// GetDeltasByType
+	// GetDeltasByType round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetDeltasByType(resources.RT_CHUNK) {
+	for b, err := range st.GetDeltasByType(resources.RT_CHUNK) {
+		require.NoError(t, err)
+		require.Equal(t, blobMAC, b.MAC)
+		require.Equal(t, resources.RT_CHUNK, b.Type)
+		require.Equal(t, packMAC, b.Packfile)
+		require.Equal(t, uint64(42), b.Offset)
+		require.Equal(t, uint32(1337), b.Length)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// GetDeltas
 	count = 0
-	for _, _ = range st.GetDeltas() {
+	for _, err := range st.GetDeltas() {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 1, count)
@@ -91,7 +98,8 @@ func TestSQLStateDeltaOperations(t *testing.T) {
 	require.NoError(t, st.DelDelta(resources.RT_CHUNK, blobMAC, packMAC))
 
 	count = 0
-	for _, _ = range st.GetDeltas() {
+	for _, err := range st.GetDeltas() {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 0, count)
@@ -101,7 +109,7 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	blobMAC := objects.MAC{0xcc}
-	data := []byte("coloured data")
+	when := time.Unix(0, 1700000000000000000).UTC()
 
 	// Not present yet
 	ok, err := st.HasColoured(resources.RT_CHUNK, blobMAC)
@@ -109,29 +117,35 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	require.False(t, ok)
 
 	// Put
-	require.NoError(t, st.PutColoured(resources.RT_CHUNK, blobMAC, data))
+	require.NoError(t, st.PutColoured(resources.RT_CHUNK, blobMAC, when))
 
 	ok, err = st.HasColoured(resources.RT_CHUNK, blobMAC)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// GetColouredEntries
+	// GetColouredEntries round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetColouredEntries() {
+	for cb, err := range st.GetColouredEntries() {
+		require.NoError(t, err)
+		require.Equal(t, blobMAC, cb.MAC)
+		require.Equal(t, resources.RT_CHUNK, cb.Type)
+		require.Equal(t, when.UnixNano(), cb.When.UnixNano())
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// GetColouredEntriesByType
 	count = 0
-	for _, _ = range st.GetColouredEntriesByType(resources.RT_CHUNK) {
+	for _, err := range st.GetColouredEntriesByType(resources.RT_CHUNK) {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// Wrong type returns nothing
 	count = 0
-	for _, _ = range st.GetColouredEntriesByType(resources.RT_PACKFILE) {
+	for _, err := range st.GetColouredEntriesByType(resources.RT_PACKFILE) {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 0, count)
@@ -148,7 +162,8 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	packMAC := objects.MAC{0xde}
-	data := []byte("packfile data")
+	stateMAC := objects.MAC{0xad}
+	when := time.Unix(0, 1700000000000000000).UTC()
 
 	// Not present
 	ok, err := st.HasPackfile(packMAC)
@@ -156,15 +171,19 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 	require.False(t, ok)
 
 	// Put
-	require.NoError(t, st.PutPackfile(packMAC, data))
+	require.NoError(t, st.PutPackfile(packMAC, stateMAC, when))
 
 	ok, err = st.HasPackfile(packMAC)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// GetPackfiles
+	// GetPackfiles round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetPackfiles() {
+	for p, err := range st.GetPackfiles() {
+		require.NoError(t, err)
+		require.Equal(t, packMAC, p.MAC)
+		require.Equal(t, stateMAC, p.State)
+		require.Equal(t, when.UnixNano(), p.Timestamp.UnixNano())
 		count++
 	}
 	require.Equal(t, 1, count)
@@ -202,7 +221,7 @@ func TestSQLStateReadOnly(t *testing.T) {
 	// First create the database in write mode.
 	st, err := caching.NewSQLState(dir, false)
 	require.NoError(t, err)
-	require.NoError(t, st.PutPackfile(objects.MAC{0x01}, []byte("pack")))
+	require.NoError(t, st.PutPackfile(objects.MAC{0x01}, objects.MAC{0x02}, time.Now()))
 
 	// Open read-only.
 	ro, err := caching.NewSQLState(dir, true)

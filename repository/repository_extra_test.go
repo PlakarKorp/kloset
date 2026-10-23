@@ -147,7 +147,8 @@ func TestGetPackfileForBlobMissing(t *testing.T) {
 func TestListPackfilesEmpty(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 	var count int
-	for range repo.ListPackfiles() {
+	for _, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		count++
 	}
 	// A fresh repository has no packfiles yet.
@@ -218,7 +219,8 @@ func TestGetPackfileRangeAfterBackup(t *testing.T) {
 	}
 	_ = ptesting.GenerateSnapshot(t, repo, files)
 
-	for packfile := range repo.ListPackfiles() {
+	for packfile, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		pf, pfErr := repo.GetPackfile(packfile)
 		if pfErr != nil {
 			continue
@@ -253,7 +255,8 @@ func TestGetPackfileBlobAfterBackup(t *testing.T) {
 	}
 	_ = ptesting.GenerateSnapshot(t, repo, files)
 
-	for packfile := range repo.ListPackfiles() {
+	for packfile, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		pf, pfErr := repo.GetPackfile(packfile)
 		if pfErr != nil {
 			continue
