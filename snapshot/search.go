@@ -27,14 +27,17 @@ func matchmime(matches []string, target string) bool {
 		return true
 	}
 
+	// Drop the parameters, as the content-type index does.
+	target, _, _ = strings.Cut(target, ";")
 	t := strings.SplitN(target, "/", 2)
 
 	for _, match := range matches {
 		m := strings.SplitN(match, "/", 2)
 
-		if len(m) == 2 && len(t) == 2 && m[0] == t[0] && m[0] == t[1] {
-			return true
-		} else if m[0] == t[0] {
+		if m[0] != t[0] {
+			continue
+		}
+		if len(m) == 1 || (len(t) == 2 && m[1] == t[1]) {
 			return true
 		}
 	}

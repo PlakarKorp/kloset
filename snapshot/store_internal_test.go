@@ -33,11 +33,17 @@ func TestMatchmime(t *testing.T) {
 	// Empty match list matches anything.
 	require.True(t, matchmime(nil, "text/plain"))
 
-	// Full type/subtype equality on the first component (the m[0]==t[0] branch).
+	// Full type/subtype equality.
 	require.True(t, matchmime([]string{"text/plain"}, "text/plain"))
 
 	// Top-level type match only ("text" matches "text/html").
 	require.True(t, matchmime([]string{"text"}, "text/html"))
+
+	// A subtype does not match its siblings.
+	require.False(t, matchmime([]string{"application/pdf"}, "application/zip"))
+
+	// Parameters are ignored, as in the content-type index.
+	require.True(t, matchmime([]string{"text/plain"}, "text/plain; charset=utf-8"))
 
 	// No match.
 	require.False(t, matchmime([]string{"image"}, "text/plain"))
