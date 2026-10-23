@@ -139,7 +139,11 @@ func (r *Repository) GetBlobs(ctx context.Context, blobs []BlobReq, opts *GetBlo
 							blobStart := b.Offset - rp.loc.Offset
 							blobBytes := data[blobStart : blobStart+uint64(b.Length)]
 							it.b.Data, it.err = r.decodeBuffer(blobBytes, r.blobLimit(b.Type))
+							if it.err == nil {
+								it.err = r.verifyBlob(b.Type, b.MAC, it.b.Data)
+							}
 							if it.err != nil {
+								it.b.Data = nil
 								it.err = fmt.Errorf("packfile %x at %d: %w", b.Packfile, b.Offset, it.err)
 							}
 						}
