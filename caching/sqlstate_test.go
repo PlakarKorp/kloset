@@ -162,7 +162,8 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	packMAC := objects.MAC{0xde}
-	data := []byte("packfile data")
+	stateMAC := objects.MAC{0xad}
+	when := time.Unix(0, 1700000000000000000).UTC()
 
 	// Not present
 	ok, err := st.HasPackfile(packMAC)
@@ -170,15 +171,19 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 	require.False(t, ok)
 
 	// Put
-	require.NoError(t, st.PutPackfile(packMAC, data))
+	require.NoError(t, st.PutPackfile(packMAC, stateMAC, when))
 
 	ok, err = st.HasPackfile(packMAC)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// GetPackfiles
+	// GetPackfiles round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetPackfiles() {
+	for p, err := range st.GetPackfiles() {
+		require.NoError(t, err)
+		require.Equal(t, packMAC, p.MAC)
+		require.Equal(t, stateMAC, p.State)
+		require.Equal(t, when.UnixNano(), p.Timestamp.UnixNano())
 		count++
 	}
 	require.Equal(t, 1, count)
@@ -216,7 +221,7 @@ func TestSQLStateReadOnly(t *testing.T) {
 	// First create the database in write mode.
 	st, err := caching.NewSQLState(dir, false)
 	require.NoError(t, err)
-	require.NoError(t, st.PutPackfile(objects.MAC{0x01}, []byte("pack")))
+	require.NoError(t, st.PutPackfile(objects.MAC{0x01}, objects.MAC{0x02}, time.Now()))
 
 	// Open read-only.
 	ro, err := caching.NewSQLState(dir, true)

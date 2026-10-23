@@ -318,7 +318,7 @@ func TestBlobExists(t *testing.T) {
 		Flags: 0x1234,
 	}
 	putDeltaInCache(t, cache, deltaEntry)
-	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
+	cache.PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
 
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.True(t, exists)
@@ -353,7 +353,7 @@ func TestGetSubpartForBlob(t *testing.T) {
 		Flags:    0x1234,
 	}
 	putDeltaInCache(t, cache, deltaEntry)
-	cache.PutPackfile(deltaEntry.Location.Packfile, []byte("packfile data"))
+	cache.PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
 
 	location, exists, err = state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.NoError(t, err)
@@ -367,8 +367,8 @@ func TestListPackfiles(t *testing.T) {
 	// Add some packfiles
 	packfile1 := objects.MAC{1, 2, 3, 4}
 	packfile2 := objects.MAC{5, 6, 7, 8}
-	cache.PutPackfile(packfile1, []byte("data1"))
-	cache.PutPackfile(packfile2, []byte("data2"))
+	cache.PutPackfile(packfile1, objects.NilMac, time.Now())
+	cache.PutPackfile(packfile2, objects.NilMac, time.Now())
 
 	// List packfiles
 	var found []objects.MAC
@@ -414,7 +414,7 @@ func TestListSnapshots(t *testing.T) {
 
 	putDeltaInCache(t, cache, delta1)
 	putDeltaInCache(t, cache, delta2)
-	cache.PutPackfile(packfile, []byte("packfile data"))
+	cache.PutPackfile(packfile, objects.NilMac, time.Now())
 
 	// List snapshots
 	var found []objects.MAC

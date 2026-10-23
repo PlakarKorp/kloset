@@ -312,7 +312,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			if err := ls.cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
 				return err
 			}
 
@@ -451,7 +451,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			if err := ls.cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
 				return err
 			}
 
@@ -528,7 +528,7 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 			return fmt.Errorf("failed to deserialize packfile entry %w", err)
 		}
 
-		if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+		if err := ls.cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -603,10 +603,16 @@ func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC
 	}
 }
 
-func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
-	return func(yield func(objects.MAC) bool) {
-		for st := range ls.cache.GetPackfiles() {
-			if !yield(st) {
+func (ls *LocalState) ListPackfiles() iter.Seq2[objects.MAC, error] {
+	return func(yield func(objects.MAC, error) bool) {
+		for p, err := range ls.cache.GetPackfiles() {
+			if err != nil {
+				if !yield(objects.NilMac, err) {
+					return
+				}
+			}
+
+			if !yield(p.MAC, nil) {
 				return
 			}
 		}
@@ -615,9 +621,19 @@ func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
 
 func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
 	return func(yield func(PackfileEntry, error) bool) {
-		for _, buf := range ls.cache.GetPackfiles() {
-			pe, err := PackfileEntryFromBytes(buf)
-			if !yield(pe, err) {
+		for p, err:= range ls.cache.GetPackfiles() {
+			if err != nil {
+				if !yield(PackfileEntry{}, err) {
+					return
+				}
+			}
+
+			pe := PackfileEntry{
+				Packfile:  p.MAC,
+				StateID:   p.State,
+				Timestamp: p.Timestamp,
+			}
+			if !yield(pe, nil) {
 				return
 			}
 		}

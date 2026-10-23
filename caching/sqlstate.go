@@ -17,12 +17,6 @@ type SQLState struct {
 	db *sqlite.SQLiteCache
 }
 
-// Used to flatten a map, because go is go.
-type kv struct {
-	mac  objects.MAC
-	data []byte
-}
-
 var stateSchema = []string{
 	`CREATE TABLE IF NOT EXISTS states (
 		mac BLOB NOT NULL PRIMARY KEY,
@@ -31,7 +25,8 @@ var stateSchema = []string{
 
 	`CREATE TABLE IF NOT EXISTS packfiles (
 		mac BLOB NOT NULL PRIMARY KEY,
-		payload BLOB NOT NULL
+		state BLOB NOT NULL,
+		timestamp INTEGER NOT NULL
 	);`,
 
 	`CREATE TABLE IF NOT EXISTS deltas (
@@ -86,6 +81,12 @@ type ColouredBlob struct {
 	MAC  objects.MAC
 	Type resources.Type
 	When time.Time
+}
+
+type Packfile struct {
+	MAC       objects.MAC
+	State     objects.MAC
+	Timestamp time.Time
 }
 
 func NewSQLState(path string, ro bool) (*SQLState, error) {
@@ -329,8 +330,8 @@ func (c *SQLState) DelColoured(blobType resources.Type, blobMAC objects.MAC) err
 	return err
 }
 
-func (c *SQLState) PutPackfile(packfileMAC objects.MAC, data []byte) error {
-	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, payload) VALUES(?,  ?)", packfileMAC[:], data)
+func (c *SQLState) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
+	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, state, timestamp) VALUES(?,  ?, ?)", packfileMAC[:], stateMAC[:], timestamp.UnixNano())
 	return err
 }
 
@@ -365,32 +366,38 @@ func (c *SQLState) DelPackfile(packfileMAC objects.MAC) error {
 	return err
 }
 
-func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM packfiles;"
+func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
+	return func(yield func(Packfile, error) bool) {
+		query := "SELECT mac, state, timestamp FROM packfiles;"
 
 		rows, err := c.db.Query(query)
 		if err != nil {
+			yield(Packfile{}, err)
 			return
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
+		result := make([]Packfile, 0)
 		for rows.Next() {
-			var kv kv
+			p := Packfile{}
+			var t int64
 
-			if err := rows.Scan(macScanner{&kv.mac}, &kv.data); err != nil {
-				// XXX: who the f designed that interface :(
+			if err := rows.Scan(macScanner{&p.MAC}, macScanner{&p.State}, &t); err != nil {
+				if !yield(Packfile{}, err) {
+					return
+				}
+
 				continue
 			}
 
-			result = append(result, kv)
+			p.Timestamp = time.Unix(0, t)
+			result = append(result, p)
 		}
 
 		rows.Close()
 
-		for _, r := range result {
-			if !yield(r.mac, r.data) {
+		for _, p := range result {
+			if !yield(p, nil) {
 				return
 			}
 		}

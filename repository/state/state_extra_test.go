@@ -194,7 +194,7 @@ func TestListPackfileEntries(t *testing.T) {
 	pf2 := objects.MAC{0xBB}
 	for i, pf := range []objects.MAC{pf1, pf2} {
 		pe := PackfileEntry{Packfile: pf, StateID: objects.MAC{byte(i + 1)}, Timestamp: time.Now()}
-		require.NoError(t, cache.PutPackfile(pe.Packfile, pe.ToBytes()))
+		require.NoError(t, cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp))
 	}
 
 	var entries []PackfileEntry
