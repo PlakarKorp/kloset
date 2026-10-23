@@ -138,6 +138,12 @@ func (r *Repository) GetBlobs(ctx context.Context, blobs []BlobReq, opts *GetBlo
 							blobStart := b.Offset - rp.loc.Offset
 							blobBytes := data[blobStart : blobStart+uint64(b.Length)]
 							it.b.Data, it.err = r.decodeBuffer(blobBytes)
+							if it.err == nil {
+								it.err = r.verifyBlob(b.Type, b.MAC, it.b.Data)
+							}
+							if it.err != nil {
+								it.b.Data = nil
+							}
 						}
 
 						select {
