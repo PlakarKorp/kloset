@@ -46,14 +46,10 @@ func New(path string) (*ScanLog, error) {
 	db, err := sqlite.New(path, "scanlog", &sqlite.Options{
 		DeleteOnClose: true,
 		Compressed:    true,
+		Schema:        scanlogSchema,
 	})
 
 	if err != nil {
-		return nil, err
-	}
-
-	if err := createSchema(db); err != nil {
-		_ = db.Close()
 		return nil, err
 	}
 
@@ -67,9 +63,8 @@ func (s *ScanLog) SetMaxConn(n int) {
 	s.db.SetMaxIdleConns(n / 2)
 }
 
-func createSchema(db *sqlite.SQLiteCache) error {
-	const schema = `
-	CREATE TABLE IF NOT EXISTS entries (
+var scanlogSchema = []string{
+	`CREATE TABLE IF NOT EXISTS entries (
 		kind    INTEGER NOT NULL, -- 1 = dir, 2 = file
 		path    TEXT    NOT NULL,
 		parent  TEXT    NOT NULL,
@@ -78,25 +73,20 @@ func createSchema(db *sqlite.SQLiteCache) error {
 		payload BLOB    NOT NULL,
 		summary BLOB,
 		PRIMARY KEY (path, kind)
-	) WITHOUT ROWID;
+	) WITHOUT ROWID;`,
 
-	CREATE INDEX IF NOT EXISTS entries_parent_idx
-	ON entries(parent);
+	`CREATE INDEX IF NOT EXISTS entries_parent_idx
+	ON entries(parent);`,
 
-
-	CREATE TABLE IF NOT EXISTS pathmacs (
+	`CREATE TABLE IF NOT EXISTS pathmacs (
 		kind    INTEGER NOT NULL, -- 1 = errors, 2 = xattr
 		path    TEXT NOT NULL PRIMARY KEY,
 		parent  TEXT NOT NULL,
 		mac     BLOB NOT NULL
-	) WITHOUT ROWID;
+	) WITHOUT ROWID;`,
 
-	CREATE INDEX IF NOT EXISTS pathmacs_parent_idx
-	ON pathmacs(kind, parent, path);
-	`
-
-	_, err := db.Exec(schema)
-	return err
+	`CREATE INDEX IF NOT EXISTS pathmacs_parent_idx
+	ON pathmacs(kind, parent, path);`,
 }
 
 func (s *ScanLog) Close() error {

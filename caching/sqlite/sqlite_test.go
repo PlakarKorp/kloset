@@ -140,3 +140,51 @@ func TestDeleteOnClose(t *testing.T) {
 	err = db.Close()
 	require.NoError(t, err)
 }
+
+var testSchema = []string{
+	`CREATE TABLE IF NOT EXISTS foo (bar INTEGER NOT NULL);`,
+}
+
+func hasTable(t *testing.T, db *sqlite.SQLiteCache, name string) bool {
+	t.Helper()
+	var n int
+	err := db.QueryRow(`SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name = ?`, name).Scan(&n)
+	require.NoError(t, err)
+	return n == 1
+}
+
+func TestSchemaReadWrite(t *testing.T) {
+	dir := t.TempDir()
+
+	db, err := sqlite.New(dir, "test.db", &sqlite.Options{Schema: testSchema})
+	require.NoError(t, err)
+	require.True(t, hasTable(t, db, "foo"))
+	require.NoError(t, db.Close())
+
+	// Reopening runs the (idempotent) schema again without error.
+	db, err = sqlite.New(dir, "test.db", &sqlite.Options{Schema: testSchema})
+	require.NoError(t, err)
+	defer db.Close()
+	require.True(t, hasTable(t, db, "foo"))
+}
+
+func TestSchemaReadOnlyMissingFile(t *testing.T) {
+	dir := t.TempDir()
+
+	// A read-only open of a database that does not exist yet must still come
+	// up with the schema, so statements can be prepared against it.
+	db, err := sqlite.New(dir, "test.db", &sqlite.Options{ReadOnly: true, Schema: testSchema})
+	require.NoError(t, err)
+	defer db.Close()
+	require.True(t, hasTable(t, db, "foo"))
+
+	_, err = db.Prepare(`SELECT bar FROM foo`)
+	require.NoError(t, err)
+}
+
+func TestSchemaInMemory(t *testing.T) {
+	db, err := sqlite.New("", ":memory:", &sqlite.Options{Schema: testSchema})
+	require.NoError(t, err)
+	defer db.Close()
+	require.True(t, hasTable(t, db, "foo"))
+}

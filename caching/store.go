@@ -54,23 +54,22 @@ type SQLiteDBStore[K any, V any] struct {
 	db     *sqlite.SQLiteCache
 }
 
+var dbstoreSchema = []string{
+	// It's safe to rely on the implicit id<=>ROWID alias here, ROWID will only
+	// be reused in case of DELETE which we don't do.
+	`CREATE TABLE IF NOT EXISTS dbstore (
+		id INTEGER PRIMARY KEY,
+		node BLOB NOT NULL
+	);`,
+}
+
 func NewSQLiteDBStore[K, V any](storePath, storeName string) (*SQLiteDBStore[K, V], error) {
 	db, err := sqlite.New(storePath, storeName, &sqlite.Options{
 		DeleteOnClose: true,
 		Compressed:    false,
+		Schema:        dbstoreSchema,
 	})
 	if err != nil {
-		return nil, err
-	}
-
-	// It's safe to rely on the implicit id<=>ROWID alias here, ROWID will only
-	// be reused in case of DELETE which we don't do.
-	create := `CREATE TABLE IF NOT EXISTS dbstore (
-		id INTEGER PRIMARY KEY,
-		node BLOB NOT NULL
-	);`
-
-	if _, err := db.Exec(create); err != nil {
 		return nil, err
 	}
 
