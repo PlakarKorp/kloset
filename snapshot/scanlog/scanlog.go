@@ -40,9 +40,14 @@ type batchRec struct {
 
 type ScanLog struct {
 	db *sqlite.SQLiteCache
+
+	// prepared statements for hotest queries
+	listPathnamesAscQ     *sql.Stmt
+	listPathnamesDescQ    *sql.Stmt
+	countDirectPathnamesQ *sql.Stmt
 }
 
-func New(path string) (*ScanLog, error) {
+func New(path string) (_ *ScanLog, err error) {
 	db, err := sqlite.New(path, "scanlog", &sqlite.Options{
 		DeleteOnClose: true,
 		Compressed:    true,
@@ -53,14 +58,44 @@ func New(path string) (*ScanLog, error) {
 		return nil, err
 	}
 
-	return &ScanLog{
+	self := &ScanLog{
 		db: db,
-	}, nil
+	}
+	defer func() {
+		if err != nil {
+			self.Close()
+		}
+	}()
+
+	self.listPathnamesAscQ, err = self.db.Prepare(`SELECT kind, path, payload, summary
+		FROM entries
+		WHERE parent = ? AND parent != path
+		ORDER BY path ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare listPathnamesAsc %w", err)
+	}
+
+	self.listPathnamesDescQ, err = self.db.Prepare(`SELECT kind, path, payload, summary
+		FROM entries
+		WHERE parent = ? AND parent != path
+		ORDER BY path DESC`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare listPathnamesDesc %w", err)
+	}
+
+	self.countDirectPathnamesQ, err = self.db.Prepare(`SELECT COUNT(1)
+		FROM pathmacs
+		WHERE kind = ? AND parent = ? AND parent != path`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare countDirectPathanemes %w", err)
+	}
+
+	return self, nil
 }
 
 func (s *ScanLog) SetMaxConn(n int) {
 	s.db.SetMaxOpenConns(n)
-	s.db.SetMaxIdleConns(n / 2)
+	s.db.SetMaxIdleConns(n)
 }
 
 var scanlogSchema = []string{
@@ -90,6 +125,14 @@ var scanlogSchema = []string{
 }
 
 func (s *ScanLog) Close() error {
+	for _, stmt := range []*sql.Stmt{
+		s.listPathnamesAscQ, s.listPathnamesDescQ, s.countDirectPathnamesQ,
+	} {
+		if stmt != nil {
+			stmt.Close()
+		}
+	}
+
 	return s.db.Close()
 }
 
@@ -311,21 +354,14 @@ func (s *ScanLog) ListPathnameEntries(prefix string, reverse bool) iter.Seq[Entr
 func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {
 
 	return func(yield func(Entry) bool) {
-		order := "ASC"
+		query := s.listPathnamesAscQ
 		if reverse {
-			order = "DESC"
+			query = s.listPathnamesDescQ
 		}
 
-		query := `
-		SELECT kind, path, payload, summary
-		FROM entries
-		WHERE parent = ? AND parent != path
-		`
 		args := []any{parent}
 
-		query += ` ORDER BY path ` + order
-
-		rows, err := s.db.Query(query, args...)
+		rows, err := query.Query(args...)
 		if err != nil {
 			return
 		}
@@ -428,10 +464,7 @@ func (s *ScanLog) ListPathMACsFrom(kind PathMACKind, prefix string) iter.Seq[Pat
 
 func (s *ScanLog) CountDirectPathMACs(kind PathMACKind, parent string) (uint64, error) {
 	var n uint64
-	err := s.db.QueryRow(
-		`SELECT COUNT(1) FROM pathmacs WHERE kind = ? AND parent = ? AND parent != path`,
-		kind, parent,
-	).Scan(&n)
+	err := s.countDirectPathnamesQ.QueryRow(kind, parent).Scan(&n)
 	if err != nil {
 		return 0, err
 	}
