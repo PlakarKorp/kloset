@@ -17,6 +17,7 @@ const (
 	FLAG_NOMERGE                        // importer: cannot merge those in a single snapshot (multidir support)
 	FLAG_EXPORTXATTR                    // exporter: please send extended attributes during Export()
 	FLAG_WALKDIRORDER                   // importer/exporter: the records are sent/expected in WalkDir order
+	FLAG_NOIGNORE                       // importer: exclude rules do not apply
 )
 
 var ErrUnknownFlag = errors.New("unknown flag")
@@ -130,6 +131,8 @@ func ParseFlag(name string) (Flags, error) {
 		return FLAG_EXPORTXATTR, nil
 	case "walkdirorder":
 		return FLAG_WALKDIRORDER, nil
+	case "noignore":
+		return FLAG_NOIGNORE, nil
 	default:
 		return 0, ErrUnknownFlag
 	}
