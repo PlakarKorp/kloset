@@ -41,6 +41,7 @@ var (
 	ErrPackfileNotFound = errors.New("packfile not found")
 	ErrBlobNotFound     = errors.New("blob not found")
 	ErrBlobTooLarge     = errors.New("blob exceeds its size limit")
+	ErrBlobCorrupted    = errors.New("blob corrupted")
 	ErrNotReadable      = errors.New("repository is not readable")
 )
 
@@ -1085,6 +1086,15 @@ func (r *Repository) getPackfileBlob(loc state.Location, limit int64) (io.ReadSe
 		r.Logger().Trace("repository", "GetPackfileBlob(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
 	}()
 
+	decoded, err := r.getPackfileBlobBytes(loc, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	return bytes.NewReader(decoded), nil
+}
+
+func (r *Repository) getPackfileBlobBytes(loc state.Location, limit int64) ([]byte, error) {
 	data, err := r.GetPackfileRange(loc)
 	if err != nil {
 		return nil, err
@@ -1095,7 +1105,22 @@ func (r *Repository) getPackfileBlob(loc state.Location, limit int64) (io.ReadSe
 		return nil, fmt.Errorf("packfile %x at %d: %w", loc.Packfile, loc.Offset, err)
 	}
 
-	return bytes.NewReader(decoded), nil
+	return decoded, nil
+}
+
+// verifyBlob checks that data is the blob the state recorded under mac.
+// Snapshot headers and signatures are stored under the snapshot identifier
+// rather than under their own MAC, so they cannot be checked this way.
+func (r *Repository) verifyBlob(Type resources.Type, mac objects.MAC, data []byte) error {
+	if Type == resources.RT_SNAPSHOT || Type == resources.RT_SIGNATURE {
+		return nil
+	}
+
+	if r.ComputeMAC(data) != mac {
+		return ErrBlobCorrupted
+	}
+
+	return nil
 }
 
 // Deletes a packfile from the store. Warning this is a true delete and is unrecoverable.
@@ -1179,6 +1204,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 		var offset, nextOffset uint64
 		var leftOver bool
 		var currChks []state.Location
+		var currMACs []objects.MAC
 		var size uint32            // size of the current range.
 		var accumulatedSize uint32 // total size we got in this iteration, possibly spanning multiple ranges.
 
@@ -1204,6 +1230,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				nextOffset = uint64(loc.Length) + loc.Offset
 				leftOver = true
 				currChks = append(currChks, loc)
+				currMACs = append(currMACs, obj.Chunks[i].ContentMAC)
 				continue
 			}
 
@@ -1216,15 +1243,19 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				}
 
 				currentOffset := 0
-				for _, l := range currChks {
+				for i, l := range currChks {
 					chunkData := data[currentOffset : currentOffset+int(l.Length)]
 					currentOffset += int(l.Length)
 
 					decodedChunk, err := r.decodeBuffer(chunkData, r.blobLimit(resources.RT_CHUNK))
+					if err == nil {
+						err = r.verifyBlob(resources.RT_CHUNK, currMACs[i], decodedChunk)
+					}
 					if err != nil {
 						if !yield(nil, fmt.Errorf("packfile %x at %d: %w", l.Packfile, l.Offset, err)) {
 							return
 						}
+						continue
 					}
 
 					if !yield(decodedChunk, nil) {
@@ -1239,6 +1270,8 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				nextOffset = uint64(loc.Length) + loc.Offset
 				currChks = nil
 				currChks = append(currChks, loc)
+				currMACs = nil
+				currMACs = append(currMACs, obj.Chunks[i].ContentMAC)
 
 				// This is inaccurate, as in we already increment the size for
 				// the _first_ chunk of the iteration so we are over accounting
@@ -1263,6 +1296,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 			accumulatedSize += loc.Length
 
 			currChks = append(currChks, loc)
+			currMACs = append(currMACs, obj.Chunks[i].ContentMAC)
 		}
 
 		if leftOver {
@@ -1274,15 +1308,19 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 			}
 
 			currentOffset := 0
-			for _, l := range currChks {
+			for i, l := range currChks {
 				chunkData := data[currentOffset : currentOffset+int(l.Length)]
 				currentOffset += int(l.Length)
 
 				decodedChunk, err := r.decodeBuffer(chunkData, r.blobLimit(resources.RT_CHUNK))
+				if err == nil {
+					err = r.verifyBlob(resources.RT_CHUNK, currMACs[i], decodedChunk)
+				}
 				if err != nil {
 					if !yield(nil, fmt.Errorf("packfile %x at %d: %w", l.Packfile, l.Offset, err)) {
 						return
 					}
+					continue
 				}
 
 				if !yield(decodedChunk, nil) {
@@ -1309,7 +1347,16 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrBlobNotFound
 	}
 
-	return r.getPackfileBlob(loc, r.blobLimit(Type))
+	decoded, err := r.getPackfileBlobBytes(loc, r.blobLimit(Type))
+	if err != nil {
+		return nil, err
+	}
+
+	if err := r.verifyBlob(Type, mac, decoded); err != nil {
+		return nil, fmt.Errorf("packfile %x at %d: %w", loc.Packfile, loc.Offset, err)
+	}
+
+	return bytes.NewReader(decoded), nil
 }
 
 func (r *Repository) GetBlobBytes(Type resources.Type, mac objects.MAC) ([]byte, error) {

@@ -55,10 +55,10 @@ func TestGetBlobCeiling(t *testing.T) {
 		{"chunk past the chunker maximum", resources.RT_CHUNK, maxChunk + 1, true},
 		{"metadata past 64 MiB", resources.RT_VFS_ENTRY, 64<<20 + 1, true},
 	}
-	for i, tt := range tests {
+	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mac := objects.MAC{byte(i + 1)}
 			stored := bytes.Repeat([]byte{0}, tt.size)
+			mac := repo.ComputeMAC(stored)
 			putBlob(t, repo, tt.typ, mac, stored)
 
 			data, err := repo.GetBlobBytes(tt.typ, mac)
