@@ -229,9 +229,8 @@ func ReadHeader(rd io.Reader, ver versioning.Version) (*Metadata, error) {
 	hdr := &Metadata{}
 
 	if ver.Equals(versioning.FromString("1.1.0")) {
-		n, err := rd.Read(hdr.Parent[:])
-		if err != nil || n != len(objects.MAC{}) {
-			return nil, fmt.Errorf("failed to read header %w", err)
+		if _, err := io.ReadFull(rd, hdr.Parent[:]); err != nil {
+			return nil, fmt.Errorf("failed to read header: %w", err)
 		}
 	}
 
@@ -635,11 +634,23 @@ func ConfigurationEntryFromBytes(buf []byte) (ce ConfigurationEntry, err error) 
 	if err != nil {
 		return ce, fmt.Errorf("Short read while deserializing keyLen ConfigurationEntry")
 	}
+	if bbuf.Len() < int(keyLen) {
+		return ce, fmt.Errorf("short read while deserializing configuration entry key: have %d, want %d", bbuf.Len(), keyLen)
+	}
 	ce.Key = string(bbuf.Next(int(keyLen)))
 
+	if bbuf.Len() < 2 {
+		return ce, fmt.Errorf("short read while deserializing configuration entry value length: have %d, want 2", bbuf.Len())
+	}
 	valueLen := binary.LittleEndian.Uint16(bbuf.Next(2))
+	if bbuf.Len() < int(valueLen) {
+		return ce, fmt.Errorf("short read while deserializing configuration entry value: have %d, want %d", bbuf.Len(), valueLen)
+	}
 	ce.Value = bbuf.Next(int(valueLen))
 
+	if bbuf.Len() < 8 {
+		return ce, fmt.Errorf("short read while deserializing configuration entry timestamp: have %d, want 8", bbuf.Len())
+	}
 	timestamp := binary.LittleEndian.Uint64(bbuf.Next(8))
 	ce.CreatedAt = time.Unix(0, int64(timestamp))
 
