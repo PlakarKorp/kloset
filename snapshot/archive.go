@@ -59,6 +59,22 @@ func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string,
 				return nil, err
 			}
 			header.Name = path
+			// Carry extended attributes the way GNU tar --xattrs and
+			// bsdtar do, as SCHILY.xattr.<name> PAX records.
+			for _, name := range entry.ExtendedAttributes {
+				rd, err := entry.Xattr(fsc, name)
+				if err != nil {
+					return nil, fmt.Errorf("xattr %s: %w", name, err)
+				}
+				value, err := io.ReadAll(rd)
+				if err != nil {
+					return nil, fmt.Errorf("xattr %s: %w", name, err)
+				}
+				if header.PAXRecords == nil {
+					header.PAXRecords = make(map[string]string)
+				}
+				header.PAXRecords["SCHILY.xattr."+name] = string(value)
+			}
 			if err := tarWriter.WriteHeader(header); err != nil {
 				return nil, err
 			}
