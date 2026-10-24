@@ -40,6 +40,7 @@ import (
 var (
 	ErrPackfileNotFound = errors.New("packfile not found")
 	ErrBlobNotFound     = errors.New("blob not found")
+	ErrBlobTooLarge     = errors.New("blob exceeds its size limit")
 	ErrNotReadable      = errors.New("repository is not readable")
 )
 
@@ -610,7 +611,44 @@ func (r *Repository) encode(input io.Reader) (io.Reader, error) {
 	return stream, nil
 }
 
-func (r *Repository) decodeBuffer(buffer []byte) ([]byte, error) {
+// Ceilings on how far a stored blob may expand when it is decoded. Without
+// one, a corrupt or tampered blob of a few megabytes inflates to gigabytes
+// in io.ReadAll and takes the process down.
+const (
+	// maxObjectBlobSize bounds an object, whose chunk list grows with the
+	// file: at about 56 bytes a chunk this is a file of 17 million chunks.
+	maxObjectBlobSize = 1 << 30
+
+	// maxMetadataBlobSize bounds every other blob in a packfile: btree
+	// nodes, vfs entries, headers, summaries, signatures and the packfile
+	// footer, which are all kilobytes.
+	maxMetadataBlobSize = 64 << 20
+)
+
+// maxIndexSize bounds a packfile index of stored bytes. Each record holds
+// a distinct MAC, so the index never compresses by more than a few times.
+func maxIndexSize(stored int) int64 {
+	return max(maxMetadataBlobSize, 8*int64(stored))
+}
+
+// blobLimit is the decoded-size ceiling for a blob of Type.
+func (r *Repository) blobLimit(Type resources.Type) int64 {
+	switch Type {
+	case resources.RT_CHUNK:
+		if m := r.configuration.Chunking.MaxSize; m > 0 {
+			return int64(m)
+		}
+		return maxMetadataBlobSize
+	case resources.RT_OBJECT:
+		return maxObjectBlobSize
+	default:
+		return maxMetadataBlobSize
+	}
+}
+
+// decodeBuffer decodes buffer and fails with ErrBlobTooLarge instead of
+// returning more than limit bytes.
+func (r *Repository) decodeBuffer(buffer []byte, limit int64) ([]byte, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "decode(%d bytes): %s", len(buffer), time.Since(t0))
@@ -620,7 +658,17 @@ func (r *Repository) decodeBuffer(buffer []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return io.ReadAll(rd)
+	// Closing releases the decoding goroutines when the read stops short.
+	defer rd.Close()
+
+	decoded, err := io.ReadAll(io.LimitReader(rd, limit+1))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(decoded)) > limit {
+		return nil, fmt.Errorf("%w: %d stored bytes decode past %d bytes", ErrBlobTooLarge, len(buffer), limit)
+	}
+	return decoded, nil
 }
 
 func (r *Repository) encodeBuffer(buffer []byte) ([]byte, error) {
@@ -909,7 +957,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 	footerbuf := rawPackfile[len(rawPackfile)-int(footerBufLength):]
 	rawPackfile = rawPackfile[:len(rawPackfile)-int(footerBufLength)]
 
-	footerbuf, err = r.decodeBuffer(footerbuf)
+	footerbuf, err = r.decodeBuffer(footerbuf, maxMetadataBlobSize)
 	if err != nil {
 		return nil, err
 	}
@@ -922,7 +970,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 	indexbuf := rawPackfile[int(footer.IndexOffset):]
 	rawPackfile = rawPackfile[:int(footer.IndexOffset)]
 
-	indexbuf, err = r.decodeBuffer(indexbuf)
+	indexbuf, err = r.decodeBuffer(indexbuf, maxIndexSize(len(indexbuf)))
 	if err != nil {
 		return nil, err
 	}
@@ -1025,7 +1073,13 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	return data[offsetDelta : length+uint32(offsetDelta)], nil
 }
 
+// GetPackfileBlob reads a blob of unknown type, so it only gets the widest
+// ceiling; GetBlob knows the type and bounds the read tighter.
 func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) {
+	return r.getPackfileBlob(loc, maxObjectBlobSize)
+}
+
+func (r *Repository) getPackfileBlob(loc state.Location, limit int64) (io.ReadSeeker, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetPackfileBlob(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
@@ -1036,9 +1090,9 @@ func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) 
 		return nil, err
 	}
 
-	decoded, err := r.decodeBuffer(data)
+	decoded, err := r.decodeBuffer(data, limit)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("packfile %x at %d: %w", loc.Packfile, loc.Offset, err)
 	}
 
 	return bytes.NewReader(decoded), nil
@@ -1166,9 +1220,9 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 					chunkData := data[currentOffset : currentOffset+int(l.Length)]
 					currentOffset += int(l.Length)
 
-					decodedChunk, err := r.decodeBuffer(chunkData)
+					decodedChunk, err := r.decodeBuffer(chunkData, r.blobLimit(resources.RT_CHUNK))
 					if err != nil {
-						if !yield(nil, err) {
+						if !yield(nil, fmt.Errorf("packfile %x at %d: %w", l.Packfile, l.Offset, err)) {
 							return
 						}
 					}
@@ -1224,9 +1278,9 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				chunkData := data[currentOffset : currentOffset+int(l.Length)]
 				currentOffset += int(l.Length)
 
-				decodedChunk, err := r.decodeBuffer(chunkData)
+				decodedChunk, err := r.decodeBuffer(chunkData, r.blobLimit(resources.RT_CHUNK))
 				if err != nil {
-					if !yield(nil, err) {
+					if !yield(nil, fmt.Errorf("packfile %x at %d: %w", l.Packfile, l.Offset, err)) {
 						return
 					}
 				}
@@ -1255,7 +1309,7 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrBlobNotFound
 	}
 
-	return r.GetPackfileBlob(loc)
+	return r.getPackfileBlob(loc, r.blobLimit(Type))
 }
 
 func (r *Repository) GetBlobBytes(Type resources.Type, mac objects.MAC) ([]byte, error) {
