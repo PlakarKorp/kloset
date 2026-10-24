@@ -106,7 +106,7 @@ func NewFilesystem(repo *repository.Repository, root, xattrs, errors objects.MAC
 	}
 
 	xstore := repository.NewRepositoryStore[string, objects.MAC](repo, resources.RT_XATTR_NODE)
-	xtree, err := btree.Deserialize(rd, xstore, strings.Compare)
+	xtree, err := btree.Deserialize(rd, xstore, PathCmp)
 	if err != nil {
 		return nil, err
 	}
