@@ -593,7 +593,7 @@ func (lo *LocateOptions) Empty() bool {
 		lo.Filters.Name == "" && lo.Filters.Category == "" && lo.Filters.Environment == "" &&
 		lo.Filters.Perimeter == "" && lo.Filters.Job == "" && lo.Filters.Dataset == "" &&
 		len(lo.Filters.Tags) == 0 && len(lo.Filters.IDs) == 0 && len(lo.Filters.Roots) == 0 &&
-		len(lo.Filters.DataClasses) == 0 &&
+		len(lo.Filters.DataClasses) == 0 && len(lo.Filters.Types) == 0 && len(lo.Filters.Origins) == 0 &&
 		lo.Filters.Before.IsZero() && lo.Filters.Since.IsZero() && !lo.Filters.Latest &&
 		lo.GroupBy == GroupByNone
 }

@@ -350,6 +350,14 @@ func TestLocateOptionsEmpty(t *testing.T) {
 				name:  "IDs",
 				apply: loc.WithID("abc123"),
 			},
+			{
+				name:  "Types",
+				apply: loc.WithType("s3"),
+			},
+			{
+				name:  "Origins",
+				apply: loc.WithOrigin("s3://bucket-a"),
+			},
 		}
 
 		for _, tc := range testCases {
@@ -371,24 +379,6 @@ func TestLocateOptionsEmpty(t *testing.T) {
 		require.False(t, lo.Empty())
 	})
 
-	t.Run("ReturnsTrueWhenOnlyOriginsAreConfigured", func(t *testing.T) {
-		lo := &loc.LocateOptions{
-			Filters: loc.LocateFilters{
-				Origins: []string{"s3://bucket-a"},
-			},
-		}
-		require.True(t, lo.Empty())
-	})
-
-	t.Run("ReturnsTrueWhenOnlyTypesAreConfigured", func(t *testing.T) {
-		lo := &loc.LocateOptions{
-			Filters: loc.LocateFilters{
-				Types: []string{"s3"},
-			},
-		}
-		require.True(t, lo.Empty())
-	})
-
 	t.Run("ReturnsTrueWhenOnlyIgnoreTagsAreConfigured", func(t *testing.T) {
 		lo := &loc.LocateOptions{
 			Filters: loc.LocateFilters{
@@ -398,22 +388,9 @@ func TestLocateOptionsEmpty(t *testing.T) {
 		require.True(t, lo.Empty())
 	})
 
-	t.Run("ReturnsTrueWhenOnlyIgnoredFiltersAreCombined", func(t *testing.T) {
-		lo := &loc.LocateOptions{
-			Filters: loc.LocateFilters{
-				Origins:    []string{"s3://bucket-a"},
-				Types:      []string{"s3"},
-				IgnoreTags: []string{"temporary"},
-			},
-		}
-		require.True(t, lo.Empty())
-	})
-
 	t.Run("ReturnsFalseWhenIgnoredAndSupportedFiltersAreCombined", func(t *testing.T) {
 		lo := &loc.LocateOptions{
 			Filters: loc.LocateFilters{
-				Origins:    []string{"s3://bucket-a"},
-				Types:      []string{"s3"},
 				IgnoreTags: []string{"temporary"},
 				Name:       "daily-backup",
 			},
