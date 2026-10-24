@@ -1446,6 +1446,63 @@ func (sourceCtx *sourceContext) buildVFSIndex() ([]string, error) {
 	return directories, nil
 }
 
+// rootSymlinkLimit bounds the symlink chain resolveRoot follows, like the
+// kernel bounds path resolution.
+const rootSymlinkLimit = 40
+
+// resolveRoot picks the directory the snapshot is rooted at.
+//
+// The root an importer reports is where the user pointed it, which is not
+// always a directory it walked. A root that is a file roots the snapshot at
+// the file's parent. A root that is a symlink roots it at what the link
+// names, when the importer walked that: the fs importer follows a root
+// symlink and emits the target's paths, and a snapshot rooted next to the
+// link would then show the link and none of the data, errors included
+// (PlakarKorp/plakar#1294). A link to something the importer did not walk
+// still roots at the link's parent.
+func (sourceCtx *sourceContext) resolveRoot() (string, error) {
+	root := sourceCtx.source.root
+	parent := path.Dir(root)
+
+	current := root
+	for range rootSymlinkLimit {
+		serialized, err := sourceCtx.scanLog.GetFile(current)
+		if err != nil {
+			return "", fmt.Errorf("failed to look up root %q: %w", current, err)
+		}
+		if serialized == nil {
+			// a directory, or a path relinkNodes fills in
+			return current, nil
+		}
+
+		entry, err := vfs.EntryFromBytes(serialized)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode root %q: %w", current, err)
+		}
+		if entry.SymlinkTarget == "" {
+			return path.Dir(current), nil
+		}
+
+		target := entry.SymlinkTarget
+		if !path.IsAbs(target) {
+			target = path.Join(path.Dir(current), target)
+		}
+		target = path.Clean(target)
+
+		known, err := sourceCtx.scanLog.Has(target)
+		if err != nil {
+			return "", fmt.Errorf("failed to look up root target %q: %w", target, err)
+		}
+		if !known {
+			return parent, nil
+		}
+		current = target
+	}
+
+	sourceCtx.builder.Logger().Warn("root %q: too many levels of symbolic links, rooting at %q", root, parent)
+	return parent, nil
+}
+
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	t0 := time.Now()
 	defer func() {
@@ -1455,10 +1512,11 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
-	// if root points at a file, move it to its parent directory
-	if b, err := sourceCtx.scanLog.GetFile(sourceCtx.source.root); b != nil && err == nil {
-		sourceCtx.source.root = path.Dir(sourceCtx.source.root)
+	root, err := sourceCtx.resolveRoot()
+	if err != nil {
+		return nil, err
 	}
+	sourceCtx.source.root = root
 
 	/* relinking must happen before anything else so we guarantee there are no orphan pathnames */
 	if err := snap.relinkNodes(sourceCtx); err != nil {
