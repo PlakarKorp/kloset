@@ -25,7 +25,12 @@ const (
 var (
 	ErrInvalidArchiveFormat = errors.New("unknown archive format")
 	ErrNotADirectory        = errors.New("is not a directory")
+	ErrXattrTooLarge        = errors.New("extended attribute too large")
 )
+
+// maxArchiveXattrSize bounds how much of an extended attribute Archive
+// reads into memory for a PAX record.
+const maxArchiveXattrSize = 64 << 20
 
 func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string, rebase bool) error {
 	fsc, err := snap.Filesystem()
@@ -66,9 +71,12 @@ func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string,
 				if err != nil {
 					return nil, fmt.Errorf("xattr %s: %w", name, err)
 				}
-				value, err := io.ReadAll(rd)
+				value, err := io.ReadAll(io.LimitReader(rd, maxArchiveXattrSize+1))
 				if err != nil {
 					return nil, fmt.Errorf("xattr %s: %w", name, err)
+				}
+				if len(value) > maxArchiveXattrSize {
+					return nil, fmt.Errorf("xattr %s: %w", name, ErrXattrTooLarge)
 				}
 				if header.PAXRecords == nil {
 					header.PAXRecords = make(map[string]string)
