@@ -100,6 +100,25 @@ func TestWarmVFSStageTailFlush(t *testing.T) {
 	waitDone(t, done)
 }
 
+// TestWarmVFSStagePartialWindow: an importer that waits for its records to
+// be read before sending more must not stall the stage short of a window.
+func TestWarmVFSStagePartialWindow(t *testing.T) {
+	in := make(chan *connectors.Record)
+	out, done := runWarmStage(context.Background(), in, 100)
+
+	in <- stageRec("/a")
+	select {
+	case rec := <-out:
+		require.Equal(t, "/a", rec.Pathname)
+	case <-time.After(5 * time.Second):
+		t.Fatal("record held back waiting for a full window")
+	}
+	close(in)
+
+	require.Empty(t, collect(t, out))
+	waitDone(t, done)
+}
+
 // TestWarmVFSStageEmptyInput: closing the input with no records closes the
 // output with no records, no hang.
 func TestWarmVFSStageEmptyInput(t *testing.T) {

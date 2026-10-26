@@ -240,21 +240,28 @@ func (snap *Builder) warmVFSStage(ctx context.Context, pvfs *vfs.Filesystem, in 
 			}
 		}
 
-		batch := make([]*connectors.Record, 0, window)
+		// Batch only the records already waiting: an importer may not send
+		// more until the workers read what it sent, so waiting for a full
+		// window can deadlock.
 		for rec := range in {
-			batch = append(batch, rec)
-			if len(batch) == window {
-				if !warm(batch) {
-					return
+			batch := append(make([]*connectors.Record, 0, window), rec)
+			closed := false
+		fill:
+			for len(batch) < window {
+				select {
+				case r, ok := <-in:
+					if !ok {
+						closed = true
+						break fill
+					}
+					batch = append(batch, r)
+				default:
+					break fill
 				}
-
-				batch = make([]*connectors.Record, 0, window)
 			}
-		}
-
-		// flush last batch
-		if len(batch) > 0 {
-			warm(batch)
+			if !warm(batch) || closed {
+				return
+			}
 		}
 	}()
 
