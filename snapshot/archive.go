@@ -25,7 +25,12 @@ const (
 var (
 	ErrInvalidArchiveFormat = errors.New("unknown archive format")
 	ErrNotADirectory        = errors.New("is not a directory")
+	ErrXattrTooLarge        = errors.New("extended attribute too large")
 )
+
+// maxArchiveXattrSize bounds how much of an extended attribute Archive
+// reads into memory for a PAX record.
+const maxArchiveXattrSize = 64 << 20
 
 func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string, rebase bool) error {
 	fsc, err := snap.Filesystem()
@@ -59,6 +64,25 @@ func (snap *Snapshot) Archive(w io.Writer, format ArchiveFormat, paths []string,
 				return nil, err
 			}
 			header.Name = path
+			// Carry extended attributes the way GNU tar --xattrs and
+			// bsdtar do, as SCHILY.xattr.<name> PAX records.
+			for _, name := range entry.ExtendedAttributes {
+				rd, err := entry.Xattr(fsc, name)
+				if err != nil {
+					return nil, fmt.Errorf("xattr %s: %w", name, err)
+				}
+				value, err := io.ReadAll(io.LimitReader(rd, maxArchiveXattrSize+1))
+				if err != nil {
+					return nil, fmt.Errorf("xattr %s: %w", name, err)
+				}
+				if len(value) > maxArchiveXattrSize {
+					return nil, fmt.Errorf("xattr %s: %w", name, ErrXattrTooLarge)
+				}
+				if header.PAXRecords == nil {
+					header.PAXRecords = make(map[string]string)
+				}
+				header.PAXRecords["SCHILY.xattr."+name] = string(value)
+			}
 			if err := tarWriter.WriteHeader(header); err != nil {
 				return nil, err
 			}

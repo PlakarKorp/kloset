@@ -1,11 +1,17 @@
 package snapshot_test
 
 import (
+	"archive/tar"
 	"bytes"
+	"io"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/PlakarKorp/kloset/connectors"
+	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/snapshot"
+	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
 
@@ -68,4 +74,68 @@ func TestArchiveMissingPath(t *testing.T) {
 
 	err := snap.Archive(&bytes.Buffer{}, snapshot.ArchiveTar, []string{"/no/such/path"}, true)
 	require.Error(t, err)
+}
+
+// TestArchiveTarXattr checks that a tar archive carries each file's extended
+// attributes as SCHILY.xattr PAX records, the convention GNU tar and bsdtar
+// read back, and that zip archives still build without them.
+func TestArchiveTarXattr(t *testing.T) {
+	snap := generateXattrBackup(t)
+	defer snap.Close()
+
+	var buf bytes.Buffer
+	require.NoError(t, snap.Archive(&buf, snapshot.ArchiveTar, []string{"/tmp/src"}, true))
+
+	want := map[string]map[string]string{
+		"plain.txt": {"SCHILY.xattr.com.apple.provenance": "p1"},
+		"sub/file.txt": {
+			"SCHILY.xattr.com.apple.provenance": "p2",
+			"SCHILY.xattr.user.bin":             "a\tb",
+			"SCHILY.xattr.user.note":            "note value",
+		},
+	}
+
+	tr := tar.NewReader(&buf)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		require.NoError(t, err)
+		require.Equal(t, want[hdr.Name], hdr.PAXRecords, hdr.Name)
+		delete(want, hdr.Name)
+	}
+	require.Empty(t, want)
+
+	buf.Reset()
+	require.NoError(t, snap.Archive(&buf, snapshot.ArchiveZip, []string{"/tmp/src"}, true))
+	require.NotZero(t, buf.Len())
+}
+
+// TestArchiveTarXattrTooLarge checks that Archive refuses an extended
+// attribute past the size it is willing to hold in a PAX record, rather
+// than writing a truncated one.
+func TestArchiveTarXattrTooLarge(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+	value := strings.Repeat("x", 64<<20+1)
+	snap := ptesting.GenerateSnapshot(t, repo, nil,
+		ptesting.WithGenerator(func(ch chan<- *connectors.Record) {
+			ch <- connectors.NewRecord("/", "", objects.FileInfo{
+				Lname: "/", Lmode: os.ModeDir | 0755,
+			}, nil, nil)
+			ch <- connectors.NewRecord("/big.txt", "", objects.FileInfo{
+				Lname: "big.txt", Lmode: 0644, Lsize: 3,
+			}, []string{"user.big"}, func() (io.ReadCloser, error) {
+				return io.NopCloser(strings.NewReader("big")), nil
+			})
+			ch <- connectors.NewXattr("/big.txt", "user.big", objects.AttributeExtended,
+				func() (io.ReadCloser, error) {
+					return io.NopCloser(strings.NewReader(value)), nil
+				})
+		}))
+	defer snap.Close()
+
+	var buf bytes.Buffer
+	err := snap.Archive(&buf, snapshot.ArchiveTar, []string{"/"}, true)
+	require.ErrorIs(t, err, snapshot.ErrXattrTooLarge)
 }
