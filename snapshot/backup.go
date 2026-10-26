@@ -1448,6 +1448,51 @@ func (sourceCtx *sourceContext) buildVFSIndex() ([]string, error) {
 	return directories, nil
 }
 
+func (sourceCtx *sourceContext) resolveRoot() (string, error) {
+	root := sourceCtx.source.root
+	parent := path.Dir(root)
+
+	current := root
+
+	// arbitrary ELOOP limit
+	for range 40 {
+		serialized, err := sourceCtx.scanLog.GetFile(current)
+		if err != nil {
+			return "", fmt.Errorf("failed to look up root %q: %w", current, err)
+		}
+		if serialized == nil {
+			// a directory, or a path relinkNodes fills in
+			return current, nil
+		}
+
+		entry, err := vfs.EntryFromBytes(serialized)
+		if err != nil {
+			return "", fmt.Errorf("failed to decode root %q: %w", current, err)
+		}
+		if entry.SymlinkTarget == "" {
+			return path.Dir(current), nil
+		}
+
+		target := entry.SymlinkTarget
+		if !path.IsAbs(target) {
+			target = path.Join(path.Dir(current), target)
+		}
+		target = path.Clean(target)
+
+		known, err := sourceCtx.scanLog.Has(target)
+		if err != nil {
+			return "", fmt.Errorf("failed to look up root target %q: %w", target, err)
+		}
+		if !known {
+			return parent, nil
+		}
+		current = target
+	}
+
+	sourceCtx.builder.Logger().Warn("root %q: too many levels of symbolic links, rooting at %q", root, parent)
+	return parent, nil
+}
+
 func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	t0 := time.Now()
 	defer func() {
@@ -1457,10 +1502,11 @@ func (snap *Builder) buildVFS(sourceCtx *sourceContext) (*vfs.Summary, error) {
 	snap.emitter.Info("snapshot.vfs.start", map[string]any{})
 	defer snap.emitter.Info("snapshot.vfs.end", map[string]any{})
 
-	// if root points at a file, move it to its parent directory
-	if b, err := sourceCtx.scanLog.GetFile(sourceCtx.source.root); b != nil && err == nil {
-		sourceCtx.source.root = path.Dir(sourceCtx.source.root)
+	root, err := sourceCtx.resolveRoot()
+	if err != nil {
+		return nil, err
 	}
+	sourceCtx.source.root = root
 
 	/* relinking must happen before anything else so we guarantee there are no orphan pathnames */
 	if err := snap.relinkNodes(sourceCtx); err != nil {
