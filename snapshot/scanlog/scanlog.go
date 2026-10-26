@@ -124,6 +124,21 @@ func (s *ScanLog) GetFile(p string) ([]byte, error) {
 	return s.get(KindFile, p)
 }
 
+// Has reports whether the scan recorded p is a directory or a file.
+func (s *ScanLog) Has(p string) (ret bool, err error) {
+	err = s.db.QueryRow(
+		`SELECT true FROM entries WHERE path = ? AND kind IN (?, ?) LIMIT 1`,
+		p, int(KindDirectory), int(KindFile),
+	).Scan(&ret)
+	if errors.Is(err, sql.ErrNoRows) {
+		err = nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return
+}
+
 func (s *ScanLog) get(kind EntryKind, p string) ([]byte, error) {
 	var stored []byte
 	err := s.db.QueryRow(
