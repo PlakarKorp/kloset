@@ -134,14 +134,16 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 		return err
 	}
 
+	// Rollback on a commit transaction is a no-op (actually returns an error
+	// but we can ignore it, and makes the error path less leak-pron.
+	defer tx.Rollback()
+
 	has, err := tx.HasState(stateID)
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	if has {
-		tx.Rollback()
 		return nil
 	}
 
@@ -150,30 +152,26 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 	// parent. This is all way too intricated and will be fixed by a refacto.
 	var mt *Metadata
 	if ver.Equals(versioning.FromString("1.1.0")) {
-		mt, err = deserializeFromStream(ls, tx, bufio.NewReaderSize(rd, 256 << 10))
+		mt, err = deserializeFromStream(ls, tx, bufio.NewReaderSize(rd, 256<<10))
 	} else {
-		mt, err = deserializeFromStreamv100(ls, tx, bufio.NewReaderSize(rd, 256 << 10))
+		mt, err = deserializeFromStreamv100(ls, tx, bufio.NewReaderSize(rd, 256<<10))
 	}
 
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	metadata, err := mt.ToBytes()
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	/* We merged the state deltas, we can now publish it */
 	if err := tx.PutState(stateID, metadata); err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	if err := tx.Commit(); err != nil {
-		tx.Rollback()
 		return err
 	}
 
@@ -187,37 +185,35 @@ func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from *caching.Sca
 		return err
 	}
 
+	// Rollback on a commit transaction is a no-op (actually returns an error
+	// but we can ignore it, and makes the error path less leak-pron.
+	defer tx.Rollback()
+
 	has, err := tx.HasState(stateID)
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	if has {
-		tx.Rollback()
 		return nil
 	}
 
 	err = mergeFromCache(ls, tx, from)
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	mt, err := ls.Metadata.ToBytes()
 	if err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	/* We merged the state deltas, we can now publish it */
 	if err := tx.PutState(stateID, mt); err != nil {
-		tx.Rollback()
 		return err
 	}
 
 	if err := tx.Commit(); err != nil {
-		tx.Rollback()
 		return err
 	}
 
