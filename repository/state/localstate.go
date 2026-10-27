@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -149,9 +150,9 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 	// parent. This is all way too intricated and will be fixed by a refacto.
 	var mt *Metadata
 	if ver.Equals(versioning.FromString("1.1.0")) {
-		mt, err = deserializeFromStream(ls, tx, rd)
+		mt, err = deserializeFromStream(ls, tx, bufio.NewReaderSize(rd, 256 << 10))
 	} else {
-		mt, err = deserializeFromStreamv100(ls, tx, rd)
+		mt, err = deserializeFromStreamv100(ls, tx, bufio.NewReaderSize(rd, 256 << 10))
 	}
 
 	if err != nil {
