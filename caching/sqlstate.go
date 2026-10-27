@@ -30,6 +30,11 @@ type SQLStateTx struct {
 	putDeltaQ    *sql.Stmt
 	putColouredQ *sql.Stmt
 	putPackfileQ *sql.Stmt
+
+	delDeltaQ              *sql.Stmt
+	delColouredQ           *sql.Stmt
+	delPackfileQ           *sql.Stmt
+	delDeltasFromPackfileQ *sql.Stmt
 }
 
 var stateSchema = []string{
@@ -189,6 +194,30 @@ func (c *SQLState) Begin() (*SQLStateTx, error) {
 		return nil, fmt.Errorf("failed to prepare putPackfile query %w", err)
 	}
 
+	st.delDeltaQ, err = tx.Prepare("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delDelta query %w", err)
+	}
+
+	st.delColouredQ, err = tx.Prepare("DELETE FROM coloured WHERE mac = ? AND type = ?;")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delColoured query %w", err)
+	}
+
+	st.delPackfileQ, err = tx.Prepare("DELETE FROM packfiles WHERE mac = ?;")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delPackfile query %w", err)
+	}
+
+	st.delDeltasFromPackfileQ, err = tx.Prepare("DELETE FROM deltas WHERE packfile = ?;")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delDeltasFromPackfile query %w", err)
+	}
+
 	return st, nil
 }
 
@@ -229,28 +258,23 @@ func (st *SQLStateTx) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp t
 }
 
 func (st *SQLStateTx) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
-	_, err := st.tx.Exec("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;", blobMAC[:], blobType, packfileMAC[:])
+	_, err := st.delDeltaQ.Exec(blobMAC[:], blobType, packfileMAC[:])
 	return err
 }
 
 func (st *SQLStateTx) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
-	_, err := st.tx.Exec("DELETE FROM coloured WHERE mac = ? AND type = ?;", blobMAC[:], blobType)
+	_, err := st.delColouredQ.Exec(blobMAC[:], blobType)
 	return err
 }
 
 func (st *SQLStateTx) DelPackfile(packfileMAC objects.MAC) error {
-	_, err := st.tx.Exec("DELETE FROM packfiles WHERE mac = ?;", packfileMAC[:])
+	_, err := st.delPackfileQ.Exec(packfileMAC[:])
 
 	if err != nil {
 		return err
 	}
 
-	// XXX: This is a big layer violation, but the common interface is getting
-	// out of hand. When we end up splitting the various State implementation
-	// the local state will deal with cascading deletion of packfiles into the
-	// blob it contained. For now we do it here to ease the implementation.
-	_, err = st.tx.Exec("DELETE FROM deltas WHERE packfile = ?;", packfileMAC[:])
-
+	_, err = st.delDeltasFromPackfileQ.Exec(packfileMAC[:])
 	return err
 }
 
