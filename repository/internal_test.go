@@ -25,7 +25,7 @@ func TestEncodeBufferRoundtrip(t *testing.T) {
 	encoded, err := repo.encodeBuffer(original)
 	require.NoError(t, err)
 
-	decoded, err := repo.decodeBuffer(encoded, maxMetadataBlobSize)
+	decoded, err := repo.decodeBounded(encoded, maxMetadataBlobSize)
 	require.NoError(t, err)
 	require.True(t, bytes.Equal(original, decoded))
 }
@@ -42,7 +42,7 @@ func TestEncodeBufferEmpty(t *testing.T) {
 	encoded, err := repo.encodeBuffer(nil)
 	require.NoError(t, err)
 
-	decoded, err := repo.decodeBuffer(encoded, maxMetadataBlobSize)
+	decoded, err := repo.decodeBounded(encoded, maxMetadataBlobSize)
 	require.NoError(t, err)
 	require.Empty(t, decoded)
 }
