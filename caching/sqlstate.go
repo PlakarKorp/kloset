@@ -22,8 +22,11 @@ type SQLState struct {
 	getAllDeltasQ    *sql.Stmt
 	hasPackfileQ     *sql.Stmt
 	hasColouredQ     *sql.Stmt
+}
 
-	// write hot queries
+type SQLStateTx struct {
+	tx *sql.Tx
+
 	putDeltaQ    *sql.Stmt
 	putColouredQ *sql.Stmt
 	putPackfileQ *sql.Stmt
@@ -158,36 +161,46 @@ func NewSQLState(path string, ro bool) (_ *SQLState, err error) {
 		return nil, fmt.Errorf("failed to prepare hasColoured query %w", err)
 	}
 
-	// even on a ro db we prepare those stmt, to avoid a nil deref in case of
-	// misuse, calling those on a r/o db will fail with an error.
-	self.putDeltaQ, err = db.Prepare("INSERT OR IGNORE INTO deltas(mac, type, packfile, offset, length) VALUES(?, ?, ?, ?, ?);")
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare putDelta query %w", err)
-	}
-
-	self.putColouredQ, err = db.Prepare("INSERT OR IGNORE INTO coloured(mac, type, timestamp) VALUES(?, ?, ?)")
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
-	}
-
-	self.putPackfileQ, err = db.Prepare("INSERT OR IGNORE INTO packfiles(mac, state, timestamp) VALUES(?,  ?, ?)")
-	if err != nil {
-		return nil, fmt.Errorf("failed to prepare putPackfile query %w", err)
-	}
-
 	return &self, nil
 }
 
+func (c *SQLState) Begin() (*SQLStateTx, error) {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("SQLState failed to begin transaction %w", err)
+	}
 
-func (c *SQLState) PutState(stateID objects.MAC, data []byte) error {
-	_, err := c.db.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateID[:], data)
+	st := &SQLStateTx{tx: tx}
+	st.putDeltaQ, err = tx.Prepare("INSERT OR IGNORE INTO deltas(mac, type, packfile, offset, length) VALUES(?, ?, ?, ?, ?);")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putDelta query %w", err)
+	}
+
+	st.putColouredQ, err = tx.Prepare("INSERT OR IGNORE INTO coloured(mac, type, timestamp) VALUES(?, ?, ?)")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
+	}
+
+	st.putPackfileQ, err = tx.Prepare("INSERT OR IGNORE INTO packfiles(mac, state, timestamp) VALUES(?,  ?, ?)")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putPackfile query %w", err)
+	}
+
+	return st, nil
+}
+
+func (st *SQLStateTx) PutState(stateID objects.MAC, data []byte) error {
+	_, err := st.tx.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateID[:], data)
 	return err
 }
 
-func (c *SQLState) HasState(stateID objects.MAC) (bool, error) {
+func (st *SQLStateTx) HasState(stateID objects.MAC) (bool, error) {
 	query := "SELECT 1 FROM states WHERE mac = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, stateID[:]).Scan(&dummy)
+	err := st.tx.QueryRow(query, stateID[:]).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -197,6 +210,56 @@ func (c *SQLState) HasState(stateID objects.MAC) (bool, error) {
 	}
 
 	return true, nil
+}
+
+func (st *SQLStateTx) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
+	_, err := st.putDeltaQ.Exec(blobMAC[:], blobType, packfileMAC[:], offset, length)
+
+	return err
+}
+
+func (st *SQLStateTx) PutColoured(blobType resources.Type, blobMAC objects.MAC, when time.Time) error {
+	_, err := st.putColouredQ.Exec(blobMAC[:], blobType, when.UnixNano())
+	return err
+}
+
+func (st *SQLStateTx) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
+	_, err := st.putPackfileQ.Exec(packfileMAC[:], stateMAC[:], timestamp.UnixNano())
+	return err
+}
+
+func (st *SQLStateTx) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
+	_, err := st.tx.Exec("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;", blobMAC[:], blobType, packfileMAC[:])
+	return err
+}
+
+func (st *SQLStateTx) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
+	_, err := st.tx.Exec("DELETE FROM coloured WHERE mac = ? AND type = ?;", blobMAC[:], blobType)
+	return err
+}
+
+func (st *SQLStateTx) DelPackfile(packfileMAC objects.MAC) error {
+	_, err := st.tx.Exec("DELETE FROM packfiles WHERE mac = ?;", packfileMAC[:])
+
+	if err != nil {
+		return err
+	}
+
+	// XXX: This is a big layer violation, but the common interface is getting
+	// out of hand. When we end up splitting the various State implementation
+	// the local state will deal with cascading deletion of packfiles into the
+	// blob it contained. For now we do it here to ease the implementation.
+	_, err = st.tx.Exec("DELETE FROM deltas WHERE packfile = ?;", packfileMAC[:])
+
+	return err
+}
+
+func (st *SQLStateTx) Rollback() error {
+	return st.tx.Rollback()
+}
+
+func (st *SQLStateTx) Commit() error {
+	return st.tx.Commit()
 }
 
 func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
@@ -259,11 +322,6 @@ func (c *SQLState) DelState(stateID objects.MAC) error {
 
 	return err
 }
-func (c *SQLState) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
-	_, err := c.putDeltaQ.Exec(blobMAC[:], blobType, packfileMAC[:], offset, length)
-
-	return err
-}
 
 // Internal helper, the layout of the query must follow the Scan obviously
 func (c *SQLState) getDeltas(query *sql.Stmt, args ...any) iter.Seq2[Blob, error] {
@@ -318,16 +376,6 @@ func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[Blob, erro
 
 func (c *SQLState) GetDeltas() iter.Seq2[Blob, error] {
 	return c.getDeltas(c.getAllDeltasQ)
-}
-
-func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
-	_, err := c.db.Exec("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;", blobMAC[:], blobType, packfileMAC[:])
-	return err
-}
-
-func (c *SQLState) PutColoured(blobType resources.Type, blobMAC objects.MAC, when time.Time) error {
-	_, err := c.putColouredQ.Exec(blobMAC[:], blobType, when.UnixNano())
-	return err
 }
 
 func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bool, error) {
@@ -400,16 +448,6 @@ func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[C
 	return c.getColouredEntries(query, blobType)
 }
 
-func (c *SQLState) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
-	_, err := c.db.Exec("DELETE FROM coloured WHERE mac = ? AND type = ?;", blobMAC[:], blobType)
-	return err
-}
-
-func (c *SQLState) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
-	_, err := c.putPackfileQ.Exec(packfileMAC[:], stateMAC[:], timestamp.UnixNano())
-	return err
-}
-
 func (c *SQLState) HasPackfile(packfileMAC objects.MAC) (bool, error) {
 	var dummy int
 	err := c.hasPackfileQ.QueryRow(packfileMAC[:]).Scan(&dummy)
@@ -422,22 +460,6 @@ func (c *SQLState) HasPackfile(packfileMAC objects.MAC) (bool, error) {
 	}
 
 	return true, nil
-}
-
-func (c *SQLState) DelPackfile(packfileMAC objects.MAC) error {
-	_, err := c.db.Exec("DELETE FROM packfiles WHERE mac = ?;", packfileMAC[:])
-
-	if err != nil {
-		return err
-	}
-
-	// XXX: This is a big layer violation, but the common interface is getting
-	// out of hand. When we end up splitting the various State implementation
-	// the local state will deal with cascading deletion of packfiles into the
-	// blob it contained. For now we do it here to ease the implementation.
-	_, err = c.db.Exec("DELETE FROM deltas WHERE packfile = ?;", packfileMAC[:])
-
-	return err
 }
 
 func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
@@ -543,7 +565,7 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 func (c *SQLState) closeStmts() {
 	for _, stmt := range []*sql.Stmt{
 		c.getDeltaQ, c.getDeltasByTypeQ, c.getAllDeltasQ, c.hasPackfileQ,
-		c.hasColouredQ, c.putDeltaQ, c.putColouredQ, c.putPackfileQ,
+		c.hasColouredQ,
 	} {
 		if stmt != nil {
 			stmt.Close()
