@@ -951,8 +951,17 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 		return nil, err
 	}
 
+	if len(rawPackfile) < 4 {
+		return nil, fmt.Errorf("packfile(%x): %d bytes is too short to hold a footer length", mac, len(rawPackfile))
+	}
+
 	footerBufLength := binary.LittleEndian.Uint32(rawPackfile[len(rawPackfile)-4:])
 	rawPackfile = rawPackfile[:len(rawPackfile)-4]
+
+	// compared as uint64 so a length near 2^32 cannot go negative through int() on 32-bit
+	if uint64(footerBufLength) > uint64(len(rawPackfile)) {
+		return nil, fmt.Errorf("packfile(%x): footer length %d exceeds the %d bytes left", mac, footerBufLength, len(rawPackfile))
+	}
 
 	footerbuf := rawPackfile[len(rawPackfile)-int(footerBufLength):]
 	rawPackfile = rawPackfile[:len(rawPackfile)-int(footerBufLength)]
@@ -965,6 +974,11 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 	footer, err := packfile.NewInMemoryFooterFromBytes(packfileVersion, footerbuf)
 	if err != nil {
 		return nil, err
+	}
+
+	// compared as uint64 so an offset beyond int range cannot go negative through int() on 32-bit
+	if footer.IndexOffset > uint64(len(rawPackfile)) {
+		return nil, fmt.Errorf("packfile(%x): index offset %d exceeds the %d bytes left", mac, footer.IndexOffset, len(rawPackfile))
 	}
 
 	indexbuf := rawPackfile[int(footer.IndexOffset):]
