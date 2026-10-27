@@ -586,6 +586,11 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 	}
 }
 
+func (c *SQLState) Close() error {
+	c.closeStmts()
+	return c.db.Close()
+}
+
 func (c *SQLState) closeStmts() {
 	for _, stmt := range []*sql.Stmt{
 		c.getDeltaQ, c.getDeltasByTypeQ, c.getAllDeltasQ, c.hasPackfileQ,
