@@ -242,8 +242,7 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 	}
 
 	mt := &Metadata{}
-	n, err := r.Read(mt.Parent[:])
-	if err != nil || n != len(objects.MAC{}) {
+	if _, err := io.ReadFull(r, mt.Parent[:]); err != nil {
 		return nil, fmt.Errorf("failed to read header %w", err)
 	}
 
