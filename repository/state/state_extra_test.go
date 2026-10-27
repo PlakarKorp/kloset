@@ -54,15 +54,15 @@ func TestDelState(t *testing.T) {
 	}
 	data, err := mt.ToBytes()
 	require.NoError(t, err)
-	require.NoError(t, cache.PutState(stateID, data))
+	require.NoError(t, viaTx(t, cache).PutState(stateID, data))
 
-	has, err := cache.HasState(stateID)
+	has, err := viaTx(t, cache).HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, has)
 
 	require.NoError(t, st.DelState(stateID))
 
-	has, err = cache.HasState(stateID)
+	has, err = viaTx(t, cache).HasState(stateID)
 	require.NoError(t, err)
 	require.False(t, has)
 }
@@ -78,8 +78,8 @@ func TestGetStates(t *testing.T) {
 	id2 := objects.MAC{0x02}
 	mt := Metadata{Version: versioning.FromString(VERSION), Timestamp: time.Now()}
 	data, _ := mt.ToBytes()
-	cache.PutState(id1, data)
-	cache.PutState(id2, data)
+	viaTx(t, cache).PutState(id1, data)
+	viaTx(t, cache).PutState(id2, data)
 
 	states, err := st.GetStates()
 	require.NoError(t, err)
@@ -194,7 +194,7 @@ func TestListPackfileEntries(t *testing.T) {
 	pf2 := objects.MAC{0xBB}
 	for i, pf := range []objects.MAC{pf1, pf2} {
 		pe := PackfileEntry{Packfile: pf, StateID: objects.MAC{byte(i + 1)}, Timestamp: time.Now()}
-		require.NoError(t, cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp))
+		require.NoError(t, viaTx(t, cache).PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp))
 	}
 
 	var entries []PackfileEntry
@@ -307,7 +307,7 @@ func TestSerializeWithDeleteEntries(t *testing.T) {
 
 	// Deserialise back into an aggregate and make sure it does not error.
 	dst, _ := newAggregate(t)
-	require.NoError(t, dst.deserializeFromStream(&buf))
+	require.NoError(t, ingest(dst, &buf))
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +336,7 @@ func TestMergeStateFromCache(t *testing.T) {
 	err := dst.MergeStateFromCache(stateID, srcCache)
 	require.NoError(t, err)
 
-	has, err := dstCache.HasState(stateID)
+	has, err := viaTx(t, dstCache).HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, has)
 }
@@ -396,5 +396,5 @@ func TestDeserializeFromStreamv100(t *testing.T) {
 
 	// Deserialise as version 1.0.0 (uses deserializeFromStreamv100 code path).
 	st, _ := newAggregate(t)
-	require.NoError(t, st.deserializeFromStreamv100(stream))
+	require.NoError(t, ingestV100(st, stream))
 }

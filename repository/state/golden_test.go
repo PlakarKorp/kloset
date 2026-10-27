@@ -348,7 +348,10 @@ func requireMetadata(t *testing.T, got state.Metadata, parent objects.MAC, versi
 func assertBackupMerged(t *testing.T, ls *state.LocalState, cache *caching.SQLState) {
 	t.Helper()
 
-	has, err := cache.HasState(gState1)
+	tx, err := cache.Begin()
+	require.NoError(t, err)
+	has, err := tx.HasState(gState1)
+	require.NoError(t, tx.Rollback())
 	require.NoError(t, err)
 	require.True(t, has)
 

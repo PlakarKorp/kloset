@@ -51,6 +51,104 @@ func newAggregate(t *testing.T) (*LocalState, *caching.SQLState) {
 	return ls, cache
 }
 
+// txCache mirrors the transactional write API of the aggregate's cache, each
+// call running in its own committed transaction. The aggregate only receives
+// writes through merges, tests use this to seed it directly.
+type txCache struct {
+	t     *testing.T
+	cache *caching.SQLState
+}
+
+func viaTx(t *testing.T, cache *caching.SQLState) txCache {
+	return txCache{t: t, cache: cache}
+}
+
+func (c txCache) do(fn func(tx *caching.SQLStateTx) error) error {
+	tx, err := c.cache.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func (c txCache) PutState(stateID objects.MAC, data []byte) error {
+	return c.do(func(tx *caching.SQLStateTx) error { return tx.PutState(stateID, data) })
+}
+
+func (c txCache) HasState(stateID objects.MAC) (has bool, err error) {
+	err = c.do(func(tx *caching.SQLStateTx) error {
+		has, err = tx.HasState(stateID)
+		return err
+	})
+	return has, err
+}
+
+func (c txCache) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
+	return c.do(func(tx *caching.SQLStateTx) error {
+		return tx.PutDelta(blobType, blobMAC, packfileMAC, offset, length)
+	})
+}
+
+func (c txCache) PutColoured(blobType resources.Type, blobMAC objects.MAC, when time.Time) error {
+	return c.do(func(tx *caching.SQLStateTx) error { return tx.PutColoured(blobType, blobMAC, when) })
+}
+
+func (c txCache) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
+	return c.do(func(tx *caching.SQLStateTx) error { return tx.PutPackfile(packfileMAC, stateMAC, timestamp) })
+}
+
+// ingestMeta drives deserializeFromStream in its own transaction, the way
+// MergeState does, minus publishing the state.
+func ingestMeta(ls *LocalState, r io.Reader) (*Metadata, error) {
+	tx, err := ls.cache.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	mt, err := deserializeFromStream(ls, tx, r)
+	if err != nil {
+		return nil, err
+	}
+	return mt, tx.Commit()
+}
+
+func ingest(ls *LocalState, r io.Reader) error {
+	_, err := ingestMeta(ls, r)
+	return err
+}
+
+func ingestV100(ls *LocalState, r io.Reader) error {
+	tx, err := ls.cache.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := deserializeFromStreamv100(ls, tx, r); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func ingestCache(ls *LocalState, from *caching.ScanCache) error {
+	tx, err := ls.cache.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if err := mergeFromCache(ls, tx, from); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func newDeltaState(t *testing.T) (*State, *caching.ScanCache) {
 	t.Helper()
 
@@ -104,7 +202,7 @@ func TestUpdateSerialOr(t *testing.T) {
 	existingData, err := existingMetadata.ToBytes()
 	require.NoError(t, err)
 
-	cache.PutState(objects.MAC{1}, existingData)
+	viaTx(t, cache).PutState(objects.MAC{1}, existingData)
 
 	newSerial := uuid.New()
 	err = state.UpdateSerialOr(newSerial)
@@ -141,21 +239,7 @@ func TestMergeState(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify the state was merged
-	hasState, err := cache.HasState(stateID)
-	require.NoError(t, err)
-	require.True(t, hasState)
-}
-
-func TestPutState(t *testing.T) {
-	state, cache := newAggregate(t)
-	state.Metadata.Serial = uuid.New()
-
-	stateID := objects.MAC{1, 2, 3, 4}
-	err := state.PutState(stateID)
-	require.NoError(t, err)
-
-	// Verify state was stored
-	hasState, err := cache.HasState(stateID)
+	hasState, err := viaTx(t, cache).HasState(stateID)
 	require.NoError(t, err)
 	require.True(t, hasState)
 }
@@ -318,14 +402,14 @@ func TestBlobExists(t *testing.T) {
 		Flags: 0x1234,
 	}
 	putDeltaInCache(t, cache, deltaEntry)
-	cache.PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
+	viaTx(t, cache).PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
 
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.True(t, exists)
 
 	// Test with deleted packfile. The aggregate receives coloured entries via
 	// merge, so seed the cache directly.
-	require.NoError(t, cache.PutColoured(resources.RT_PACKFILE, deltaEntry.Location.Packfile, time.Now()))
+	require.NoError(t, viaTx(t, cache).PutColoured(resources.RT_PACKFILE, deltaEntry.Location.Packfile, time.Now()))
 	exists = state.BlobExists(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.False(t, exists)
 }
@@ -353,7 +437,7 @@ func TestGetSubpartForBlob(t *testing.T) {
 		Flags:    0x1234,
 	}
 	putDeltaInCache(t, cache, deltaEntry)
-	cache.PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
+	viaTx(t, cache).PutPackfile(deltaEntry.Location.Packfile, objects.NilMac, time.Now())
 
 	location, exists, err = state.GetSubpartForBlob(resources.RT_SNAPSHOT, objects.MAC{1, 2, 3, 4})
 	require.NoError(t, err)
@@ -367,8 +451,8 @@ func TestListPackfiles(t *testing.T) {
 	// Add some packfiles
 	packfile1 := objects.MAC{1, 2, 3, 4}
 	packfile2 := objects.MAC{5, 6, 7, 8}
-	cache.PutPackfile(packfile1, objects.NilMac, time.Now())
-	cache.PutPackfile(packfile2, objects.NilMac, time.Now())
+	viaTx(t, cache).PutPackfile(packfile1, objects.NilMac, time.Now())
+	viaTx(t, cache).PutPackfile(packfile2, objects.NilMac, time.Now())
 
 	// List packfiles
 	var found []objects.MAC
@@ -415,7 +499,7 @@ func TestListSnapshots(t *testing.T) {
 
 	putDeltaInCache(t, cache, delta1)
 	putDeltaInCache(t, cache, delta2)
-	cache.PutPackfile(packfile, objects.NilMac, time.Now())
+	viaTx(t, cache).PutPackfile(packfile, objects.NilMac, time.Now())
 
 	// List snapshots
 	var found []objects.MAC
@@ -465,7 +549,7 @@ func TestListOrphanDeltas(t *testing.T) {
 // aggregate receives deltas via merge, not through a method of its own.
 func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
 	t.Helper()
-	require.NoError(t, cache.PutDelta(de.Type, de.Blob, de.Location.Packfile, de.Location.Offset, de.Location.Length))
+	require.NoError(t, viaTx(t, cache).PutDelta(de.Type, de.Blob, de.Location.Packfile, de.Location.Offset, de.Location.Length))
 }
 
 // colourInCache seeds a coloured entry directly in the aggregate's cache: the
@@ -473,7 +557,7 @@ func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {
 // own.
 func colourInCache(t *testing.T, cache *caching.SQLState, rtype resources.Type, resource objects.MAC) {
 	t.Helper()
-	require.NoError(t, cache.PutColoured(rtype, resource, time.Now()))
+	require.NoError(t, viaTx(t, cache).PutColoured(rtype, resource, time.Now()))
 }
 
 func TestHasDeletedResource(t *testing.T) {
@@ -594,7 +678,7 @@ func TestDeserializeFromStreamError(t *testing.T) {
 	invalidData := []byte{byte(ET_LOCATIONS), 0, 0, 0, 1} // Invalid length
 	reader := bytes.NewReader(invalidData)
 
-	err := state.deserializeFromStream(reader)
+	err := ingest(state, reader)
 	require.Error(t, err)
 }
 
