@@ -21,13 +21,13 @@ func TestDeserializeFromStreamV100ReadErrorsAtEveryOffset(t *testing.T) {
 		st, _ := newAggregate(t)
 
 		r := &failAfterReader{data: valid, max: cutoff}
-		err := st.deserializeFromStreamv100(r)
+		err := ingestV100(st, r)
 		require.Error(t, err, "cutoff=%d should fail to deserialize v100", cutoff)
 	}
 
 	// Sanity: full stream still deserializes.
 	st, _ := newAggregate(t)
-	require.NoError(t, st.deserializeFromStreamv100(bytes.NewReader(valid)))
+	require.NoError(t, ingestV100(st, bytes.NewReader(valid)))
 }
 
 // TestMergeFromCacheParseErrors exercises each "failed to deserialize ... entry"
@@ -61,7 +61,7 @@ func TestMergeFromCacheParseErrors(t *testing.T) {
 
 			dst, _ := newAggregate(t)
 
-			err := dst.mergeFromCache(from)
+			err := ingestCache(dst, from)
 			require.Error(t, err)
 		})
 	}
