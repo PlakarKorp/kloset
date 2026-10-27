@@ -140,7 +140,7 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 
 	has, err := tx.HasState(stateID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to query hasstate %w", err)
 	}
 
 	if has {
@@ -168,11 +168,11 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 
 	/* We merged the state deltas, we can now publish it */
 	if err := tx.PutState(stateID, metadata); err != nil {
-		return err
+		return fmt.Errorf("failed to putstate %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return err
+		return fmt.Errorf("failed to commit %w", err)
 	}
 
 	ls.Metadata = *mt
@@ -191,7 +191,7 @@ func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from *caching.Sca
 
 	has, err := tx.HasState(stateID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to query hasstate %w", err)
 	}
 
 	if has {
@@ -210,11 +210,11 @@ func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from *caching.Sca
 
 	/* We merged the state deltas, we can now publish it */
 	if err := tx.PutState(stateID, mt); err != nil {
-		return err
+		return fmt.Errorf("failed to putstate %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
-		return err
+		return fmt.Errorf("failed to commit %w", err)
 	}
 
 	return nil
