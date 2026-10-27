@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"fmt"
 	"iter"
 	"slices"
 	"sync"
@@ -137,7 +138,10 @@ func (r *Repository) GetBlobs(ctx context.Context, blobs []BlobReq, opts *GetBlo
 						} else {
 							blobStart := b.Offset - rp.loc.Offset
 							blobBytes := data[blobStart : blobStart+uint64(b.Length)]
-							it.b.Data, it.err = r.decodeBuffer(blobBytes)
+							it.b.Data, it.err = r.decodeBuffer(blobBytes, r.blobLimit(b.Type))
+							if it.err != nil {
+								it.err = fmt.Errorf("packfile %x at %d: %w", b.Packfile, b.Offset, it.err)
+							}
 						}
 
 						select {
