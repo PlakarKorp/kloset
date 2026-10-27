@@ -287,11 +287,17 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 
 			switch toDel.Type {
 			case ET_LOCATIONS:
-				tx.DelDelta(toDel.BlobType, toDel.Blob, toDel.Packfile)
+				if err := tx.DelDelta(toDel.BlobType, toDel.Blob, toDel.Packfile); err != nil {
+					return nil, fmt.Errorf("failed to delete delta %w", err)
+				}
 			case ET_COLOURED:
-				tx.DelColoured(toDel.BlobType, toDel.Blob)
+				if err := tx.DelColoured(toDel.BlobType, toDel.Blob); err != nil {
+					return nil, fmt.Errorf("failed to delete coloured %w", err)
+				}
 			case ET_PACKFILE:
-				tx.DelPackfile(toDel.Packfile)
+				if err := tx.DelPackfile(toDel.Packfile); err != nil {
+					return nil, fmt.Errorf("failed to delete packfile %w", err)
+				}
 			default:
 				return nil, fmt.Errorf("invalid delete Type %d", toDel.Type)
 			}
@@ -312,7 +318,7 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 			}
 
 			if err := tx.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put delta %w", err)
 			}
 
 		case ET_COLOURED:
@@ -330,7 +336,7 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 			}
 
 			if err := tx.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put coloured %w", err)
 			}
 		case ET_PACKFILE:
 			if length != PackfileEntrySerializedSize {
@@ -347,7 +353,7 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 			}
 
 			if err := tx.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put packfile %w", err)
 			}
 
 		case ET_CONFIGURATION:
@@ -453,7 +459,7 @@ func deserializeFromStreamv100(l *LocalState, tx *caching.SQLStateTx, r io.Reade
 			}
 
 			if err := tx.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put delta %w", err)
 			}
 
 		case ET_COLOURED:
@@ -471,7 +477,7 @@ func deserializeFromStreamv100(l *LocalState, tx *caching.SQLStateTx, r io.Reade
 			}
 
 			if err := tx.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put coloured %w", err)
 			}
 		case ET_PACKFILE:
 			if length != PackfileEntrySerializedSize {
@@ -488,7 +494,7 @@ func deserializeFromStreamv100(l *LocalState, tx *caching.SQLStateTx, r io.Reade
 			}
 
 			if err := tx.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
-				return nil, err
+				return nil, fmt.Errorf("failed to put packfile %w", err)
 			}
 
 		case ET_CONFIGURATION:
