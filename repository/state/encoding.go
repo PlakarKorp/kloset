@@ -39,8 +39,7 @@ func ReadHeader(rd io.Reader, ver versioning.Version) (*Metadata, error) {
 	hdr := &Metadata{}
 
 	if ver.Equals(versioning.FromString("1.1.0")) {
-		n, err := rd.Read(hdr.Parent[:])
-		if err != nil || n != len(objects.MAC{}) {
+		if _, err := io.ReadFull(rd, hdr.Parent[:]); err != nil {
 			return nil, fmt.Errorf("failed to read header %w", err)
 		}
 	}
