@@ -73,7 +73,7 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 		Header:         header.NewHeader("default", identifier),
 		stateId:        identifier,
 		flushEnd:       make(chan bool),
-		flushEnded:     make(chan error),
+		flushEnded:     make(chan error, 1),
 
 		beginTime: time.Now(),
 	}
@@ -91,7 +91,7 @@ func newBuilder(appContext *kcontext.KContext, identifier objects.MAC, builderOp
 
 	if !builderOptions.NoCheckpoint {
 		snap.flushTick = time.NewTicker(1 * time.Hour)
-		go snap.flushDeltaState()
+		go snap.flushDeltaState(snap.flushTick.C)
 	}
 
 	if !builderOptions.ForcedTimestamp.IsZero() {
@@ -374,14 +374,20 @@ func (snap *Builder) Unlock() error {
 	return <-snap.lockReleased
 }
 
-func (snap *Builder) flushDeltaState() {
+func (snap *Builder) flushDeltaState(ticks <-chan time.Time) {
+	var result error
+	defer func() {
+		snap.flushEnded <- result
+		close(snap.flushEnded)
+	}()
+
 	for {
 		select {
 		case <-snap.flushEnd:
 			// End of backup we push the last and final State.
-			err := snap.repository.CommitTransaction(snap.stateId)
-			if err != nil {
-				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
+			result = snap.repository.CommitTransaction(snap.stateId)
+			if result != nil {
+				snap.Logger().Warn("Failed to push the final state to the repository %s", result)
 			}
 
 			if snap.builderOptions.StateRefresher != nil {
@@ -390,15 +396,12 @@ func (snap *Builder) flushDeltaState() {
 				}
 			}
 
-			// See below
 			if snap.deltaCache != snap.scanCache {
 				snap.deltaCache.Close()
 			}
 
-			snap.flushEnded <- err
-			close(snap.flushEnded)
 			return
-		case <-snap.flushTick.C:
+		case <-ticks:
 			// In case the previous Flushing operation was too long and the
 			// ticker got a chance to queue another tick we might end up here
 			// rather than in flushEnd so just skip this and go to the final
@@ -414,7 +417,8 @@ func (snap *Builder) flushDeltaState() {
 			identifier := objects.RandomMAC()
 			newDeltaCache, err := snap.repository.AppContext().GetCache().Scan(identifier)
 			if err != nil {
-				snap.appContext.Cancel(fmt.Errorf("state flusher: failed to open a new cache %w", err))
+				result = fmt.Errorf("state flusher: failed to open a new cache %w", err)
+				snap.appContext.Cancel(result)
 				return
 			}
 
@@ -425,18 +429,21 @@ func (snap *Builder) flushDeltaState() {
 			// the resulting statefile to the repo.
 			err = snap.repository.RotateTransaction(snap.deltaCache, oldStateId, snap.stateId)
 			if err != nil {
-				snap.appContext.Cancel(fmt.Errorf("state flusher: failed to rotate state's transaction %w", err))
+				result = fmt.Errorf("state flusher: failed to rotate state's transaction %w", err)
+				snap.appContext.Cancel(result)
 				return
 			}
 
 			if snap.builderOptions.StateRefresher != nil {
 				if err := snap.builderOptions.StateRefresher(oldStateId, false); err != nil {
-					snap.appContext.Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					result = fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err)
+					snap.appContext.Cancel(result)
 					return
 				}
 			} else {
 				if err := snap.repository.MergeLocalStateWith(oldStateId, oldCache); err != nil {
-					snap.appContext.Cancel(fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err))
+					result = fmt.Errorf("state flusher: failed to merge the previous delta state inside the local state %w", err)
+					snap.appContext.Cancel(result)
 					return
 				}
 			}
@@ -499,9 +506,15 @@ func (snap *Builder) Commit() error {
 	// We are done with packfiles we can flush the last state, either through
 	// the flusher, or manually here.
 	if snap.flushTick != nil {
-		snap.flushEnd <- true
-		close(snap.flushEnd)
-		err = <-snap.flushEnded
+		select {
+		case snap.flushEnd <- true:
+			close(snap.flushEnd)
+			err = <-snap.flushEnded
+		case err = <-snap.flushEnded:
+			if snap.deltaCache != snap.scanCache {
+				snap.deltaCache.Close()
+			}
+		}
 	} else {
 		err = snap.repository.CommitTransaction(snap.Header.Identifier)
 	}
