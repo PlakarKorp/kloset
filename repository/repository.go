@@ -641,9 +641,9 @@ func (r *Repository) blobLimit(Type resources.Type) int64 {
 	}
 }
 
-// decodeBuffer decodes buffer and fails with ErrBlobTooLarge instead of
+// decodeBounded decodes buffer and fails with ErrBlobTooLarge instead of
 // returning more than limit bytes.
-func (r *Repository) decodeBuffer(buffer []byte, limit int64) ([]byte, error) {
+func (r *Repository) decodeBounded(buffer []byte, limit int64) ([]byte, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "decode(%d bytes): %s", len(buffer), time.Since(t0))
@@ -663,6 +663,28 @@ func (r *Repository) decodeBuffer(buffer []byte, limit int64) ([]byte, error) {
 	if int64(len(decoded)) > limit {
 		return nil, fmt.Errorf("%w: %d stored bytes decode past %d bytes", ErrBlobTooLarge, len(buffer), limit)
 	}
+	return decoded, nil
+}
+
+// decodeBuffer decodes a blob stored under mac and checks that it is the
+// blob the state recorded there: each blob is encoded on its own, so one
+// moved into another blob's slot still decodes cleanly. Snapshot headers
+// and signatures are stored under the snapshot identifier rather than
+// under their own MAC, so only their size is checked.
+func (r *Repository) decodeBuffer(buffer []byte, Type resources.Type, mac objects.MAC) ([]byte, error) {
+	decoded, err := r.decodeBounded(buffer, r.blobLimit(Type))
+	if err != nil {
+		return nil, err
+	}
+
+	if Type == resources.RT_SNAPSHOT || Type == resources.RT_SIGNATURE {
+		return decoded, nil
+	}
+
+	if r.ComputeMAC(decoded) != mac {
+		return nil, ErrBlobCorrupted
+	}
+
 	return decoded, nil
 }
 
@@ -961,7 +983,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 	footerbuf := rawPackfile[len(rawPackfile)-int(footerBufLength):]
 	rawPackfile = rawPackfile[:len(rawPackfile)-int(footerBufLength)]
 
-	footerbuf, err = r.decodeBuffer(footerbuf, maxMetadataBlobSize)
+	footerbuf, err = r.decodeBounded(footerbuf, maxMetadataBlobSize)
 	if err != nil {
 		return nil, err
 	}
@@ -979,7 +1001,7 @@ func (r *Repository) GetPackfile(mac objects.MAC) (*packfile.PackfileInMemory, e
 	indexbuf := rawPackfile[int(footer.IndexOffset):]
 	rawPackfile = rawPackfile[:int(footer.IndexOffset)]
 
-	indexbuf, err = r.decodeBuffer(indexbuf, maxIndexSize(len(indexbuf)))
+	indexbuf, err = r.decodeBounded(indexbuf, maxIndexSize(len(indexbuf)))
 	if err != nil {
 		return nil, err
 	}
@@ -1082,53 +1104,26 @@ func (r *Repository) GetPackfileRange(loc state.Location) ([]byte, error) {
 	return data[offsetDelta : length+uint32(offsetDelta)], nil
 }
 
-// GetPackfileBlob reads a blob of unknown type, so it only gets the widest
-// ceiling; GetBlob knows the type and bounds the read tighter.
+// GetPackfileBlob reads a blob by location alone, so it neither knows the
+// MAC to check it against nor its type: it only gets the widest ceiling.
+// GetBlob knows both and verifies what it decodes.
 func (r *Repository) GetPackfileBlob(loc state.Location) (io.ReadSeeker, error) {
-	return r.getPackfileBlob(loc, maxObjectBlobSize)
-}
-
-func (r *Repository) getPackfileBlob(loc state.Location, limit int64) (io.ReadSeeker, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetPackfileBlob(%x, %d, %d): %s", loc.Packfile, loc.Offset, loc.Length, time.Since(t0))
 	}()
 
-	decoded, err := r.getPackfileBlobBytes(loc, limit)
-	if err != nil {
-		return nil, err
-	}
-
-	return bytes.NewReader(decoded), nil
-}
-
-func (r *Repository) getPackfileBlobBytes(loc state.Location, limit int64) ([]byte, error) {
 	data, err := r.GetPackfileRange(loc)
 	if err != nil {
 		return nil, err
 	}
 
-	decoded, err := r.decodeBuffer(data, limit)
+	decoded, err := r.decodeBounded(data, maxObjectBlobSize)
 	if err != nil {
 		return nil, fmt.Errorf("packfile %x at %d: %w", loc.Packfile, loc.Offset, err)
 	}
 
-	return decoded, nil
-}
-
-// verifyBlob checks that data is the blob the state recorded under mac.
-// Snapshot headers and signatures are stored under the snapshot identifier
-// rather than under their own MAC, so they cannot be checked this way.
-func (r *Repository) verifyBlob(Type resources.Type, mac objects.MAC, data []byte) error {
-	if Type == resources.RT_SNAPSHOT || Type == resources.RT_SIGNATURE {
-		return nil
-	}
-
-	if r.ComputeMAC(data) != mac {
-		return ErrBlobCorrupted
-	}
-
-	return nil
+	return bytes.NewReader(decoded), nil
 }
 
 // Deletes a packfile from the store. Warning this is a true delete and is unrecoverable.
@@ -1255,10 +1250,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 					chunkData := data[currentOffset : currentOffset+int(l.Length)]
 					currentOffset += int(l.Length)
 
-					decodedChunk, err := r.decodeBuffer(chunkData, r.blobLimit(resources.RT_CHUNK))
-					if err == nil {
-						err = r.verifyBlob(resources.RT_CHUNK, currMACs[i], decodedChunk)
-					}
+					decodedChunk, err := r.decodeBuffer(chunkData, resources.RT_CHUNK, currMACs[i])
 					if err != nil {
 						if !yield(nil, fmt.Errorf("packfile %x at %d: %w", l.Packfile, l.Offset, err)) {
 							return
@@ -1320,10 +1312,7 @@ func (r *Repository) GetObjectContent(obj *objects.Object, start int, maxSize ui
 				chunkData := data[currentOffset : currentOffset+int(l.Length)]
 				currentOffset += int(l.Length)
 
-				decodedChunk, err := r.decodeBuffer(chunkData, r.blobLimit(resources.RT_CHUNK))
-				if err == nil {
-					err = r.verifyBlob(resources.RT_CHUNK, currMACs[i], decodedChunk)
-				}
+				decodedChunk, err := r.decodeBuffer(chunkData, resources.RT_CHUNK, currMACs[i])
 				if err != nil {
 					if !yield(nil, fmt.Errorf("packfile %x at %d: %w", l.Packfile, l.Offset, err)) {
 						return
@@ -1355,12 +1344,13 @@ func (r *Repository) GetBlob(Type resources.Type, mac objects.MAC) (io.ReadSeeke
 		return nil, ErrBlobNotFound
 	}
 
-	decoded, err := r.getPackfileBlobBytes(loc, r.blobLimit(Type))
+	data, err := r.GetPackfileRange(loc)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := r.verifyBlob(Type, mac, decoded); err != nil {
+	decoded, err := r.decodeBuffer(data, Type, mac)
+	if err != nil {
 		return nil, fmt.Errorf("packfile %x at %d: %w", loc.Packfile, loc.Offset, err)
 	}
 
