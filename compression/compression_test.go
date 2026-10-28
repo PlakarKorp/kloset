@@ -19,8 +19,8 @@ func TestNewDefaultConfiguration(t *testing.T) {
 		cfg := cprss.NewDefaultConfiguration()
 
 		require.NotNil(t, cfg)
-		require.Equal(t, "LZ4", cfg.Algorithm)
-		require.Equal(t, int(lz4.Level9), cfg.Level)
+		require.Equal(t, "S2", cfg.Algorithm)
+		require.Equal(t, -1, cfg.Level)
 		require.Equal(t, -1, cfg.WindowSize)
 		require.Equal(t, -1, cfg.ChunkSize)
 		require.Equal(t, -1, cfg.BlockSize)
