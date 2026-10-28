@@ -91,6 +91,11 @@ func DeflateLZ4Stream(r io.Reader) (io.Reader, error) {
 	pr, pw := io.Pipe()
 	go func() {
 		lw := lz4.NewWriter(pw)
+		if err := lw.Apply(lz4.ChecksumOption(false)); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
 		defer pw.Close()
 		defer lw.Close()
 		_, err := io.Copy(lw, r)

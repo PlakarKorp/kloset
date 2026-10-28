@@ -227,8 +227,9 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 	if err != nil {
 		return err
 	}
-	encoded, err := io.ReadAll(encodedReader)
-	if err != nil {
+
+	encoded := bytes.NewBuffer(make([]byte, 0, len(data)+len(data)/255+64))
+	if _, err := encoded.ReadFrom(encodedReader); err != nil {
 		return err
 	}
 
@@ -247,7 +248,7 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 		f |= PackfileHot
 	}
 
-	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded, Flags: f}
+	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded.Bytes(), Flags: f}
 	select {
 	case mgr.packerChan[i] <- msg:
 		return nil

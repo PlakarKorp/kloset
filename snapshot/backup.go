@@ -476,27 +476,52 @@ func (snap *Builder) Backup(source *Source) error {
 	return nil
 }
 
-func entropy(data []byte) (float64, [256]float64) {
+const (
+	entropySampleThreshold = 512 << 10
+	entropySampleBlock     = 4 << 10
+	entropySampleStride    = 32 << 10
+)
+
+func entropy(data []byte) float64 {
 	if len(data) == 0 {
-		return 0.0, [256]float64{}
+		return 0.0
 	}
 
-	// Count the frequency of each byte value
-	var freq [256]float64
-	for _, b := range data {
-		freq[b]++
+	var freq [4][256]uint32
+	n := len(data)
+	if len(data) < entropySampleThreshold {
+		countBytes(data, &freq)
+	} else {
+		n = 0
+		for off := 0; off < len(data); off += entropySampleStride {
+			block := data[off:min(off+entropySampleBlock, len(data))]
+			countBytes(block, &freq)
+			n += len(block)
+		}
 	}
 
-	// Calculate the entropy
 	entropy := 0.0
-	dataSize := float64(len(data))
-	for _, f := range freq {
-		if f > 0 {
-			p := f / dataSize
+	dataSize := float64(n)
+	for b := range freq[0] {
+		if f := freq[0][b] + freq[1][b] + freq[2][b] + freq[3][b]; f > 0 {
+			p := float64(f) / dataSize
 			entropy -= p * math.Log2(p)
 		}
 	}
-	return entropy, freq
+	return entropy
+}
+
+func countBytes(data []byte, freq *[4][256]uint32) {
+	i := 0
+	for ; i+4 <= len(data); i += 4 {
+		freq[0][data[i]]++
+		freq[1][data[i+1]]++
+		freq[2][data[i+2]]++
+		freq[3][data[i+3]]++
+	}
+	for ; i < len(data); i++ {
+		freq[0][data[i]]++
+	}
 }
 
 func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Reader) (objects.MAC, error) {
@@ -591,7 +616,6 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	var object_t32 objects.MAC
 
 	var totalEntropy float64
-	var totalFreq [256]float64
 	var totalDataSize int64
 
 	if snap.throttler != nil {
@@ -613,16 +637,10 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 		copy(chunk_t32[:], chunkHasher.Sum(nil))
 		releaseChunkHasher()
 
-		entropyScore, freq := entropy(data)
-		if len(data) > 0 {
-			for i := range 256 {
-				totalFreq[i] += freq[i]
-			}
-		}
 		chunk := objects.NewChunk()
 		chunk.ContentMAC = chunk_t32
 		chunk.Length = uint32(len(data))
-		chunk.Entropy = entropyScore
+		chunk.Entropy = entropy(data)
 
 		object.Chunks = append(object.Chunks, *chunk)
 		cdcOffset += uint64(len(data))
