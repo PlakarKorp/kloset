@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/klauspost/compress/s2"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 )
@@ -46,6 +47,15 @@ func LookupDefaultConfiguration(algorithm string) (*Configuration, error) {
 			BlockSize:  -1,
 			EnableCRC:  false,
 		}, nil
+	case "S2":
+		return &Configuration{
+			Algorithm:  "S2",
+			Level:      -1,
+			WindowSize: -1,
+			ChunkSize:  -1,
+			BlockSize:  -1,
+			EnableCRC:  false,
+		}, nil
 	case "ZSTD":
 		return &Configuration{
 			Algorithm:  "ZSTD",
@@ -64,6 +74,7 @@ func DeflateStream(name string, r io.Reader) (io.Reader, error) {
 	m := map[string]func(io.Reader) (io.Reader, error){
 		"GZIP": DeflateGzipStream,
 		"LZ4":  DeflateLZ4Stream,
+		"S2":   DeflateS2Stream,
 		"ZSTD": DeflateZstdStream,
 	}
 	if fn, exists := m[name]; exists {
@@ -106,6 +117,38 @@ func DeflateLZ4Stream(r io.Reader) (io.Reader, error) {
 	return pr, nil
 }
 
+// s2WriterPool keeps S2 writers across blobs: each one holds its block
+// buffers, which a new writer per blob would allocate again.
+var s2WriterPool = sync.Pool{
+	New: func() any {
+		// One goroutine: blobs are compressed in parallel already, and
+		// S2's default spawns GOMAXPROCS of them per writer.
+		return s2.NewWriter(nil, s2.WriterConcurrency(1))
+	},
+}
+
+func DeflateS2Stream(r io.Reader) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		sw := s2WriterPool.Get().(*s2.Writer)
+		sw.Reset(pw)
+		defer s2WriterPool.Put(sw)
+
+		if _, err := io.Copy(sw, r); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+
+		// Close writes the last block, so it must run before pw.Close().
+		if err := sw.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
+}
+
 func DeflateZstdStream(r io.Reader) (io.Reader, error) {
 	pr, pw := io.Pipe()
 	go func() {
@@ -144,6 +187,7 @@ func InflateStream(name string, r io.ReadCloser) (io.ReadCloser, error) {
 	m := map[string]func(io.ReadCloser) (io.ReadCloser, error){
 		"GZIP": InflateGzipStream,
 		"LZ4":  InflateLZ4Stream,
+		"S2":   InflateS2Stream,
 		"ZSTD": InflateZstdStream,
 	}
 	if fn, exists := m[name]; exists {
@@ -191,6 +235,20 @@ func InflateLZ4Stream(r io.ReadCloser) (io.ReadCloser, error) {
 		defer pw.Close()
 
 		_, err := io.Copy(pw, lz)
+		if err != nil {
+			pw.CloseWithError(err)
+		}
+	}()
+	return pr, nil
+}
+
+func InflateS2Stream(r io.ReadCloser) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	sr := s2.NewReader(r)
+	go func() {
+		defer pw.Close()
+
+		_, err := io.Copy(pw, sr)
 		if err != nil {
 			pw.CloseWithError(err)
 		}
