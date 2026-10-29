@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors"
 	xport "github.com/PlakarKorp/kloset/connectors/exporter"
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/location"
 	"github.com/stretchr/testify/require"
 )
 

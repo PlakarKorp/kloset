@@ -1,99 +1,26 @@
 package connectors
 
 import (
-	"errors"
 	"io"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/kloset/objects"
 )
 
-type Options struct {
-	Hostname        string
-	OperatingSystem string
-	Architecture    string
-	CWD             string
-	MaxConcurrency  int
-	Excludes        []string
-	NoXattr         bool
-
-	Stdin  io.Reader `msgpack:"-"`
-	Stdout io.Writer `msgpack:"-"`
-	Stderr io.Writer `msgpack:"-"`
-}
-
-// requests
-type Record struct {
-	// kloset doesn't make use of this field at all, it's just
-	// echoed back in the record.
-	ID string
-
-	Reader io.ReadCloser
-
-	Pathname string
-	Err      error
-
-	IsXattr   bool
-	XattrName string
-	XattrType objects.Attribute
-
-	Target             string
-	FileInfo           objects.FileInfo
-	ExtendedAttributes []string
-	FileAttributes     uint32
-}
-
-func (s *Record) Close() error {
-	if s.Reader == nil {
-		return errors.ErrUnsupported
-	}
-	return s.Reader.Close()
-}
-
-func (s *Record) Ok() *Result {
-	s.Close()
-	return &Result{
-		Record: *s,
-		Err:    nil,
-	}
-}
-
-func (s *Record) Error(err error) *Result {
-	s.Close()
-	return &Result{
-		Record: *s,
-		Err:    err,
-	}
-}
-
-// result
-type Result struct {
-	Record Record
-	Err    error
-}
+type (
+	Options = integration.Options
+	Record  = integration.Record
+	Result  = integration.Result
+)
 
 func NewRecord(pathname, target string, fileinfo objects.FileInfo, xattr []string, read func() (io.ReadCloser, error)) *Record {
-	return &Record{
-		Pathname:           pathname,
-		Target:             target,
-		FileInfo:           fileinfo,
-		ExtendedAttributes: xattr,
-		Reader:             NewLazyReader(read),
-	}
+	return integration.NewRecord(pathname, target, fileinfo, xattr, read)
 }
 
 func NewXattr(pathname, xattr string, kind objects.Attribute, read func() (io.ReadCloser, error)) *Record {
-	return &Record{
-		Pathname:  pathname,
-		IsXattr:   true,
-		XattrName: xattr,
-		XattrType: kind,
-		Reader:    NewLazyReader(read),
-	}
+	return integration.NewXattr(pathname, xattr, kind, read)
 }
 
 func NewError(pathname string, err error) *Record {
-	return &Record{
-		Pathname: pathname,
-		Err:      err,
-	}
+	return integration.NewError(pathname, err)
 }
