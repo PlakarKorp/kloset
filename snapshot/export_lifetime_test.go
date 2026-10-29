@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/events"
-	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/snapshot"
 	"github.com/stretchr/testify/require"
 )

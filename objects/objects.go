@@ -1,11 +1,9 @@
 package objects
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
 	"github.com/vmihailenco/msgpack/v5"
@@ -19,51 +17,16 @@ func init() {
 	versioning.Register(resources.RT_CHUNK, versioning.FromString(CHUNK_VERSION))
 }
 
-type MAC [32]byte
-
-var (
-	NilMac MAC
+type (
+	MAC = integration.MAC
 )
 
-func (m MAC) MarshalJSON() ([]byte, error) {
-	return json.Marshal(m.FormatHex())
-}
-
-func (m *MAC) UnmarshalJSON(data []byte) error {
-	var s string
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
-	}
-
-	return m.ParseHex(s)
-}
-
-func (m MAC) FormatHex() string {
-	return hex.EncodeToString(m[:])
-}
-
-func (m *MAC) ParseHex(s string) error {
-	decoded, err := hex.DecodeString(s)
-	if err != nil {
-		return err
-	}
-
-	if len(decoded) != 32 {
-		return fmt.Errorf("invalid mac length: %d", len(decoded))
-	}
-
-	copy(m[:], decoded)
-	return nil
-}
+var (
+	NilMac = integration.NilMac
+)
 
 func RandomMAC() MAC {
-	var r MAC
-
-	// According to the documentation, this call never fails and
-	// always return a complete read.
-	rand.Read(r[:])
-
-	return r
+	return integration.RandomMAC()
 }
 
 type Object struct {

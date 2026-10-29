@@ -4,9 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/importer"
-	"github.com/PlakarKorp/kloset/location"
 )
 
 type MockImporter struct {
