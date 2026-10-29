@@ -315,19 +315,15 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 					}
 
 					if !snap.builderOptions.NoXattr || !record.IsXattr {
+						snap.emitter.Path(record.Pathname)
 						if record.Err != nil {
-							snap.emitter.Path(record.Pathname)
 							snap.emitter.PathError(record.Pathname, record.Err)
 							sourceCtx.recordError(idx, record.Pathname, record.Err)
-
-						} else if !snap.skipExcludedPathname(sourceCtx, record) {
-							snap.emitter.Path(record.Pathname)
-							if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
-								sourceCtx.recordError(idx, record.Pathname, err)
-								snap.emitter.PathError(record.Pathname, err)
-							} else {
-								snap.emitter.PathOk(record.Pathname)
-							}
+						} else if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
+							sourceCtx.recordError(idx, record.Pathname, err)
+							snap.emitter.PathError(record.Pathname, err)
+						} else {
+							snap.emitter.PathOk(record.Pathname)
 						}
 					}
 					if results != nil {
