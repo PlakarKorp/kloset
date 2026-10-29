@@ -314,18 +314,17 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 						return nil
 					}
 
-					if !snap.builderOptions.NoXattr || !record.IsXattr {
-						snap.emitter.Path(record.Pathname)
-						if record.Err != nil {
-							snap.emitter.PathError(record.Pathname, record.Err)
-							sourceCtx.recordError(idx, record.Pathname, record.Err)
-						} else if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
-							sourceCtx.recordError(idx, record.Pathname, err)
-							snap.emitter.PathError(record.Pathname, err)
-						} else {
-							snap.emitter.PathOk(record.Pathname)
-						}
+					snap.emitter.Path(record.Pathname)
+					if record.Err != nil {
+						snap.emitter.PathError(record.Pathname, record.Err)
+						sourceCtx.recordError(idx, record.Pathname, record.Err)
+					} else if err := snap.processRecord(idx, sourceCtx, record, stats, ck); err != nil {
+						sourceCtx.recordError(idx, record.Pathname, err)
+						snap.emitter.PathError(record.Pathname, err)
+					} else {
+						snap.emitter.PathOk(record.Pathname)
 					}
+
 					if results != nil {
 						results <- record.Ok()
 					} else {
