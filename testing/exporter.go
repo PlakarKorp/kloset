@@ -5,9 +5,9 @@ import (
 	"context"
 	"io"
 
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/connectors/exporter"
-	"github.com/PlakarKorp/kloset/location"
 )
 
 type MockExporter struct {
