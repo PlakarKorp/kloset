@@ -1,26 +1,19 @@
 package exporter
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 
+	"github.com/PlakarKorp/integration-sdk"
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/location"
 )
 
-type Exporter interface {
-	Origin() string
-	Type() string
-	Root() string
-	Flags() location.Flags
-	Ping(context.Context) error
-	Export(context.Context, <-chan *connectors.Record, chan<- *connectors.Result) error
-	Close(context.Context) error
-}
-
-type ExporterFn func(context.Context, *connectors.Options, string, map[string]string) (Exporter, error)
+type (
+	Exporter   = integration.Exporter
+	ExporterFn = integration.ExporterFn
+)
 
 var backends = location.New[ExporterFn]("fs")
 

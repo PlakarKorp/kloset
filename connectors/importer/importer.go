@@ -17,26 +17,19 @@
 package importer
 
 import (
-	"context"
 	"fmt"
 	"path/filepath"
 
+	"github.com/PlakarKorp/integration-sdk"
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/kcontext"
-	"github.com/PlakarKorp/kloset/location"
 )
 
-type Importer interface {
-	Origin() string
-	Type() string
-	Root() string
-	Flags() location.Flags
-	Ping(context.Context) error
-	Import(context.Context, chan<- *connectors.Record, <-chan *connectors.Result) error
-	Close(context.Context) error
-}
-
-type ImporterFn func(context.Context, *connectors.Options, string, map[string]string) (Importer, error)
+type (
+	Importer   = integration.Importer
+	ImporterFn = integration.ImporterFn
+)
 
 var backends = location.New[ImporterFn]("fs")
 

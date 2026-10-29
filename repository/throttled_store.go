@@ -4,8 +4,8 @@ import (
 	"context"
 	"io"
 
+	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors/storage"
-	"github.com/PlakarKorp/kloset/location"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/throttle"
 )
