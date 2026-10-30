@@ -464,20 +464,40 @@ func (snap *Builder) Backup(source *Source) error {
 	return nil
 }
 
+const (
+	entropySampleThreshold = 512 << 10
+	entropySampleBlock     = 4 << 10
+	entropySampleStride    = 32 << 10
+)
+
+// Chunks of least entropySampleThreshold bytes are estimated from one block of
+// entropySampleBlock bytes every entropySampleStride bytes, so the value is
+// approximate for them; smaller chunks are counted in full.
 func entropy(data []byte) float64 {
+
 	if len(data) == 0 {
 		return 0.0
 	}
 
+	block, stride := len(data), len(data)
+	if len(data) >= entropySampleThreshold {
+		block, stride = entropySampleBlock, entropySampleStride
+	}
+
 	// Count the frequency of each byte value
 	var freq [256]uint32
-	for _, b := range data {
-		freq[b]++
+	n := 0
+	for off := 0; off < len(data); off += stride {
+		sample := data[off:min(off+block, len(data))]
+		for _, b := range sample {
+			freq[b]++
+		}
+		n += len(sample)
 	}
 
 	// Calculate the entropy
 	entropy := 0.0
-	dataSize := float64(len(data))
+	dataSize := float64(n)
 	for _, f := range freq {
 		if f > 0 {
 			p := float64(f) / dataSize

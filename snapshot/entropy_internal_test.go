@@ -35,21 +35,40 @@ func randomBytes(n int) []byte {
 	return b
 }
 
-// Every byte is counted, so the result must match the reference exactly (up
-// to float rounding).
-func TestEntropyMatchesReference(t *testing.T) {
-	random := randomBytes(1 << 20)
+// Below the sampling threshold every byte is counted, so the result must
+// match the reference exactly (up to float rounding).
+func TestEntropyExactBelowThreshold(t *testing.T) {
+	random := randomBytes(entropySampleThreshold - 1)
 
 	cases := map[string][]byte{
 		"empty":     nil,
 		"one byte":  {42},
-		"odd tail":  random[:len(random)-3],
+		"odd tail":  random[:len(random)-2],
 		"random":    random,
-		"zeros":     make([]byte, 1<<20),
-		"text":      bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog. "), 1<<14),
+		"zeros":     make([]byte, entropySampleThreshold-1),
+		"text":      bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog. "), 4096),
 		"two bytes": bytes.Repeat([]byte{0, 255}, 1<<15),
 	}
 	for name, data := range cases {
 		require.InDelta(t, referenceEntropy(data), entropy(data), 1e-12, name)
+	}
+}
+
+// At or above the threshold the value is estimated from samples: exact for
+// data whose byte distribution is the same in every block, close otherwise.
+func TestEntropySampledAboveThreshold(t *testing.T) {
+	cases := map[string]struct {
+		data  []byte
+		delta float64
+	}{
+		"zeros":             {make([]byte, 1<<20), 1e-12},
+		"two bytes":         {bytes.Repeat([]byte{0, 255}, 1<<19), 1e-12},
+		"random":            {randomBytes(1 << 20), 0.01},
+		"random odd size":   {randomBytes(entropySampleThreshold + 12345), 0.01},
+		"text":              {bytes.Repeat([]byte("the quick brown fox jumps over the lazy dog. "), 1<<15), 0.01},
+		"zeros then random": {append(make([]byte, 1<<19), randomBytes(1<<19)...), 0.05},
+	}
+	for name, c := range cases {
+		require.InDelta(t, referenceEntropy(c.data), entropy(c.data), c.delta, name)
 	}
 }
