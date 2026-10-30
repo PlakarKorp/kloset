@@ -328,7 +328,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 	// we are just refreshing the existing lock so that the others don't consider
 	// us stale and kick us out.
 	go func() {
-		lastRefresh := time.Now()
+		lastRefresh := lock.Timestamp
 		refresh := time.After(repository.LOCK_REFRESH_RATE)
 
 		for {
@@ -364,7 +364,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 				}
 
 				cancel()
-				lastRefresh = time.Now()
+				lastRefresh = lock.Timestamp
 				refresh = time.After(repository.LOCK_REFRESH_RATE)
 			}
 		}
