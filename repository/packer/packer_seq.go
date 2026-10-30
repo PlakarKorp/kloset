@@ -227,8 +227,13 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 	if err != nil {
 		return err
 	}
-	encoded, err := io.ReadAll(encodedReader)
-	if err != nil {
+
+	// Size the buffer upfront to avoid any reallocations (and in case it's not
+	// enough the buffer will grow anyway). The /2048+1024 is to take into
+	// account the frame overhead from compression + encryption, and the fact
+	// that ReadFrom always want's 512 bytes of headroom.
+	encoded := bytes.NewBuffer(make([]byte, 0, len(data)+len(data)/2048+1024))
+	if _, err := encoded.ReadFrom(encodedReader); err != nil {
 		return err
 	}
 
@@ -247,7 +252,7 @@ func (mgr *seqPackerManager) Put(hint int, Type resources.Type, mac objects.MAC,
 		f |= PackfileHot
 	}
 
-	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded, Flags: f}
+	msg := PackerMsg{Type: Type, Version: versioning.GetCurrentVersion(Type), Timestamp: time.Now(), MAC: mac, Data: encoded.Bytes(), Flags: f}
 	select {
 	case mgr.packerChan[i] <- msg:
 		return nil
