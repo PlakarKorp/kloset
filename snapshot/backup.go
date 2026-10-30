@@ -468,10 +468,17 @@ const (
 	entropySampleThreshold = 512 << 10
 	entropySampleBlock     = 4 << 10
 	entropySampleStride    = 32 << 10
+
+	// entropySampleSkew moves each block within its stride, by about
+	// stride/phi more than the previous one, so the samples spread evenly
+	// over every position of page-structured data (database pages of 8 or
+	// 16 KiB, ...). Always sampling at the same offset in the stride would
+	// land on the same part of every page.
+	entropySampleSkew = 20251
 )
 
-// Chunks of least entropySampleThreshold bytes are estimated from one block of
-// entropySampleBlock bytes every entropySampleStride bytes, so the value is
+// Chunks of at least entropySampleThreshold bytes are estimated from one block
+// of entropySampleBlock bytes every entropySampleStride bytes, so the value is
 // approximate for them; smaller chunks are counted in full.
 func entropy(data []byte) float64 {
 
@@ -487,8 +494,12 @@ func entropy(data []byte) float64 {
 	// Count the frequency of each byte value
 	var freq [256]uint32
 	n := 0
-	for off := 0; off < len(data); off += stride {
-		sample := data[off:min(off+block, len(data))]
+	for i, off := 0, 0; off < len(data); i, off = i+1, off+stride {
+		start := off + (i*entropySampleSkew)%stride
+		if start >= len(data) {
+			start = off
+		}
+		sample := data[start:min(start+block, len(data))]
 		for _, b := range sample {
 			freq[b]++
 		}

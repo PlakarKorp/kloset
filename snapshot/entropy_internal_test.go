@@ -72,3 +72,32 @@ func TestEntropySampledAboveThreshold(t *testing.T) {
 		require.InDelta(t, referenceEntropy(c.data), entropy(c.data), c.delta, name)
 	}
 }
+
+// pages returns size bytes of page-structured data starting at phase within
+// a page: each page begins with hdr zero bytes followed by random payload.
+func pages(size, page, hdr, phase int) []byte {
+	payload := randomBytes(size + page)
+	for i := range payload {
+		if i%page < hdr {
+			payload[i] = 0
+		}
+	}
+	return payload[phase : phase+size]
+}
+
+// Pages whose size divides the sampling stride must not bias the estimate,
+// whatever the phase the chunk starts at within a page.
+func TestEntropySampledPeriodicData(t *testing.T) {
+	for _, c := range []struct{ page, hdr int }{
+		{8 << 10, 4 << 10},
+		{8 << 10, 1 << 10},
+		{16 << 10, 4 << 10},
+		{32 << 10, 16 << 10},
+	} {
+		for phase := 0; phase < c.page; phase += 1 << 10 {
+			data := pages(1<<20, c.page, c.hdr, phase)
+			require.InDelta(t, referenceEntropy(data), entropy(data), 0.3,
+				"page %d, header %d, phase %d", c.page, c.hdr, phase)
+		}
+	}
+}
