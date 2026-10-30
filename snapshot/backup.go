@@ -464,27 +464,58 @@ func (snap *Builder) Backup(source *Source) error {
 	return nil
 }
 
-func entropy(data []byte) (float64, [256]float64) {
+const (
+	entropySampleThreshold = 512 << 10
+	entropySampleBlock     = 4 << 10
+	entropySampleStride    = 32 << 10
+
+	// entropySampleSkew moves each block within its stride, by about
+	// stride/phi more than the previous one, so the samples spread evenly
+	// over every position of page-structured data (database pages of 8 or
+	// 16 KiB, ...). Always sampling at the same offset in the stride would
+	// land on the same part of every page.
+	entropySampleSkew = 20251
+)
+
+// Chunks of at least entropySampleThreshold bytes are estimated from one block
+// of entropySampleBlock bytes every entropySampleStride bytes, so the value is
+// approximate for them; smaller chunks are counted in full.
+func entropy(data []byte) float64 {
+
 	if len(data) == 0 {
-		return 0.0, [256]float64{}
+		return 0.0
+	}
+
+	block, stride := len(data), len(data)
+	if len(data) >= entropySampleThreshold {
+		block, stride = entropySampleBlock, entropySampleStride
 	}
 
 	// Count the frequency of each byte value
-	var freq [256]float64
-	for _, b := range data {
-		freq[b]++
+	var freq [256]uint32
+	n := 0
+	for i, off := 0, 0; off < len(data); i, off = i+1, off+stride {
+		start := off + (i*entropySampleSkew)%stride
+		if start >= len(data) {
+			start = off
+		}
+		sample := data[start:min(start+block, len(data))]
+		for _, b := range sample {
+			freq[b]++
+		}
+		n += len(sample)
 	}
 
 	// Calculate the entropy
 	entropy := 0.0
-	dataSize := float64(len(data))
+	dataSize := float64(n)
 	for _, f := range freq {
 		if f > 0 {
-			p := f / dataSize
+			p := float64(f) / dataSize
 			entropy -= p * math.Log2(p)
 		}
 	}
-	return entropy, freq
+	return entropy
 }
 
 func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Reader) (objects.MAC, error) {
@@ -579,7 +610,6 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	var object_t32 objects.MAC
 
 	var totalEntropy float64
-	var totalFreq [256]float64
 	var totalDataSize int64
 
 	if snap.throttler != nil {
@@ -601,16 +631,10 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 		copy(chunk_t32[:], chunkHasher.Sum(nil))
 		releaseChunkHasher()
 
-		entropyScore, freq := entropy(data)
-		if len(data) > 0 {
-			for i := range 256 {
-				totalFreq[i] += freq[i]
-			}
-		}
 		chunk := objects.NewChunk()
 		chunk.ContentMAC = chunk_t32
 		chunk.Length = uint32(len(data))
-		chunk.Entropy = entropyScore
+		chunk.Entropy = entropy(data)
 
 		object.Chunks = append(object.Chunks, *chunk)
 		cdcOffset += uint64(len(data))
