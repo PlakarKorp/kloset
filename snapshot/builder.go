@@ -329,7 +329,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 	// us stale and kick us out.
 	go func() {
 		lastRefresh := lock.Timestamp
-		refresh := time.After(repository.LOCK_REFRESH_RATE)
+		refresh := time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
 
 		for {
 			select {
@@ -352,7 +352,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 				buffer := &bytes.Buffer{}
 
 				lock.SerializeToStream(buffer)
-				tctx, cancel := context.WithTimeout(snap.AppContext(), 2*time.Minute)
+				tctx, cancel := context.WithDeadline(snap.AppContext(), lastRefresh.Add(repository.LOCK_TTL))
 				if _, err := snap.repository.PutLock(tctx, snap.Header.Identifier, buffer); err != nil {
 					// For some storage reason the refresh failed, warn the user
 					// and retry sooner than the normal rate so that we don't
@@ -365,7 +365,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 
 				cancel()
 				lastRefresh = lock.Timestamp
-				refresh = time.After(repository.LOCK_REFRESH_RATE)
+				refresh = time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
 			}
 		}
 	}()
