@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -259,16 +260,16 @@ func (snap *Builder) Lock() (chan bool, error) {
 		return nil, err
 	}
 
-	_, err = snap.repository.PutLock(snap.Header.Identifier, buffer)
+	_, err = snap.repository.PutLock(snap.AppContext(), snap.Header.Identifier, buffer)
 	if err != nil {
 		return nil, err
 	}
 
 	// We installed the lock, now let's see if there is a conflicting exclusive lock or not.
-	locksID, err := snap.repository.GetLocks()
+	locksID, err := snap.repository.GetLocks(snap.AppContext())
 	if err != nil {
 		// We still need to delete it, and we need to do so manually.
-		snap.repository.DeleteLock(snap.Header.Identifier)
+		snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 		return nil, err
 	}
 
@@ -277,32 +278,32 @@ func (snap *Builder) Lock() (chan bool, error) {
 			continue
 		}
 
-		rd, err := snap.repository.GetLock(lockID)
+		rd, err := snap.repository.GetLock(snap.AppContext(), lockID)
 		if err != nil {
 			// Err can't tell us if it's not found or a transport error, so
 			// relist because it might have been Deleted by another process in
 			// which case it's fine to continue
-			if lockIDs, err := snap.repository.GetLocks(); err == nil {
+			if lockIDs, err := snap.repository.GetLocks(snap.AppContext()); err == nil {
 				if !slices.Contains(lockIDs, lockID) {
 					continue
 				}
 			}
 
 			// Okay it was an actual error we can't proceed further
-			snap.repository.DeleteLock(snap.Header.Identifier)
+			snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 			return nil, err
 		}
 
 		lock, err := repository.NewLockFromStream(rd)
 		rd.Close()
 		if err != nil {
-			snap.repository.DeleteLock(snap.Header.Identifier)
+			snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 			return nil, err
 		}
 
 		/* Kick out stale locks */
 		if lock.IsStale() {
-			if err := snap.repository.DeleteLock(lockID); err != nil {
+			if err := snap.repository.DeleteLock(snap.AppContext(), lockID); err != nil {
 				// Failure to delete is not an hardstop, either it was already
 				// deleted, or there is a real failure to do it, but this lock
 				// is Shared so we can keep going on.
@@ -314,7 +315,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 
 		// There is an exclusive lock in place, we need to abort.
 		if lock.Exclusive {
-			err := snap.repository.DeleteLock(snap.Header.Identifier)
+			err := snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 			if err != nil {
 				return nil, err
 			}
@@ -333,7 +334,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 		for {
 			select {
 			case <-lockReleaser:
-				snap.lockReleased <- snap.repository.DeleteLock(snap.Header.Identifier)
+				snap.lockReleased <- snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 				return
 			case <-refresh:
 
@@ -351,15 +352,18 @@ func (snap *Builder) Lock() (chan bool, error) {
 				buffer := &bytes.Buffer{}
 
 				lock.SerializeToStream(buffer)
-				if _, err := snap.repository.PutLock(snap.Header.Identifier, buffer); err != nil {
+				tctx, cancel := context.WithTimeout(snap.AppContext(), 2*time.Minute)
+				if _, err := snap.repository.PutLock(tctx, snap.Header.Identifier, buffer); err != nil {
 					// For some storage reason the refresh failed, warn the user
 					// and retry sooner than the normal rate so that we don't
 					// have to abort the backup.
+					cancel()
 					snap.Logger().Warn("failed to refresh the repository lock: %s", err)
 					refresh = time.After(repository.LOCK_REFRESH_RATE / 10)
 					continue
 				}
 
+				cancel()
 				lastRefresh = time.Now()
 				refresh = time.After(repository.LOCK_REFRESH_RATE)
 			}
