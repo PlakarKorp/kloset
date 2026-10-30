@@ -8,7 +8,6 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/PlakarKorp/kloset.svg)](https://pkg.go.dev/github.com/PlakarKorp/kloset)
 [![Go Report Card](https://goreportcard.com/badge/github.com/PlakarKorp/kloset)](https://goreportcard.com/report/github.com/PlakarKorp/kloset)
-[![codecov](https://codecov.io/gh/PlakarKorp/kloset/branch/main/graph/badge.svg)](https://codecov.io/gh/PlakarKorp/kloset)
 [![License: ISC](https://img.shields.io/badge/License-ISC-blue.svg)](LICENSE)
 
 Kloset is a Go library, not a command-line tool. It provides the storage engine

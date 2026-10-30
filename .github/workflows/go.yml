@@ -26,10 +26,10 @@ jobs:
     - name: Build
       run: go build -v ./...
 
-    # Produce a coverage profile (Codecov coverage) and a JUnit XML (Codecov
-    # Test Analytics) in one run. continue-on-error + explicit exit keeps the
-    # upload steps reachable on test failure — that is exactly when the test
-    # results are most useful; a later step re-surfaces the failure.
+    # Produce a coverage profile and a JUnit XML in one run. continue-on-error
+    # + explicit exit keeps the upload steps reachable on test failure — that is
+    # exactly when the test results are most useful; a later step re-surfaces
+    # the failure.
     - name: Test
       id: gotest
       continue-on-error: true
@@ -41,22 +41,6 @@ jobs:
         status=$?
         echo "test_exit=$status" >> "$GITHUB_OUTPUT"
         exit $status
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./coverage.out
-        fail_ci_if_error: false
-
-    - name: Upload test results to Codecov
-      if: ${{ !cancelled() }}
-      uses: codecov/codecov-action@0fb7174895f61a3b6b78fc075e0cd60383518dac # v5.5.5
-      with:
-        token: ${{ secrets.CODECOV_TOKEN }}
-        files: ./junit.xml
-        report_type: test_results
-        fail_ci_if_error: false
 
     # kortex gets the same reports, sent by the uploader it serves (a public
     # repository cannot use its action) with the job's OIDC token: no secret.
