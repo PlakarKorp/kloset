@@ -140,19 +140,6 @@ func (sourceCtx *sourceContext) recordXattr(idx int, record *connectors.Record, 
 	return sourceCtx.scanLog.PutPathMAC(scanlog.KindXattr, xattr.ToPath(), mac)
 }
 
-func (snapshot *Builder) skipExcludedPathname(sourceCtx *sourceContext, record *connectors.Record) bool {
-	var isDir bool
-	if record.Err == nil {
-		isDir = record.FileInfo.IsDir()
-	}
-
-	if record.Pathname == "/" {
-		return false
-	}
-
-	return sourceCtx.source.excludes.IsExcluded(record.Pathname, isDir)
-}
-
 func (snap *Builder) processRecord(idx int, sourceCtx *sourceContext, record *connectors.Record, stats *scanStats, chunker *chunkers.Chunker) error {
 	if !snap.noSkipSelf {
 		// XXX: Remove this when we introduce the Location object.

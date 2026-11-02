@@ -150,9 +150,6 @@ func GenerateSnapshot(t *testing.T, repo *repository.Repository, files []MockFil
 	s, err := snapshot.NewSource(repo.AppContext(), imp)
 	require.NoError(t, err)
 
-	err = s.SetExcludes(o.excludes)
-	require.NoError(t, err)
-
 	err = builder.Backup(s)
 	require.NoError(t, err)
 
