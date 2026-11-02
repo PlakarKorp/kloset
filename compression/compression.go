@@ -4,8 +4,10 @@ import (
 	"compress/gzip"
 	"fmt"
 	"io"
+	"sync"
 
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/s2"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 )
@@ -64,6 +66,15 @@ func LookupDefaultConfiguration(algorithm string) (*Configuration, error) {
 			BlockSize:  -1,
 			EnableCRC:  false,
 		}, nil
+	case "S2":
+		return &Configuration{
+			Algorithm:  "S2",
+			Level:      -1,
+			WindowSize: -1,
+			ChunkSize:  -1,
+			BlockSize:  -1,
+			EnableCRC:  false,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown compression algorithm: %s", algorithm)
 	}
@@ -75,6 +86,7 @@ func DeflateStream(name string, r io.Reader) (io.Reader, error) {
 		"LZ4":    DeflateLZ4Stream,
 		"ZSTD":   DeflateZstdStream,
 		"SNAPPY": DeflateSnappyStream,
+		"S2":     DeflateS2Stream,
 	}
 	if fn, exists := m[name]; exists {
 		return fn(r)
@@ -166,6 +178,42 @@ func DeflateSnappyStream(r io.Reader) (io.Reader, error) {
 	return pr, nil
 }
 
+// An S2 writer owns a block-sized input buffer, 1 MiB by default, and
+// allocating one per stream turns a backup of many small files into
+// gigabytes of garbage. Writers are pooled and reset between streams
+// instead. Callers already encode chunks in parallel, so each writer
+// runs single-threaded rather than spawning GOMAXPROCS goroutines.
+var s2Writers = sync.Pool{
+	New: func() any { return s2.NewWriter(nil, s2.WriterConcurrency(1)) },
+}
+
+func DeflateS2Stream(r io.Reader) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		sw := s2Writers.Get().(*s2.Writer)
+		sw.Reset(pw)
+		defer func() {
+			sw.Reset(nil)
+			s2Writers.Put(sw)
+		}()
+
+		if _, err := io.Copy(sw, r); err != nil {
+			sw.Close()
+			pw.CloseWithError(err)
+			return
+		}
+
+		// Close flushes the last block, so it can't be deferred
+		// past pw.Close() or the reader sees a truncated stream.
+		if err := sw.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
+}
+
 type readCloserInternal struct {
 	input  io.Closer
 	reader io.ReadCloser
@@ -180,6 +228,7 @@ func InflateStream(name string, r io.ReadCloser) (io.ReadCloser, error) {
 		"LZ4":    InflateLZ4Stream,
 		"ZSTD":   InflateZstdStream,
 		"SNAPPY": InflateSnappyStream,
+		"S2":     InflateS2Stream,
 	}
 	if fn, exists := m[name]; exists {
 		or, err := fn(r)
@@ -249,6 +298,19 @@ func InflateZstdStream(r io.ReadCloser) (io.ReadCloser, error) {
 func InflateSnappyStream(r io.ReadCloser) (io.ReadCloser, error) {
 	pr, pw := io.Pipe()
 	sr := snappy.NewReader(r)
+	go func() {
+		if _, err := io.Copy(pw, sr); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
+}
+
+func InflateS2Stream(r io.ReadCloser) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	sr := s2.NewReader(r)
 	go func() {
 		if _, err := io.Copy(pw, sr); err != nil {
 			pw.CloseWithError(err)

@@ -9,6 +9,7 @@ import (
 
 	cprss "github.com/PlakarKorp/kloset/compression"
 	"github.com/golang/snappy"
+	"github.com/klauspost/compress/s2"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 	"github.com/stretchr/testify/require"
@@ -81,6 +82,19 @@ func TestLookupDefaultConfiguration(t *testing.T) {
 		require.False(t, cfg.EnableCRC)
 	})
 
+	t.Run("CheckS2Defaults", func(t *testing.T) {
+		cfg, err := cprss.LookupDefaultConfiguration("S2")
+
+		require.NoError(t, err)
+		require.NotNil(t, cfg)
+		require.Equal(t, "S2", cfg.Algorithm)
+		require.Equal(t, -1, cfg.Level)
+		require.Equal(t, -1, cfg.WindowSize)
+		require.Equal(t, -1, cfg.ChunkSize)
+		require.Equal(t, -1, cfg.BlockSize)
+		require.False(t, cfg.EnableCRC)
+	})
+
 	t.Run("CheckUnknownAlgorithm", func(t *testing.T) {
 		cfg, err := cprss.LookupDefaultConfiguration("UNKNOWN")
 
@@ -112,6 +126,8 @@ func compressDataForTest(t *testing.T, algorithm string, data []byte) []byte {
 		writer = w
 	case "SNAPPY":
 		writer = snappy.NewBufferedWriter(&compressedData)
+	case "S2":
+		writer = s2.NewWriter(&compressedData)
 	default:
 		require.FailNow(t, "unsupported algorithm", "algorithm=%s", algorithm)
 	}
@@ -145,6 +161,9 @@ func decompressDataForTest(t *testing.T, algorithm string, r io.Reader) []byte {
 		closer = zr.IOReadCloser()
 	case "SNAPPY":
 		reader = snappy.NewReader(r)
+		closer = nil
+	case "S2":
+		reader = s2.NewReader(r)
 		closer = nil
 	default:
 		require.FailNow(t, "unsupported algorithm", "algorithm=%s", algorithm)
@@ -528,7 +547,7 @@ func TestInflateStream(t *testing.T) {
 func TestInflateStreamCloseClosesUnderlyingReader(t *testing.T) {
 	// readCloserInternal.Close() closes both the inflated stream and the
 	// caller-supplied input reader. Verify both happen.
-	for _, algo := range []string{"GZIP", "LZ4", "ZSTD", "SNAPPY"} {
+	for _, algo := range []string{"GZIP", "LZ4", "ZSTD", "SNAPPY", "S2"} {
 		t.Run(algo, func(t *testing.T) {
 			compressed := compressDataForTest(t, algo, []byte("payload"))
 			inputClosed := false
@@ -611,6 +630,26 @@ func TestLargeData(t *testing.T) {
 		require.NotNil(t, compressedReader)
 
 		decompressedReader, err := cprss.InflateStream("SNAPPY", io.NopCloser(compressedReader))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("S2", func(t *testing.T) {
+		data := make([]byte, 10*1024*1024)
+		for i := range data {
+			data[i] = byte(i % 251)
+		}
+
+		compressedReader, err := cprss.DeflateStream("S2", bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedReader, err := cprss.InflateStream("S2", io.NopCloser(compressedReader))
 		require.NoError(t, err)
 		require.NotNil(t, decompressedReader)
 
@@ -820,6 +859,157 @@ func TestInflateSnappyStream(t *testing.T) {
 
 	t.Run("FailsOnGarbageInput", func(t *testing.T) {
 		decompressedReader, err := cprss.InflateSnappyStream(io.NopCloser(bytes.NewReader([]byte("not snappy at all"))))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+	})
+}
+
+func TestDeflateS2Stream(t *testing.T) {
+	t.Run("CompressData", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello s2"), 128)
+
+		compressedReader, err := cprss.DeflateS2Stream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "S2", compressedReader)
+		require.NotEmpty(t, decompressedData)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("CompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+
+		compressedReader, err := cprss.DeflateS2Stream(bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedData := decompressDataForTest(t, "S2", compressedReader)
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("CompressDataLargerThanOneBlock", func(t *testing.T) {
+		// The writer emits 1 MiB blocks; make sure multi-block streams
+		// round-trip through DeflateStream/InflateStream.
+		data := make([]byte, 3*1024*1024+17)
+		for i := range data {
+			data[i] = byte(i % 253)
+		}
+
+		compressedReader, err := cprss.DeflateStream("S2", bytes.NewReader(data))
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		decompressedReader, err := cprss.InflateStream("S2", io.NopCloser(compressedReader))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Equal(t, data, decompressedData)
+		require.NoError(t, decompressedReader.Close())
+	})
+
+	t.Run("PooledWriterIsCleanAfterFailure", func(t *testing.T) {
+		// A stream whose source fails leaves its writer in an error state;
+		// the pool must hand out a usable writer for the next stream.
+		failed, err := cprss.DeflateS2Stream(&errorReader{})
+		require.NoError(t, err)
+		_, err = io.ReadAll(failed)
+		require.Error(t, err)
+
+		data := bytes.Repeat([]byte("after failure"), 64)
+		for i := 0; i < 8; i++ {
+			compressedReader, err := cprss.DeflateS2Stream(bytes.NewReader(data))
+			require.NoError(t, err)
+			require.Equal(t, data, decompressDataForTest(t, "S2", compressedReader))
+		}
+	})
+
+	t.Run("Fails_IfSourceReaderFails", func(t *testing.T) {
+		compressedReader, err := cprss.DeflateS2Stream(&errorReader{})
+		require.NoError(t, err)
+		require.NotNil(t, compressedReader)
+
+		_, err = io.ReadAll(compressedReader)
+		require.Error(t, err)
+	})
+}
+
+func TestInflateS2Stream(t *testing.T) {
+	t.Run("DecompressData", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello s2"), 128)
+		compressedData := compressDataForTest(t, "S2", data)
+
+		decompressedReader, err := cprss.InflateS2Stream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("DecompressEmptyData", func(t *testing.T) {
+		data := []byte{}
+		compressedData := compressDataForTest(t, "S2", data)
+
+		decompressedReader, err := cprss.InflateS2Stream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Empty(t, decompressedData)
+	})
+
+	t.Run("DecompressesSnappyStream", func(t *testing.T) {
+		// S2 readers accept snappy framing, so a repository that switched
+		// from SNAPPY to S2 can still read its older blobs through S2.
+		data := bytes.Repeat([]byte("hello snappy via s2"), 128)
+		compressedData := compressDataForTest(t, "SNAPPY", data)
+
+		decompressedReader, err := cprss.InflateS2Stream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+
+		decompressedData, err := io.ReadAll(decompressedReader)
+		require.NoError(t, err)
+		require.Equal(t, data, decompressedData)
+	})
+
+	t.Run("FailsOnTruncatedFrame", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello s2"), 1024)
+		compressedData := compressDataForTest(t, "S2", data)
+		truncatedData := compressedData[:len(compressedData)-4]
+
+		decompressedReader, err := cprss.InflateS2Stream(io.NopCloser(bytes.NewReader(truncatedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+	})
+
+	t.Run("FailsOnCorruptedChecksum", func(t *testing.T) {
+		data := bytes.Repeat([]byte("hello s2"), 1024)
+		compressedData := compressDataForTest(t, "S2", data)
+		// Byte 0..9 is the stream identifier, 10..13 the first block header,
+		// 14..17 its CRC-32C. Flip a CRC bit.
+		compressedData[14] ^= 0xff
+
+		decompressedReader, err := cprss.InflateS2Stream(io.NopCloser(bytes.NewReader(compressedData)))
+		require.NoError(t, err)
+		require.NotNil(t, decompressedReader)
+
+		_, err = io.ReadAll(decompressedReader)
+		require.Error(t, err)
+	})
+
+	t.Run("FailsOnGarbageInput", func(t *testing.T) {
+		decompressedReader, err := cprss.InflateS2Stream(io.NopCloser(bytes.NewReader([]byte("not s2 at all"))))
 		require.NoError(t, err)
 		require.NotNil(t, decompressedReader)
 
