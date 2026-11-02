@@ -38,11 +38,6 @@ func TestSourceGetters(t *testing.T) {
 	require.Equal(t, "mock", s.Type())
 	require.Equal(t, "/home/foo", s.Root())
 	require.Equal(t, imp.Flags(), s.Flags())
-
-	excludes := s.GetExcludes()
-	require.NotNil(t, excludes)
-
-	require.NoError(t, s.SetExcludes([]string{"*.tmp"}))
 }
 
 func TestSourceDedupCommonPrefix(t *testing.T) {

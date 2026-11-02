@@ -9,7 +9,6 @@ import (
 
 	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors/importer"
-	"github.com/PlakarKorp/kloset/exclude"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 )
 
@@ -23,18 +22,13 @@ type Source struct {
 	root   string
 	flags  location.Flags
 
-	excludes *exclude.RuleSet
-
 	failure error
 
 	maxReadRate int64
 }
 
 func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, error) {
-	s := &Source{
-		ctx:      ctx,
-		excludes: exclude.NewRuleSet(),
-	}
+	s := &Source{ctx: ctx}
 
 	var is []importer.Importer
 	for i, imp := range importers {
@@ -109,10 +103,6 @@ func pathEqual(lhs, rhs string) bool {
 	return cleanPath == cleanWithin
 }
 
-func (s *Source) SetExcludes(excludes []string) error {
-	return s.excludes.AddRulesFromArray(excludes)
-}
-
 func (s *Source) GetHeader() header.Source {
 	hSource := header.NewSource()
 	hSource.Importer.Origin = s.origin
@@ -120,10 +110,6 @@ func (s *Source) GetHeader() header.Source {
 	hSource.Importer.Directory = s.root
 
 	return hSource
-}
-
-func (s *Source) GetExcludes() *exclude.RuleSet {
-	return s.excludes
 }
 
 func (s *Source) Origin() string {

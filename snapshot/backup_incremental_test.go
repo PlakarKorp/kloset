@@ -33,7 +33,6 @@ func backupOnce(t *testing.T, repo *repository.Repository, name string, vfsCache
 
 	src, err := snapshot.NewSource(repo.AppContext(), imp)
 	require.NoError(t, err)
-	require.NoError(t, src.SetExcludes(nil))
 
 	require.NoError(t, builder.Backup(src))
 	require.NoError(t, builder.Commit())

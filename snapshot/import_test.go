@@ -33,7 +33,6 @@ func TestBuilderImport(t *testing.T) {
 
 	src, err := snapshot.NewSource(repo.AppContext(), imp)
 	require.NoError(t, err)
-	require.NoError(t, src.SetExcludes(nil))
 
 	require.NoError(t, builder.Import(src))
 	require.NoError(t, builder.Commit())
