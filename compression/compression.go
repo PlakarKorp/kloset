@@ -12,7 +12,7 @@ import (
 	"github.com/pierrec/lz4/v4"
 )
 
-const DEFAULT_COMPRESSION_ALGORITHM = "LZ4"
+const DEFAULT_COMPRESSION_ALGORITHM = "S2"
 
 type Configuration struct {
 	Algorithm  string `json:"algorithm"`
