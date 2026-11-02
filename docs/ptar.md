@@ -209,6 +209,7 @@ The configuration is **not** encoded. It is plaintext msgpack inside its wrapper
 | `LZ4` (default) | LZ4 **frame** format, `pierrec/lz4/v4` writer defaults |
 | `ZSTD` | Zstandard frame, `klauspost/compress/zstd` defaults |
 | `GZIP` | RFC 1952 gzip, Go `compress/gzip` defaults |
+| `SNAPPY` | Snappy **framing** format, `golang/snappy` buffered writer defaults |
 
 The `Level`, `WindowSize`, `ChunkSize`, `BlockSize` and `EnableCRC` fields are stored in the config but **not applied**. The writers always use library defaults. Readers MUST NOT depend on these fields.
 
@@ -606,7 +607,7 @@ Validation found **one error in the first draft**: the content-type index key dr
 
 These parts are described from code reading only:
 
-- ZSTD and GZIP compression. `plakar ptar` cannot select them.
+- ZSTD, GZIP and SNAPPY compression. `plakar ptar` cannot select them.
 - The `AES256-GCM` subkey wrapping.
 - scrypt and PBKDF2.
 - Signatures (type 6), error entries, and COLOURED, DELETE and CONFIGURATION state records.
