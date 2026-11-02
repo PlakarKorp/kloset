@@ -58,7 +58,6 @@ func symlinkAncestor(symlinks map[string]struct{}, entrypath string) (string, bo
 
 type ExportOptions struct {
 	Strip           string
-	SkipPermissions bool
 	ForceCompletion bool
 	MaxWriteRate    int64
 }
