@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/golang/snappy"
 	"github.com/klauspost/compress/zstd"
 	"github.com/pierrec/lz4/v4"
 )
@@ -54,6 +55,15 @@ func LookupDefaultConfiguration(algorithm string) (*Configuration, error) {
 			BlockSize:  -1,
 			EnableCRC:  false,
 		}, nil
+	case "SNAPPY":
+		return &Configuration{
+			Algorithm:  "SNAPPY",
+			Level:      -1,
+			WindowSize: -1,
+			ChunkSize:  -1,
+			BlockSize:  -1,
+			EnableCRC:  false,
+		}, nil
 	default:
 		return nil, fmt.Errorf("unknown compression algorithm: %s", algorithm)
 	}
@@ -61,9 +71,10 @@ func LookupDefaultConfiguration(algorithm string) (*Configuration, error) {
 
 func DeflateStream(name string, r io.Reader) (io.Reader, error) {
 	m := map[string]func(io.Reader) (io.Reader, error){
-		"GZIP": DeflateGzipStream,
-		"LZ4":  DeflateLZ4Stream,
-		"ZSTD": DeflateZstdStream,
+		"GZIP":   DeflateGzipStream,
+		"LZ4":    DeflateLZ4Stream,
+		"ZSTD":   DeflateZstdStream,
+		"SNAPPY": DeflateSnappyStream,
 	}
 	if fn, exists := m[name]; exists {
 		return fn(r)
@@ -131,6 +142,30 @@ func DeflateZstdStream(r io.Reader) (io.Reader, error) {
 	return pr, nil
 }
 
+func DeflateSnappyStream(r io.Reader) (io.Reader, error) {
+	pr, pw := io.Pipe()
+	go func() {
+		// snappy framing format; NewBufferedWriter is required for
+		// streaming use, the plain NewWriter is one-shot only.
+		sw := snappy.NewBufferedWriter(pw)
+
+		if _, err := io.Copy(sw, r); err != nil {
+			sw.Close()
+			pw.CloseWithError(err)
+			return
+		}
+
+		// Close flushes the last chunk, so it can't be deferred
+		// past pw.Close() or the reader sees a truncated stream.
+		if err := sw.Close(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
+}
+
 type readCloserInternal struct {
 	input  io.Closer
 	reader io.ReadCloser
@@ -141,9 +176,10 @@ func (c *readCloserInternal) Close() error               { c.reader.Close(); ret
 
 func InflateStream(name string, r io.ReadCloser) (io.ReadCloser, error) {
 	m := map[string]func(io.ReadCloser) (io.ReadCloser, error){
-		"GZIP": InflateGzipStream,
-		"LZ4":  InflateLZ4Stream,
-		"ZSTD": InflateZstdStream,
+		"GZIP":   InflateGzipStream,
+		"LZ4":    InflateLZ4Stream,
+		"ZSTD":   InflateZstdStream,
+		"SNAPPY": InflateSnappyStream,
 	}
 	if fn, exists := m[name]; exists {
 		or, err := fn(r)
@@ -202,6 +238,19 @@ func InflateZstdStream(r io.ReadCloser) (io.ReadCloser, error) {
 		defer zr.Close()
 
 		if _, err := io.Copy(pw, zr.IOReadCloser()); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close()
+	}()
+	return pr, nil
+}
+
+func InflateSnappyStream(r io.ReadCloser) (io.ReadCloser, error) {
+	pr, pw := io.Pipe()
+	sr := snappy.NewReader(r)
+	go func() {
+		if _, err := io.Copy(pw, sr); err != nil {
 			pw.CloseWithError(err)
 			return
 		}
