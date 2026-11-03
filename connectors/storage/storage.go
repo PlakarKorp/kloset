@@ -17,7 +17,6 @@
 package storage
 
 import (
-	"context"
 	"encoding/binary"
 	"flag"
 	"fmt"
@@ -135,14 +134,6 @@ func NewConfigurationFromWrappedBytes(data []byte) (*Configuration, error) {
 
 func (c *Configuration) ToBytes() ([]byte, error) {
 	return msgpack.Marshal(c)
-}
-
-func WithFlag(ctx context.Context, flag StorageFlag) context.Context {
-	return integration.WithFlag(ctx, flag)
-}
-
-func Flag(ctx context.Context) StorageFlag {
-	return integration.Flag(ctx)
 }
 
 var backends = location.New[StoreFn]("fs")
