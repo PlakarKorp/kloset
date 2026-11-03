@@ -13,7 +13,8 @@ type MockImporter struct {
 	location string
 	files    map[string]MockFile
 
-	gen func(chan<- *connectors.Record)
+	gen   func(chan<- *connectors.Record)
+	flags location.Flags
 
 	FakeRoot string
 }
@@ -60,7 +61,11 @@ func (p *MockImporter) SetGenerator(gen func(chan<- *connectors.Record)) {
 func (p *MockImporter) Origin() string        { return "mock" }
 func (p *MockImporter) Type() string          { return "mock" }
 func (p *MockImporter) Root() string          { return p.FakeRoot }
-func (p *MockImporter) Flags() location.Flags { return 0 }
+func (p *MockImporter) Flags() location.Flags { return p.flags }
+
+func (p *MockImporter) SetFlags(flags location.Flags) {
+	p.flags = flags
+}
 
 func (p *MockImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
 	defer close(records)
