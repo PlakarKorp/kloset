@@ -3,7 +3,9 @@ package repository
 import (
 	"context"
 	"io"
+	"iter"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
@@ -56,25 +58,25 @@ func (ts *ThrottledStore) Size(ctx context.Context) (int64, error) {
 	return ts.s.Size(ctx)
 }
 
-func (ts *ThrottledStore) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
-	return ts.s.List(ctx, res)
+func (ts *ThrottledStore) List(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag) iter.Seq2[integration.Resource, error] {
+	return ts.s.List(ctx, res, flag)
 }
 
-func (ts *ThrottledStore) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+func (ts *ThrottledStore) Put(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC, rd io.Reader) (int64, error) {
 	if res == storage.StorageResourceLock {
-		return ts.s.Put(ctx, res, mac, rd)
+		return ts.s.Put(ctx, res, flag, mac, rd)
 	}
 
 	throttledRd := ts.th.WriteFromReader(ctx, rd)
-	return ts.s.Put(ctx, res, mac, throttledRd)
+	return ts.s.Put(ctx, res, flag, mac, throttledRd)
 }
 
-func (ts *ThrottledStore) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+func (ts *ThrottledStore) Get(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
 	if res == storage.StorageResourceLock {
-		return ts.s.Get(ctx, res, mac, rg)
+		return ts.s.Get(ctx, res, flag, mac, rg)
 	}
 
-	rc, err := ts.s.Get(ctx, res, mac, rg)
+	rc, err := ts.s.Get(ctx, res, flag, mac, rg)
 	if err != nil {
 		return nil, err
 	}
@@ -82,8 +84,8 @@ func (ts *ThrottledStore) Get(ctx context.Context, res storage.StorageResource, 
 	return ts.th.ReadCloser(ctx, rc), nil
 }
 
-func (ts *ThrottledStore) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
-	return ts.s.Delete(ctx, res, mac)
+func (ts *ThrottledStore) Delete(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC) error {
+	return ts.s.Delete(ctx, res, flag, mac)
 }
 
 func (ts *ThrottledStore) Close(ctx context.Context) error {

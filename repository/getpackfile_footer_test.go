@@ -28,7 +28,7 @@ func putRawPackfile(t *testing.T, repo *repository.Repository, mac objects.MAC, 
 	rd, err := storage.Serialize(repo.GetMACHasher(), resources.RT_PACKFILE, versioning.GetCurrentVersion(resources.RT_PACKFILE), bytes.NewReader(body))
 	require.NoError(t, err)
 
-	_, err = repo.Store().Put(repo.AppContext(), storage.StorageResourcePackfile, mac, rd)
+	_, err = repo.Store().Put(repo.AppContext(), storage.StorageResourcePackfile, 0, mac, rd)
 	require.NoError(t, err)
 }
 
