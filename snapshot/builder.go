@@ -348,22 +348,29 @@ func (snap *Builder) Lock() (chan bool, error) {
 				}
 
 				lock := repository.NewSharedLock(snap.appContext.Hostname)
-
 				buffer := &bytes.Buffer{}
-
 				lock.SerializeToStream(buffer)
 				tctx, cancel := context.WithDeadline(snap.AppContext(), lastRefresh.Add(repository.LOCK_TTL))
-				if _, err := snap.repository.PutLock(tctx, snap.Header.Identifier, buffer); err != nil {
+
+				// Before updating our lock, check if it's still present. If it
+				// was removed, either someone is doing something fishy, or
+				// another process thought we were stale. In any case this will
+				// lead to an abort (after a retry period).
+				err := snap.lockPresent(tctx)
+				if err == nil {
+					_, err = snap.repository.PutLock(tctx, snap.Header.Identifier, buffer)
+				}
+				cancel()
+
+				if err != nil {
 					// For some storage reason the refresh failed, warn the user
 					// and retry sooner than the normal rate so that we don't
 					// have to abort the backup.
-					cancel()
 					snap.Logger().Warn("failed to refresh the repository lock: %s", err)
 					refresh = time.After(repository.LOCK_REFRESH_RATE / 10)
 					continue
 				}
 
-				cancel()
 				lastRefresh = lock.Timestamp
 				refresh = time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
 			}
@@ -371,6 +378,20 @@ func (snap *Builder) Lock() (chan bool, error) {
 	}()
 
 	return lockReleaser, nil
+}
+
+func (snap *Builder) lockPresent(ctx context.Context) error {
+	rd, err := snap.repository.GetLock(ctx, snap.Header.Identifier)
+	if err != nil {
+		return fmt.Errorf("failed to fetch the repository lock: %w", err)
+	}
+	defer rd.Close()
+
+	if _, err := repository.NewLockFromStream(rd); err != nil {
+		return fmt.Errorf("failed to read the repository lock: %w", err)
+	}
+
+	return nil
 }
 
 func (snap *Builder) Unlock() error {

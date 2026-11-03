@@ -71,6 +71,21 @@ func (s *lockStore) Put(ctx context.Context, res storage.StorageResource, mac ob
 	return n, err
 }
 
+func (s *lockStore) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+	if res == storage.StorageResourceLock {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+	}
+	return s.Store.Get(ctx, res, mac, rg)
+}
+
+// removeLock deletes a lock the way maintenance removes one it thinks stale.
+func (s *lockStore) removeLock(mac objects.MAC) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.Store.Delete(context.Background(), storage.StorageResourceLock, mac)
+}
+
 // newRefresherBuilder returns a builder over a lockStore that holds no lock
 // yet: Create would start the refresher on the real clock, so each test calls
 // Lock() itself inside its synctest bubble.
@@ -168,6 +183,29 @@ func TestLockRefresherRejectsLateRefresh(t *testing.T) {
 		synctest.Wait()
 
 		require.Len(t, store.landedLocks(), 1, "a refresh landed after the lock went stale")
+		require.ErrorContains(t, context.Cause(builder.AppContext()), "lock refresher")
+
+		close(done)
+		requireReleased(t, builder, store)
+	})
+}
+
+func TestLockRefresherDoesNotRecreateRemovedLock(t *testing.T) {
+	builder, store := newRefresherBuilder(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		done, err := builder.Lock()
+		require.NoError(t, err)
+
+		// Someone removes our lock between two refreshes, e.g. a host whose
+		// clock runs ahead and sees it stale.
+		time.Sleep(repository.LOCK_REFRESH_RATE / 2)
+		require.NoError(t, store.removeLock(builder.Header.Identifier))
+
+		time.Sleep(repository.LOCK_TTL)
+		synctest.Wait()
+
+		require.Len(t, store.landedLocks(), 1, "the refresher recreated a removed lock")
 		require.ErrorContains(t, context.Cause(builder.AppContext()), "lock refresher")
 
 		close(done)
