@@ -86,10 +86,7 @@ func (s *lockStore) removeLock(mac objects.MAC) error {
 	return s.Store.Delete(context.Background(), storage.StorageResourceLock, mac)
 }
 
-// newRefresherBuilder returns a builder over a lockStore that holds no lock
-// yet: Create would start the refresher on the real clock, so each test calls
-// Lock() itself inside its synctest bubble.
-func newRefresherBuilder(t *testing.T) (*snapshot.Builder, *lockStore) {
+func newLockStoreRepository(t *testing.T) (*repository.Repository, *lockStore) {
 	base := ptesting.GenerateRepository(t, &bytes.Buffer{}, &bytes.Buffer{}, nil)
 	store := &lockStore{Store: base.Store()}
 
@@ -98,6 +95,15 @@ func newRefresherBuilder(t *testing.T) (*snapshot.Builder, *lockStore) {
 
 	repo, err := repository.New(base.AppContext(), nil, store, config)
 	require.NoError(t, err)
+
+	return repo, store
+}
+
+// newRefresherBuilder returns a builder over a lockStore that holds no lock
+// yet: Create would start the refresher on the real clock, so each test calls
+// Lock() itself inside its synctest bubble.
+func newRefresherBuilder(t *testing.T) (*snapshot.Builder, *lockStore) {
+	repo, store := newLockStoreRepository(t)
 
 	t.Setenv("PLAKAR_LOCKLESS", "true")
 	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
@@ -207,6 +213,74 @@ func TestLockRefresherDoesNotRecreateRemovedLock(t *testing.T) {
 
 		require.Len(t, store.landedLocks(), 1, "the refresher recreated a removed lock")
 		require.ErrorContains(t, context.Cause(builder.AppContext()), "lock refresher")
+
+		close(done)
+		requireReleased(t, builder, store)
+	})
+}
+
+func TestCommitChecksLock(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		checkpoint bool
+		lockLost   bool
+	}{
+		{"held", false, false},
+		{"lost", false, true},
+		{"held with checkpoints", true, false},
+		{"lost with checkpoints", true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, store := newLockStoreRepository(t)
+			builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+				NoCheckpoint: !tc.checkpoint,
+			})
+			require.NoError(t, err)
+
+			ctx := context.Background()
+			states, err := store.List(ctx, storage.StorageResourceState)
+			require.NoError(t, err)
+
+			if tc.lockLost {
+				require.NoError(t, store.removeLock(builder.Header.Identifier))
+			}
+
+			err = builder.Commit()
+			after, listErr := store.List(ctx, storage.StorageResourceState)
+			require.NoError(t, listErr)
+
+			if tc.lockLost {
+				require.ErrorContains(t, err, "repository lock lost")
+				require.Len(t, after, len(states))
+			} else {
+				require.NoError(t, err)
+				require.Len(t, after, len(states)+1)
+			}
+
+			require.NoError(t, builder.Close())
+		})
+	}
+}
+
+func TestCommitRefusesStaleLock(t *testing.T) {
+	builder, store := newRefresherBuilder(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		done, err := builder.Lock()
+		require.NoError(t, err)
+
+		// Refreshes fail fast, then the retry issued at 9m hangs until its
+		// deadline at 10m: the refresher only notices at its next tick,
+		// 10m30s, leaving the lock stale but the backup not yet cancelled.
+		store.set(true, 0)
+		time.Sleep(repository.LOCK_TTL - repository.LOCK_REFRESH_RATE/4)
+		store.set(false, repository.LOCK_REFRESH_RATE)
+
+		time.Sleep(repository.LOCK_REFRESH_RATE/4 + repository.LOCK_REFRESH_RATE/30)
+		synctest.Wait()
+		require.NoError(t, builder.AppContext().Err())
+
+		require.ErrorContains(t, builder.Commit(), "repository lock went stale")
 
 		close(done)
 		requireReleased(t, builder, store)

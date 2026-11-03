@@ -46,6 +46,7 @@ type Builder struct {
 
 	lockReleaser chan bool
 	lockReleased chan error
+	lockless     bool
 
 	beginTime time.Time
 
@@ -247,6 +248,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
 	lockReleaser := make(chan bool)
 	snap.lockReleased = make(chan error, 1)
+	snap.lockless = lockless
 	if lockless {
 		close(snap.lockReleased)
 		return lockReleaser, nil
@@ -356,7 +358,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 				// was removed, either someone is doing something fishy, or
 				// another process thought we were stale. In any case this will
 				// lead to an abort (after a retry period).
-				err := snap.lockPresent(tctx)
+				_, err := snap.getLock(tctx)
 				if err == nil {
 					_, err = snap.repository.PutLock(tctx, snap.Header.Identifier, buffer)
 				}
@@ -380,18 +382,37 @@ func (snap *Builder) Lock() (chan bool, error) {
 	return lockReleaser, nil
 }
 
-func (snap *Builder) lockPresent(ctx context.Context) error {
+func (snap *Builder) getLock(ctx context.Context) (*repository.Lock, error) {
 	rd, err := snap.repository.GetLock(ctx, snap.Header.Identifier)
 	if err != nil {
-		return fmt.Errorf("failed to fetch the repository lock: %w", err)
+		return nil, fmt.Errorf("failed to fetch the repository lock: %w", err)
 	}
 	defer rd.Close()
 
-	if _, err := repository.NewLockFromStream(rd); err != nil {
-		return fmt.Errorf("failed to read the repository lock: %w", err)
+	lock, err := repository.NewLockFromStream(rd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the repository lock: %w", err)
 	}
 
-	return nil
+	return lock, nil
+}
+
+// commitState pushes the final state, which is what makes the snapshot
+// visible. Refuse to if our lock is gone or stale: maintenance may have run
+// under us and removed packfiles this snapshot references.
+func (snap *Builder) commitState(stateID objects.MAC) error {
+	if !snap.lockless {
+		lock, err := snap.getLock(snap.AppContext())
+		if err != nil {
+			return fmt.Errorf("snapshot not committed, repository lock lost: %w", err)
+		}
+
+		if lock.IsStale() {
+			return fmt.Errorf("snapshot not committed, repository lock went stale")
+		}
+	}
+
+	return snap.repository.CommitTransaction(stateID)
 }
 
 func (snap *Builder) Unlock() error {
@@ -404,7 +425,7 @@ func (snap *Builder) flushDeltaState() {
 		select {
 		case <-snap.flushEnd:
 			// End of backup we push the last and final State.
-			err := snap.repository.CommitTransaction(snap.stateId)
+			err := snap.commitState(snap.stateId)
 			if err != nil {
 				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
 			}
@@ -528,7 +549,7 @@ func (snap *Builder) Commit() error {
 		close(snap.flushEnd)
 		err = <-snap.flushEnded
 	} else {
-		err = snap.repository.CommitTransaction(snap.Header.Identifier)
+		err = snap.commitState(snap.Header.Identifier)
 	}
 	if err != nil {
 		snap.Logger().Warn("Failed to push the state to the repository %s", err)
