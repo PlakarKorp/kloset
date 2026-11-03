@@ -6,7 +6,7 @@ require (
 	github.com/PlakarKorp/aes-gcm-siv v0.0.0-20260921114103-b2704f58f4a4
 	github.com/PlakarKorp/go-cdc-chunkers v1.1.0
 	github.com/PlakarKorp/go-human2duration v0.1.6
-	github.com/PlakarKorp/integration-sdk v1.1.2
+	github.com/PlakarKorp/integration-sdk v1.1.4
 	github.com/cockroachdb/pebble/v2 v2.1.7
 	github.com/dustin/go-humanize v1.1.0
 	github.com/gabriel-vasile/mimetype v1.4.16
