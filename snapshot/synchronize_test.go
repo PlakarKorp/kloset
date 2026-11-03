@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/snapshot"
 	ptesting "github.com/PlakarKorp/kloset/testing"
@@ -26,7 +25,7 @@ func TestSynchronize(t *testing.T) {
 	})
 	defer srcSnap.Close()
 
-	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", srcSnap.Header.Identifier, &snapshot.BuilderOptions{
 		Name: "sync-test",
 	})
 	require.NoError(t, err)
@@ -70,7 +69,7 @@ func TestSynchronizeNoCommit(t *testing.T) {
 	})
 	defer srcSnap.Close()
 
-	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", srcSnap.Header.Identifier, &snapshot.BuilderOptions{
 		Name:     "sync-nocommit",
 		NoCommit: true,
 	})
@@ -89,7 +88,7 @@ func TestSynchronizeRich(t *testing.T) {
 	defer srcSnap.Close()
 
 	dstRepo := ptesting.GenerateRepository(t, nil, nil, nil)
-	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", srcSnap.Header.Identifier, &snapshot.BuilderOptions{
 		Name: "sync-rich",
 	})
 	require.NoError(t, err)
@@ -131,7 +130,7 @@ func TestSynchronizeLeavesSourceHeaderAlone(t *testing.T) {
 	before, err := srcSnap.Header.Serialize()
 	require.NoError(t, err)
 
-	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+	dstBuilder, err := snapshot.Create(dstRepo, repository.DefaultType, "", srcSnap.Header.Identifier, &snapshot.BuilderOptions{
 		Name: "sync-header",
 	})
 	require.NoError(t, err)
