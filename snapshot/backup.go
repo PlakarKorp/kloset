@@ -587,7 +587,7 @@ func (snap *Builder) chunkifyDirpack(chk *chunkers.Chunker, chkId int, rd io.Rea
 	return objectMAC, nil
 }
 
-func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, rd io.Reader, isXattr bool) (*objects.Object, objects.MAC, int64, error) {
+func (snap *Builder) chunkify(cIdx int, sourceCtx *sourceContext, chk *chunkers.Chunker, pathname string, rd io.Reader, isXattr bool) (*objects.Object, objects.MAC, int64, error) {
 	object := objects.NewObject()
 
 	objectHasher, releaseGlobalHasher := snap.repository.GetPooledMACHasher()
@@ -689,7 +689,7 @@ func (snap *Builder) chunkify(cIdx int, chk *chunkers.Chunker, pathname string, 
 	}
 	objectMAC := snap.repository.ComputeMAC(objectSerialized)
 
-	if snap.vfsCache == nil || isXattr {
+	if sourceCtx.vfsCache == nil || isXattr {
 		if err := snap.repository.PutBlobIfNotExistsWithHint(cIdx, resources.RT_OBJECT, objectMAC, objectSerialized, true); err != nil {
 			return nil, objects.MAC{}, -1, err
 		}
@@ -814,11 +814,17 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 		return nil, err
 	}
 
+	vfsCache := snap.vfsCache
+	if vfsCache != nil && source.Flags()&location.FLAG_NOCACHE != 0 {
+		snap.Logger().Info("vfs cache disabled by the %s importer", source.Type())
+		vfsCache = nil
+	}
+
 	sourceCtx := &sourceContext{
 		builder:     snap,
 		source:      source,
 		vfsEntBatch: scanLog.NewBatch(),
-		vfsCache:    snap.vfsCache,
+		vfsCache:    vfsCache,
 		scanLog:     scanLog,
 	}
 
@@ -887,7 +893,7 @@ type contentMeta struct {
 	ContentType string
 }
 
-func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *connectors.Record) (*contentMeta, error) {
+func (snap *Builder) computeContent(idx int, sourceCtx *sourceContext, chunker *chunkers.Chunker, cachedPath *objects.CachedPath, record *connectors.Record) (*contentMeta, error) {
 	if !record.FileInfo.Mode().IsRegular() {
 		return &contentMeta{
 			ContentType: "application/x-not-regular-file",
@@ -908,7 +914,7 @@ func (snap *Builder) computeContent(idx int, chunker *chunkers.Chunker, cachedPa
 		}, nil
 	}
 
-	obj, objMAC, dataSize, err := snap.chunkify(idx, chunker, record.Pathname, record.Reader, record.IsXattr)
+	obj, objMAC, dataSize, err := snap.chunkify(idx, sourceCtx, chunker, record.Pathname, record.Reader, record.IsXattr)
 	if err != nil {
 		return nil, err
 	}
@@ -943,7 +949,7 @@ func (snap *Builder) writeDirectoryEntry(idx int, sourceCtx *sourceContext, cach
 		}
 
 		dirEntryMAC = snap.repository.ComputeMAC(serialized)
-		if snap.vfsCache == nil || record.IsXattr {
+		if sourceCtx.vfsCache == nil || record.IsXattr {
 			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, dirEntryMAC, serialized, true); err != nil {
 				return err
 			}
@@ -995,7 +1001,7 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 
 		fileEntryMAC = snap.repository.ComputeMAC(serialized)
 
-		if snap.vfsCache == nil || record.IsXattr {
+		if sourceCtx.vfsCache == nil || record.IsXattr {
 			if err := snap.repository.PutBlobIfNotExistsWithHint(idx, resources.RT_VFS_ENTRY, fileEntryMAC, serialized, true); err != nil {
 				return err
 			}
@@ -1044,7 +1050,7 @@ func (snap *Builder) processFileRecord(idx int, sourceCtx *sourceContext, record
 		snap.Logger().Warn("VFS CACHE: %v", err)
 	}
 
-	meta, err := snap.computeContent(idx, chunker, cachedPath, record)
+	meta, err := snap.computeContent(idx, sourceCtx, chunker, cachedPath, record)
 	if err != nil {
 		return err
 	}
