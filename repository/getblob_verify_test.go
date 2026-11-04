@@ -54,7 +54,7 @@ func swapChunks(t *testing.T, repo *repository.Repository) []*objects.Object {
 
 	ctx := context.Background()
 	store := repo.Store()
-	rd, err := store.Get(ctx, storage.StorageResourcePackfile, locs[0].Packfile, nil)
+	rd, err := store.Get(ctx, storage.StorageResourcePackfile, 0, locs[0].Packfile, nil)
 	require.NoError(t, err)
 	raw, err := io.ReadAll(rd)
 	require.NoError(t, err)
@@ -67,8 +67,8 @@ func swapChunks(t *testing.T, repo *repository.Repository) []*objects.Object {
 	copy(a, b)
 	copy(b, tmp)
 
-	require.NoError(t, store.Delete(ctx, storage.StorageResourcePackfile, locs[0].Packfile))
-	_, err = store.Put(ctx, storage.StorageResourcePackfile, locs[0].Packfile, bytes.NewReader(raw))
+	require.NoError(t, store.Delete(ctx, storage.StorageResourcePackfile, 0, locs[0].Packfile))
+	_, err = store.Put(ctx, storage.StorageResourcePackfile, 0, locs[0].Packfile, bytes.NewReader(raw))
 	require.NoError(t, err)
 
 	return objs

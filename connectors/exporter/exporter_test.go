@@ -24,6 +24,7 @@ func (m MockedBackend) Close(context.Context) error { return nil }
 
 func (m MockedBackend) Export(
 	ctx context.Context,
+	meta map[string]string,
 	records <-chan *connectors.Record,
 	results chan<- *connectors.Result,
 ) error {

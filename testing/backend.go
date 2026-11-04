@@ -5,11 +5,13 @@ import (
 	"context"
 	"errors"
 	"io"
+	"iter"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
@@ -137,32 +139,29 @@ func (mb *MockBackend) Size(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
-func (mb *MockBackend) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
-	switch res {
-	case storage.StorageResourcePackfile:
-		ret := make([]objects.MAC, 0)
-		for MAC := range mb.packfileMACs {
-			ret = append(ret, MAC)
+func (mb *MockBackend) List(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag) iter.Seq2[*integration.StorageResourceEntry, error] {
+	return func(yield func(*integration.StorageResourceEntry, error) bool) {
+		var m map[objects.MAC][]byte
+		switch res {
+		case storage.StorageResourcePackfile:
+			m = mb.packfileMACs
+		case storage.StorageResourceState:
+			m = mb.stateMACs
+		case storage.StorageResourceLock:
+			m = mb.locks
+		default:
+			yield(nil, errors.ErrUnsupported)
+			return
 		}
-		return ret, nil
-	case storage.StorageResourceState:
-		ret := make([]objects.MAC, 0)
-		for MAC := range mb.stateMACs {
-			ret = append(ret, MAC)
+		for MAC := range m {
+			if !yield(&integration.StorageResourceEntry{MAC: MAC}, nil) {
+				return
+			}
 		}
-		return ret, nil
-	case storage.StorageResourceLock:
-		locks := make([]objects.MAC, 0)
-		for lock := range mb.locks {
-			locks = append(locks, lock)
-		}
-		return locks, nil
 	}
-
-	return nil, errors.ErrUnsupported
 }
 
-func (mb *MockBackend) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+func (mb *MockBackend) Put(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC, rd io.Reader) (int64, error) {
 	switch res {
 	case storage.StorageResourcePackfile:
 		mb.packfileMutex.Lock()
@@ -187,7 +186,7 @@ func (mb *MockBackend) Put(ctx context.Context, res storage.StorageResource, mac
 	return -1, errors.ErrUnsupported
 }
 
-func (mb *MockBackend) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+func (mb *MockBackend) Get(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
 	switch res {
 	case storage.StorageResourcePackfile:
 		if rg == nil {
@@ -209,7 +208,7 @@ func (mb *MockBackend) Get(ctx context.Context, res storage.StorageResource, mac
 	return nil, errors.ErrUnsupported
 }
 
-func (mb *MockBackend) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
+func (mb *MockBackend) Delete(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC) error {
 	switch res {
 	case storage.StorageResourcePackfile:
 		delete(mb.packfileMACs, mac)
