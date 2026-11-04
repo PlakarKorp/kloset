@@ -25,9 +25,9 @@ func (m MockedImporter) Ping(context.Context) error {
 	return nil
 }
 
-func (m MockedImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
+func (m MockedImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) (map[string]string, error) {
 	close(records)
-	return nil
+	return nil, nil
 }
 
 func (m MockedImporter) NewReader(string) (io.ReadCloser, error) {

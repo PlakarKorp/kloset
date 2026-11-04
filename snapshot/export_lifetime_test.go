@@ -29,7 +29,7 @@ func (e *batchExporter) Flags() location.Flags { return 0 }
 func (e *batchExporter) Ping(ctx context.Context) error  { return nil }
 func (e *batchExporter) Close(ctx context.Context) error { return nil }
 
-func (e *batchExporter) Export(ctx context.Context, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
+func (e *batchExporter) Export(ctx context.Context, meta map[string]string, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
 	defer close(results)
 
 	var acks []*connectors.Result

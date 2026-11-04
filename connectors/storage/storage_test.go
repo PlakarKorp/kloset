@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"errors"
 	"io"
+	"iter"
 	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/chunking"
 	"github.com/PlakarKorp/kloset/compression"
@@ -53,19 +55,21 @@ func (m *mockStore) Flags() location.Flags                      { return 0 }
 func (m *mockStore) Mode(context.Context) (storage.Mode, error) { return 0, nil }
 func (m *mockStore) Size(context.Context) (int64, error)        { return 0, nil }
 
-func (m *mockStore) List(context.Context, storage.StorageResource) ([]objects.MAC, error) {
-	return nil, nil
+func (m *mockStore) List(context.Context, storage.StorageResource, integration.StorageFlag) iter.Seq2[*integration.StorageResourceEntry, error] {
+	return func(yield func(*integration.StorageResourceEntry, error) bool) {
+		return
+	}
 }
 
-func (m *mockStore) Put(context.Context, storage.StorageResource, objects.MAC, io.Reader) (int64, error) {
+func (m *mockStore) Put(context.Context, storage.StorageResource, integration.StorageFlag, objects.MAC, io.Reader) (int64, error) {
 	return 0, nil
 }
 
-func (m *mockStore) Get(context.Context, storage.StorageResource, objects.MAC, *storage.Range) (io.ReadCloser, error) {
+func (m *mockStore) Get(context.Context, storage.StorageResource, integration.StorageFlag, objects.MAC, *storage.Range) (io.ReadCloser, error) {
 	return nil, nil
 }
 
-func (m *mockStore) Delete(context.Context, storage.StorageResource, objects.MAC) error {
+func (m *mockStore) Delete(context.Context, storage.StorageResource, integration.StorageFlag, objects.MAC) error {
 	return nil
 }
 

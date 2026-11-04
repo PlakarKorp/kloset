@@ -359,7 +359,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		}
 	}()
 
-	importerErr := imp.Import(ctx, scanned, results)
+	_, importerErr := imp.Import(ctx, scanned, results)
 	if results != nil {
 		for range results {
 			// drain the results channel so that we unblock the

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
@@ -260,13 +261,14 @@ func (r *RepositoryWriter) PutPackfile(pfile packfile.Packfile) error {
 	}
 
 	var ctx context.Context = r.appContext
+	var flag integration.StorageFlag
 	if pfile.Hot() {
-		ctx = storage.WithFlag(ctx, storage.StorageHot)
+		flag = storage.StorageHot
 	}
 
 	span := r.ioStats.GetWriteSpan()
 	putStart := time.Now()
-	nbytes, err := r.store.Put(ctx, storage.StorageResourcePackfile, mac, rd)
+	nbytes, err := r.store.Put(ctx, storage.StorageResourcePackfile, flag, mac, rd)
 
 	span.Add(nbytes)
 	if err != nil {
@@ -321,7 +323,7 @@ func (r *RepositoryWriter) PutPtarPackfile(packfile *packer.PackWriter) error {
 	}
 
 	span := r.ioStats.GetWriteSpan()
-	nbytes, err := r.store.Put(r.appContext, storage.StorageResourcePackfile, mac, rd)
+	nbytes, err := r.store.Put(r.appContext, storage.StorageResourcePackfile, 0, mac, rd)
 	span.Add(nbytes)
 	if err != nil {
 		return err

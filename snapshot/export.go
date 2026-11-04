@@ -274,7 +274,7 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		}
 	}()
 
-	err = exp.Export(snap.AppContext(), records, results)
+	err = exp.Export(snap.AppContext(), nil, records, results)
 
 	wg.Wait() // wait the events reporting before exiting.
 

@@ -29,7 +29,7 @@ func (e *orderExporter) Flags() location.Flags { return e.flags }
 func (e *orderExporter) Ping(ctx context.Context) error  { return nil }
 func (e *orderExporter) Close(ctx context.Context) error { return nil }
 
-func (e *orderExporter) Export(ctx context.Context, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
+func (e *orderExporter) Export(ctx context.Context, meta map[string]string, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
 	defer close(results)
 
 	for record := range records {

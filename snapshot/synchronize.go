@@ -37,25 +37,25 @@ func (p *syncImporter) Close(ctx context.Context) error {
 	return nil
 }
 
-func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) error {
+func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) (map[string]string, error) {
 	defer close(records)
 
 	_, _, xattrtree := p.fs.BTrees()
 	xattriter, err := xattrtree.ScanFrom("/")
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	i := 0
 	for erritem, err := range p.fs.Errors("/") {
 		if i%1024 == 0 {
 			if err := ctx.Err(); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		i++
 		if err != nil {
-			return err
+			return nil, err
 		}
 		records <- connectors.NewError(erritem.Name, fmt.Errorf("%s", erritem.Error))
 	}
@@ -64,7 +64,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 	for xattriter.Next() {
 		if i%1024 == 0 {
 			if err := ctx.Err(); err != nil {
-				return err
+				return nil, err
 			}
 		}
 		i++
@@ -72,7 +72,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 		_, xattrmac := xattriter.Current()
 		xattr, err := p.fs.ResolveXattr(xattrmac)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		records <- connectors.NewXattr(xattr.Path, xattr.Name, objects.AttributeExtended,
 			func() (io.ReadCloser, error) {
@@ -80,7 +80,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 			})
 	}
 	if err := xattriter.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	i = 0
@@ -105,7 +105,7 @@ func (p *syncImporter) Import(ctx context.Context, records chan<- *connectors.Re
 		return nil
 	})
 
-	return err
+	return nil, err
 }
 
 func (src *Snapshot) Synchronize(dst *Builder) error {

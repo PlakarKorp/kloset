@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"io"
+	"iter"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/integration-sdk/location"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
@@ -59,20 +61,25 @@ func (s *store) Size(ctx context.Context) (int64, error) {
 	return 0, nil
 }
 
-func (s *store) List(ctx context.Context, res storage.StorageResource) ([]objects.MAC, error) {
-	switch res {
-	case storage.StorageResourceState:
-		var all []objects.MAC
-		for k := range s.states {
-			all = append(all, k)
+func (s *store) List(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag) iter.Seq2[*integration.StorageResourceEntry, error] {
+	return func(yield func(*integration.StorageResourceEntry, error) bool) {
+		var m map[objects.MAC][]byte
+		switch res {
+		case storage.StorageResourceState:
+			m = s.states
+		default:
+			yield(nil, errors.ErrUnsupported)
+			return
 		}
-		return all, nil
+		for MAC := range m {
+			if !yield(&integration.StorageResourceEntry{MAC: MAC}, nil) {
+				return
+			}
+		}
 	}
-
-	return nil, errors.ErrUnsupported
 }
 
-func (s *store) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+func (s *store) Put(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC, rd io.Reader) (int64, error) {
 	switch res {
 	case storage.StorageResourceState:
 		data, err := io.ReadAll(rd)
@@ -87,7 +94,7 @@ func (s *store) Put(ctx context.Context, res storage.StorageResource, mac object
 	return -1, errors.ErrUnsupported
 }
 
-func (s *store) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+func (s *store) Get(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
 	switch res {
 	case storage.StorageResourceState:
 		return io.NopCloser(bytes.NewReader(s.states[mac])), nil
@@ -96,7 +103,7 @@ func (s *store) Get(ctx context.Context, res storage.StorageResource, mac object
 	return nil, errors.ErrUnsupported
 }
 
-func (s *store) Delete(ctx context.Context, res storage.StorageResource, mac objects.MAC) error {
+func (s *store) Delete(ctx context.Context, res storage.StorageResource, flag integration.StorageFlag, mac objects.MAC) error {
 	switch res {
 	case storage.StorageResourceState:
 		panic("!!!")
