@@ -369,6 +369,13 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 		// bytes except the last one, which may be shorter. The reader is free
 		// to return frames in arbitrary fragments, so reassemble with ReadFull.
 		buffer := make([]byte, config.ChunkSize+AESGCMSIV_OVERHEAD)
+
+		// Open appends to its first argument, so give it a buffer with room
+		// for a whole chunk instead of nil: with nil it allocates a new one
+		// for every frame, which is one allocation the size of the stream
+		// over a restore. Reusing it is safe because the pipe below blocks
+		// until the reader has consumed what it was handed.
+		plain := make([]byte, 0, config.ChunkSize)
 		for {
 			n, rerr := io.ReadFull(r, buffer)
 			if rerr != nil && rerr != io.EOF && rerr != io.ErrUnexpectedEOF {
@@ -381,7 +388,7 @@ func DecryptStream(config *Configuration, key []byte, r io.ReadCloser) (io.ReadC
 					pw.CloseWithError(fmt.Errorf("encrypted chunk too short: %d bytes", n))
 					return
 				}
-				decryptedChunk, err := dataGCM.Open(nil, buffer[:AESGCMSIVNonceSize], buffer[AESGCMSIVNonceSize:n], nil)
+				decryptedChunk, err := dataGCM.Open(plain[:0], buffer[:AESGCMSIVNonceSize], buffer[AESGCMSIVNonceSize:n], nil)
 				if err != nil {
 					pw.CloseWithError(err)
 					return
