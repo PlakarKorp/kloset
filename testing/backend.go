@@ -29,6 +29,10 @@ type mockedBackendBehavior struct {
 	packfile      string
 }
 
+const mockLockDeleteDenied = "mock lock delete denied"
+
+var ErrMockLockDeleteDenied = errors.New(mockLockDeleteDenied)
+
 var behaviors = map[string]mockedBackendBehavior{
 	"default": {
 		statesMACs:    nil,
@@ -71,13 +75,18 @@ type MockBackend struct {
 	stateMACs     map[objects.MAC][]byte
 	packfileMACs  map[objects.MAC][]byte
 
-	packfileMutex sync.Mutex
+	packfileMutex    sync.Mutex
+	refuseLockDelete bool
 	// used to trigger different behaviors during tests
 	behavior string
 }
 
 func NewMockBackend(storeConfig map[string]string) *MockBackend {
 	return &MockBackend{location: storeConfig["location"], locks: make(map[objects.MAC][]byte), stateMACs: make(map[objects.MAC][]byte), packfileMACs: make(map[objects.MAC][]byte)}
+}
+
+func (mb *MockBackend) RefuseLockDeletes() {
+	mb.refuseLockDelete = true
 }
 
 func (mb *MockBackend) Create(ctx context.Context, configuration []byte) error {
@@ -216,6 +225,9 @@ func (mb *MockBackend) Delete(ctx context.Context, res storage.StorageResource, 
 	case storage.StorageResourceState:
 		delete(mb.stateMACs, mac)
 	case storage.StorageResourceLock:
+		if mb.refuseLockDelete {
+			return ErrMockLockDeleteDenied
+		}
 		delete(mb.locks, mac)
 	default:
 		return errors.ErrUnsupported
