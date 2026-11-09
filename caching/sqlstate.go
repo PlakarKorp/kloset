@@ -15,6 +15,18 @@ import (
 
 type SQLState struct {
 	db *sqlite.SQLiteCache
+
+	// read hot queries
+	getDeltaQ        *sql.Stmt
+	getDeltasByTypeQ *sql.Stmt
+	getAllDeltasQ    *sql.Stmt
+	hasPackfileQ     *sql.Stmt
+	hasColouredQ     *sql.Stmt
+
+	// write hot queries
+	putDeltaQ    *sql.Stmt
+	putColouredQ *sql.Stmt
+	putPackfileQ *sql.Stmt
 }
 
 var stateSchema = []string{
@@ -89,7 +101,7 @@ type Packfile struct {
 	Timestamp time.Time
 }
 
-func NewSQLState(path string, ro bool) (*SQLState, error) {
+func NewSQLState(path string, ro bool) (_ *SQLState, err error) {
 	db, err := sqlite.New(path, "state.db", &sqlite.Options{
 		DeleteOnClose: false,
 		Compressed:    true,
@@ -101,15 +113,71 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		return nil, err
 	}
 
+	self := SQLState{db: db}
+	defer func() {
+		if err != nil {
+			self.closeStmts()
+			db.Close()
+		}
+	}()
+
 	if ro {
 		// This should be ctx.MaxConcurrency, but this is an import cycle and
 		// breaking it is out of the scope.
 		db.SetMaxOpenConns(runtime.NumCPU())
-		db.SetMaxIdleConns(runtime.NumCPU() / 2)
+		db.SetMaxIdleConns(runtime.NumCPU())
+
 	}
 
-	return &SQLState{db}, nil
+	self.getDeltaQ, err = db.Prepare(`SELECT mac, type, packfile, offset, length
+				FROM deltas
+				WHERE mac = ? AND type = ?;`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare getDelta query %w", err)
+	}
+
+	self.getDeltasByTypeQ, err = db.Prepare(`SELECT mac, type, packfile, offset, length
+				FROM deltas
+				WHERE type = ?;`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare getDeltasByType query %w", err)
+	}
+
+	self.getAllDeltasQ, err = db.Prepare(`SELECT mac, type, packfile, offset, length FROM deltas;`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare getAllDeltas query %w", err)
+	}
+
+	self.hasPackfileQ, err = db.Prepare("SELECT 1 FROM packfiles WHERE mac = ? LIMIT 1;")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare hasPackfile query %w", err)
+	}
+
+	self.hasColouredQ, err = db.Prepare("SELECT 1 FROM coloured WHERE mac = ? AND type = ? LIMIT 1;")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare hasColoured query %w", err)
+	}
+
+	// even on a ro db we prepare those stmt, to avoid a nil deref in case of
+	// misuse, calling those on a r/o db will fail with an error.
+	self.putDeltaQ, err = db.Prepare("INSERT OR IGNORE INTO deltas(mac, type, packfile, offset, length) VALUES(?, ?, ?, ?, ?);")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare putDelta query %w", err)
+	}
+
+	self.putColouredQ, err = db.Prepare("INSERT OR IGNORE INTO coloured(mac, type, timestamp) VALUES(?, ?, ?)")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
+	}
+
+	self.putPackfileQ, err = db.Prepare("INSERT OR IGNORE INTO packfiles(mac, state, timestamp) VALUES(?,  ?, ?)")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare putPackfile query %w", err)
+	}
+
+	return &self, nil
 }
+
 
 func (c *SQLState) PutState(stateID objects.MAC, data []byte) error {
 	_, err := c.db.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateID[:], data)
@@ -192,15 +260,15 @@ func (c *SQLState) DelState(stateID objects.MAC) error {
 	return err
 }
 func (c *SQLState) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
-	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, offset, length) VALUES(?, ?, ?, ?, ?);", blobMAC[:], blobType, packfileMAC[:], offset, length)
+	_, err := c.putDeltaQ.Exec(blobMAC[:], blobType, packfileMAC[:], offset, length)
 
 	return err
 }
 
 // Internal helper, the layout of the query must follow the Scan obviously
-func (c *SQLState) getDeltas(query string, args ...any) iter.Seq2[Blob, error] {
+func (c *SQLState) getDeltas(query *sql.Stmt, args ...any) iter.Seq2[Blob, error] {
 	return func(yield func(Blob, error) bool) {
-		rows, err := c.db.Query(query, args...)
+		rows, err := query.Query(args...)
 		if err != nil {
 			// We can't proceed here. Ideally this should be pre-iteration.
 			yield(Blob{}, err)
@@ -241,25 +309,15 @@ func (c *SQLState) getDeltas(query string, args ...any) iter.Seq2[Blob, error] {
 }
 
 func (c *SQLState) GetDelta(blobType resources.Type, blobMAC objects.MAC) iter.Seq2[Blob, error] {
-	query := `SELECT mac, type, packfile, offset, length
-					FROM deltas
-					WHERE mac = ? AND type = ?;`
-
-	return c.getDeltas(query, blobMAC[:], blobType)
+	return c.getDeltas(c.getDeltaQ, blobMAC[:], blobType)
 }
 
 func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[Blob, error] {
-	query := `SELECT mac, type, packfile, offset, length
-					FROM deltas
-					WHERE type = ?;`
-	return c.getDeltas(query, blobType)
+	return c.getDeltas(c.getDeltasByTypeQ, blobType)
 }
 
 func (c *SQLState) GetDeltas() iter.Seq2[Blob, error] {
-	query := `SELECT mac, type, packfile, offset, length
-					FROM deltas;`
-
-	return c.getDeltas(query)
+	return c.getDeltas(c.getAllDeltasQ)
 }
 
 func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
@@ -268,14 +326,13 @@ func (c *SQLState) DelDelta(blobType resources.Type, blobMAC, packfileMAC object
 }
 
 func (c *SQLState) PutColoured(blobType resources.Type, blobMAC objects.MAC, when time.Time) error {
-	_, err := c.db.Exec("INSERT OR IGNORE INTO coloured(mac, type, timestamp) VALUES(?, ?, ?)", blobMAC[:], blobType, when.UnixNano())
+	_, err := c.putColouredQ.Exec(blobMAC[:], blobType, when.UnixNano())
 	return err
 }
 
 func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bool, error) {
-	query := "SELECT 1 FROM coloured WHERE mac = ? AND type = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, blobMAC[:], blobType).Scan(&dummy)
+	err := c.hasColouredQ.QueryRow(blobMAC[:], blobType).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -349,14 +406,13 @@ func (c *SQLState) DelColoured(blobType resources.Type, blobMAC objects.MAC) err
 }
 
 func (c *SQLState) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
-	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, state, timestamp) VALUES(?,  ?, ?)", packfileMAC[:], stateMAC[:], timestamp.UnixNano())
+	_, err := c.putPackfileQ.Exec(packfileMAC[:], stateMAC[:], timestamp.UnixNano())
 	return err
 }
 
 func (c *SQLState) HasPackfile(packfileMAC objects.MAC) (bool, error) {
-	query := "SELECT 1 FROM packfiles WHERE mac = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, packfileMAC[:]).Scan(&dummy)
+	err := c.hasPackfileQ.QueryRow(packfileMAC[:]).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -480,6 +536,17 @@ func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
 			if !yield(d) {
 				return
 			}
+		}
+	}
+}
+
+func (c *SQLState) closeStmts() {
+	for _, stmt := range []*sql.Stmt{
+		c.getDeltaQ, c.getDeltasByTypeQ, c.getAllDeltasQ, c.hasPackfileQ,
+		c.hasColouredQ, c.putDeltaQ, c.putColouredQ, c.putPackfileQ,
+	} {
+		if stmt != nil {
+			stmt.Close()
 		}
 	}
 }
