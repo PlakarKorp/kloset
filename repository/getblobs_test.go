@@ -118,7 +118,8 @@ func TestGetBlobsRangeReadError(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 	reqs := chunkRequests(t, repo, "/a.txt", "/b.txt")
 
-	for mac := range repo.ListPackfiles() {
+	for mac, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		require.NoError(t, repo.DeletePackfile(mac))
 	}
 

@@ -277,7 +277,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize delta entry %w", err)
 			}
 
-			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
+			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
 				return err
 			}
 
@@ -295,7 +295,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize coloured entry %w", err)
 			}
 
-			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
 				return err
 			}
 		case ET_PACKFILE:
@@ -312,7 +312,7 @@ func (ls *LocalState) deserializeFromStream(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			if err := ls.cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
 				return err
 			}
 
@@ -416,7 +416,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize delta entry %w", err)
 			}
 
-			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, de_buf); err != nil {
+			if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
 				return err
 			}
 
@@ -434,7 +434,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize coloured entry %w", err)
 			}
 
-			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+			if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
 				return err
 			}
 		case ET_PACKFILE:
@@ -451,7 +451,7 @@ func (ls *LocalState) deserializeFromStreamv100(r io.Reader) error {
 				return fmt.Errorf("failed to deserialize packfile entry %w", err)
 			}
 
-			if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+			if err := ls.cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
 				return err
 			}
 
@@ -506,7 +506,7 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 			return fmt.Errorf("failed to deserialize delta entry %w", err)
 		}
 
-		if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, entry); err != nil {
+		if err := ls.cache.PutDelta(delta.Type, delta.Blob, delta.Location.Packfile, delta.Location.Offset, delta.Location.Length); err != nil {
 			return err
 		}
 	}
@@ -517,7 +517,7 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 			return fmt.Errorf("failed to deserialize coloured entry %w", err)
 		}
 
-		if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured_buf); err != nil {
+		if err := ls.cache.PutColoured(coloured.Type, coloured.Blob, coloured.When); err != nil {
 			return err
 		}
 	}
@@ -528,7 +528,7 @@ func (ls *LocalState) mergeFromCache(from *caching.ScanCache) error {
 			return fmt.Errorf("failed to deserialize packfile entry %w", err)
 		}
 
-		if err := ls.cache.PutPackfile(pe.Packfile, pe_buf); err != nil {
+		if err := ls.cache.PutPackfile(pe.Packfile, pe.StateID, pe.Timestamp); err != nil {
 			return err
 		}
 	}
@@ -553,18 +553,17 @@ func (ls *LocalState) DelState(stateID objects.MAC) error {
 }
 
 func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool {
-	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
-		de, err := DeltaEntryFromBytes(buf)
+	for b, err := range ls.cache.GetDelta(Type, blobMAC) {
 		if err != nil {
 			continue
 		}
 
-		ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+		ok, err := ls.cache.HasPackfile(b.Packfile)
 		if err != nil {
 			continue
 		}
 
-		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, de.Location.Packfile)
+		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, b.Packfile)
 		if ok && !coloured {
 			return true
 		}
@@ -574,37 +573,48 @@ func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool 
 }
 
 func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC) (Location, bool, error) {
-	var delta *DeltaEntry
-	for _, buf := range ls.cache.GetDelta(Type, blobMAC) {
-		de, err := DeltaEntryFromBytes(buf)
-
+	var blob *caching.Blob
+	for b, err := range ls.cache.GetDelta(Type, blobMAC) {
 		if err != nil {
 			return Location{}, false, err
 		}
 
-		ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+		ok, err := ls.cache.HasPackfile(b.Packfile)
 		if err != nil {
 			return Location{}, false, err
 		}
 
-		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, de.Location.Packfile)
+		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, b.Packfile)
 		if ok && !coloured {
-			delta = &de
+			blob = &b
 			break
 		}
 	}
 
-	if delta == nil {
+	if blob == nil {
 		return Location{}, false, nil
 	} else {
-		return delta.Location, true, nil
+		l := Location{
+			Packfile: blob.Packfile,
+			Offset:   blob.Offset,
+			Length:   blob.Length,
+		}
+		return l, true, nil
 	}
 }
 
-func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
-	return func(yield func(objects.MAC) bool) {
-		for st := range ls.cache.GetPackfiles() {
-			if !yield(st) {
+func (ls *LocalState) ListPackfiles() iter.Seq2[objects.MAC, error] {
+	return func(yield func(objects.MAC, error) bool) {
+		for p, err := range ls.cache.GetPackfiles() {
+			if err != nil {
+				if !yield(objects.NilMac, err) {
+					return
+				}
+
+				continue
+			}
+
+			if !yield(p.MAC, nil) {
 				return
 			}
 		}
@@ -613,9 +623,21 @@ func (ls *LocalState) ListPackfiles() iter.Seq[objects.MAC] {
 
 func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
 	return func(yield func(PackfileEntry, error) bool) {
-		for _, buf := range ls.cache.GetPackfiles() {
-			pe, err := PackfileEntryFromBytes(buf)
-			if !yield(pe, err) {
+		for p, err:= range ls.cache.GetPackfiles() {
+			if err != nil {
+				if !yield(PackfileEntry{}, err) {
+					return
+				}
+
+				continue
+			}
+
+			pe := PackfileEntry{
+				Packfile:  p.MAC,
+				StateID:   p.State,
+				Timestamp: p.Timestamp,
+			}
+			if !yield(pe, nil) {
 				return
 			}
 		}
@@ -624,35 +646,40 @@ func (ls *LocalState) ListPackfileEntries() iter.Seq2[PackfileEntry, error] {
 
 func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 	return func(yield func(objects.MAC, error) bool) {
-		for _, buf := range ls.cache.GetDeltasByType(resources.RT_SNAPSHOT) {
-			de, err := DeltaEntryFromBytes(buf)
+		for b, err := range ls.cache.GetDeltasByType(resources.RT_SNAPSHOT) {
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			ok, err := ls.cache.HasPackfile(b.Packfile)
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 			if !ok {
 				continue
 			}
 
-			has, err := ls.cache.HasColoured(resources.RT_SNAPSHOT, de.Blob)
+			has, err := ls.cache.HasColoured(resources.RT_SNAPSHOT, b.MAC)
 			if err != nil {
 				if !yield(objects.NilMac, err) {
 					return
 				}
+
+				continue
 			}
 			if has {
 				continue
 			}
 
-			if !yield(de.Blob, nil) {
+			if !yield(b.MAC, nil) {
 				return
 			}
 		}
@@ -661,23 +688,35 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 
 func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 	return func(yield func(DeltaEntry, error) bool) {
-		for _, buf := range ls.cache.GetDeltas() {
-			de, err := DeltaEntryFromBytes(buf)
-
+		for b, err := range ls.cache.GetDeltas() {
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			ok, err := ls.cache.HasPackfile(b.Packfile)
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			if !ok {
+				de := DeltaEntry{
+					Type: b.Type,
+					Blob: b.MAC,
+					Location: Location{
+						Packfile: b.Packfile,
+						Offset:   b.Offset,
+						Length:   b.Length,
+					},
+				}
+
 				if !yield(de, nil) {
 					return
 				}
@@ -733,10 +772,21 @@ func (ls *LocalState) insertOrUpdateConfiguration(ce ConfigurationEntry) error {
 
 func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[ColouredEntry, error] {
 	return func(yield func(ColouredEntry, error) bool) {
-		for _, buf := range ls.cache.GetColouredEntriesByType(rtype) {
-			de, err := ColouredEntryFromBytes(buf)
+		for ce, err := range ls.cache.GetColouredEntriesByType(rtype) {
+			if err != nil {
+				if !yield(ColouredEntry{}, err) {
+					return
+				}
 
-			if !yield(de, err) {
+				continue
+			}
+
+			de := ColouredEntry {
+				Type: ce.Type,
+				Blob: ce.MAC,
+				When: ce.When,
+			}
+			if !yield(de, nil) {
 				return
 			}
 		}
@@ -745,26 +795,38 @@ func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[Colo
 
 func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntry, error] {
 	return func(yield func(DeltaEntry, error) bool) {
-		for _, buf := range ls.cache.GetDeltasByType(Type) {
-			de, err := DeltaEntryFromBytes(buf)
+		for b, err := range ls.cache.GetDeltasByType(Type) {
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
-			ok, err := ls.cache.HasPackfile(de.Location.Packfile)
+			ok, err := ls.cache.HasPackfile(b.Packfile)
 			if err != nil {
 				if !yield(DeltaEntry{}, err) {
 					return
 				}
+
+				continue
 			}
 
 			if !ok {
 				continue
 			}
 
-			if !yield(de, err) {
+			de := DeltaEntry{
+				Type: b.Type,
+				Blob: b.MAC,
+				Location: Location{
+					Packfile: b.Packfile,
+					Offset:   b.Offset,
+					Length:   b.Length,
+				},
+			}
+			if !yield(de, nil) {
 				return
 			}
 		}
