@@ -254,20 +254,49 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 func TestSQLStateConfigurationOperations(t *testing.T) {
 	st := newSQLState(t)
 
-	// Put and Get
-	require.NoError(t, st.PutConfiguration("key1", []byte("value1")))
-	require.NoError(t, st.PutConfiguration("key2", []byte("value2")))
-
-	got, err := st.GetConfiguration("key1")
-	require.NoError(t, err)
-	require.Equal(t, []byte("value1"), got)
-
-	// GetConfigurations iterates all
-	count := 0
-	for range st.GetConfigurations() {
-		count++
+	t0 := time.Unix(0, 1700000000000000000)
+	put := func(key, value string, when time.Time) {
+		t.Helper()
+		inTx(t, st, func(tx *caching.SQLStateTx) error {
+			return tx.PutConfiguration(key, []byte(value), when)
+		})
 	}
-	require.Equal(t, 2, count)
+	get := func(key string) ([]byte, bool) {
+		t.Helper()
+		value, found, err := st.GetConfiguration(key)
+		require.NoError(t, err)
+		return value, found
+	}
+
+	// Missing key.
+	_, found := get("key1")
+	require.False(t, found)
+
+	put("key1", "value1", t0)
+	put("key2", "value2", t0)
+
+	value, found := get("key1")
+	require.True(t, found)
+	require.Equal(t, []byte("value1"), value)
+
+	value, found = get("key2")
+	require.True(t, found)
+	require.Equal(t, []byte("value2"), value)
+
+	// A newer entry replaces the stored one.
+	put("key1", "newer", t0.Add(time.Hour))
+	value, _ = get("key1")
+	require.Equal(t, []byte("newer"), value)
+
+	// An older entry is ignored.
+	put("key1", "older", t0)
+	value, _ = get("key1")
+	require.Equal(t, []byte("newer"), value)
+
+	// An entry with the same timestamp is ignored too.
+	put("key1", "same-time", t0.Add(time.Hour))
+	value, _ = get("key1")
+	require.Equal(t, []byte("newer"), value)
 }
 
 func TestSQLStateReadOnly(t *testing.T) {
