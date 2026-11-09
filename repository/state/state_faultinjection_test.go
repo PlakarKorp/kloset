@@ -116,7 +116,7 @@ func TestSerializeToStreamWriteErrorsAtEveryOffset(t *testing.T) {
 // TestDeserializeFromStreamReadErrorsAtEveryOffset drives deserializeFromStream
 // against a reader that faults at every byte offset of a valid serialized
 // state, exercising every "failed to read ..." branch.
-func _TestDeserializeFromStreamReadErrorsAtEveryOffset(t *testing.T) {
+func TestDeserializeFromStreamReadErrorsAtEveryOffset(t *testing.T) {
 	var buf bytes.Buffer
 	require.NoError(t, seedAllEntryTypes(t).SerializeToStream(&buf))
 	valid := buf.Bytes()

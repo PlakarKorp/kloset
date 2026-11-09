@@ -579,27 +579,6 @@ func TestHasDeletedResource(t *testing.T) {
 	require.True(t, hasDeleted)
 }
 
-func TestSetConfiguration(t *testing.T) {
-	state, cache := newAggregate(t)
-
-	key := "test_key"
-	value := []byte("test_value")
-
-	err := state.SetConfiguration(key, value)
-	require.NoError(t, err)
-
-	// Verify configuration was set
-	configData, err := cache.GetConfiguration(key)
-	require.NoError(t, err)
-	require.NotNil(t, configData)
-
-	// Deserialize and verify
-	config, err := ConfigurationEntryFromBytes(configData)
-	require.NoError(t, err)
-	require.Equal(t, key, config.Key)
-	require.Equal(t, value, config.Value)
-}
-
 func TestListDeletedResources(t *testing.T) {
 	state, cache := newAggregate(t)
 

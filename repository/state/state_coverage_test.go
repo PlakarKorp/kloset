@@ -11,51 +11,35 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestSetConfigurationOverwriteNewer exercises the
-// "oldCe.CreatedAt.Before(ce.CreatedAt)" branch of insertOrUpdateConfiguration:
-// after seeding an older entry, a newer SetConfiguration call replaces it.
-func TestSetConfigurationOverwriteNewer(t *testing.T) {
-	st, cache := newAggregate(t)
+// configStream serializes a delta state carrying a single configuration entry.
+func configStream(t *testing.T, key, value string, when time.Time) *bytes.Buffer {
+	t.Helper()
 
-	older := ConfigurationEntry{
-		Key:       "k",
-		Value:     []byte("older"),
-		CreatedAt: time.Now().Add(-1 * time.Hour),
-	}
-	require.NoError(t, cache.PutConfiguration(older.Key, older.ToBytes()))
+	src, sc := newDeltaState(t)
+	ce := ConfigurationEntry{Key: key, Value: []byte(value), CreatedAt: when}
+	require.NoError(t, sc.PutConfiguration(ce.Key, ce.ToBytes()))
 
-	// Now SetConfiguration writes a newer entry; the "newer" branch overwrites.
-	require.NoError(t, st.SetConfiguration("k", []byte("newer")))
-
-	got, err := cache.GetConfiguration("k")
-	require.NoError(t, err)
-	ce, err := ConfigurationEntryFromBytes(got)
-	require.NoError(t, err)
-	require.Equal(t, []byte("newer"), ce.Value)
+	var buf bytes.Buffer
+	require.NoError(t, src.SerializeToStream(&buf))
+	return &buf
 }
 
-// TestSetConfigurationKeepsOlder exercises the "no overwrite" branch:
-// when the stored entry is newer than the incoming one, insertOrUpdate keeps
-// the stored value.
-func TestSetConfigurationKeepsOlder(t *testing.T) {
+// TestMergeStateConfigurationNewestWins merges configuration entries for the
+// same key out of order: whatever the merge order, the aggregate keeps the
+// most recent one, and a merge carrying an older entry doesn't overwrite it.
+func TestMergeStateConfigurationNewestWins(t *testing.T) {
 	st, cache := newAggregate(t)
+	ver := versioning.FromString("1.1.0")
+	t0 := time.Unix(0, 1700000000000000000)
 
-	// Seed cache with a future-dated entry so subsequent SetConfiguration
-	// won't replace it.
-	future := ConfigurationEntry{
-		Key:       "k",
-		Value:     []byte("future"),
-		CreatedAt: time.Now().Add(1 * time.Hour),
-	}
-	require.NoError(t, cache.PutConfiguration(future.Key, future.ToBytes()))
+	require.NoError(t, st.MergeState(objects.MAC{0x01}, configStream(t, "k", "middle", t0), ver))
+	require.NoError(t, st.MergeState(objects.MAC{0x02}, configStream(t, "k", "newest", t0.Add(time.Hour)), ver))
+	require.NoError(t, st.MergeState(objects.MAC{0x03}, configStream(t, "k", "oldest", t0.Add(-time.Hour)), ver))
 
-	require.NoError(t, st.SetConfiguration("k", []byte("now")))
-
-	got, err := cache.GetConfiguration("k")
+	value, found, err := cache.GetConfiguration("k")
 	require.NoError(t, err)
-	ce, err := ConfigurationEntryFromBytes(got)
-	require.NoError(t, err)
-	require.Equal(t, []byte("future"), ce.Value)
+	require.True(t, found)
+	require.Equal(t, []byte("newest"), value)
 }
 
 // TestListSnapshotsWithMissingPackfile exercises ListSnapshots's continue
@@ -154,7 +138,7 @@ func TestListOrphanDeltasWithMixedState(t *testing.T) {
 // entry type the on-stream format supports, so both State.SerializeToStream
 // and LocalState.deserializeFromStream cover the per-entry branches (DELETE,
 // LOCATIONS, COLOURED, PACKFILE, CONFIGURATION, METADATA).
-func _TestSerializeDeserializeAllEntryTypes(t *testing.T) {
+func TestSerializeDeserializeAllEntryTypes(t *testing.T) {
 	src, srcCache := newDeltaState(t)
 
 	// LOCATIONS / delta
@@ -231,7 +215,7 @@ func TestDeserializeFromStreamUnknownEntryType(t *testing.T) {
 // TestDeserializeFromStreamV100AllEntryTypes feeds a hand-rolled v1.0.0
 // state stream (no header MAC, no DELETE entries) so deserializeFromStreamv100
 // is driven through each case branch.
-func _TestDeserializeFromStreamV100AllEntryTypes(t *testing.T) {
+func TestDeserializeFromStreamV100AllEntryTypes(t *testing.T) {
 	buf := &bytes.Buffer{}
 
 	// LOCATIONS entry
@@ -302,7 +286,7 @@ func writeUint64LE(buf *bytes.Buffer, v uint64) {
 
 // TestMergeFromCachePopulated exercises mergeFromCache with all four cache
 // categories populated, so each loop body in the merge function runs.
-func _TestMergeFromCachePopulated(t *testing.T) {
+func TestMergeFromCachePopulated(t *testing.T) {
 	src, srcCache := newDeltaState(t)
 
 	require.NoError(t, src.PutDelta(&DeltaEntry{
@@ -337,7 +321,7 @@ func TestMergeStateFromCacheAlreadyHas(t *testing.T) {
 // TestSerializeToStreamWithAllEntryTypes follows up by triggering each
 // State.SerializeToStream branch (DELETE / LOCATIONS / COLOURED / PACKFILE /
 // CONFIGURATION) with a non-empty cache.
-func _TestSerializeToStreamWithAllEntryTypes(t *testing.T) {
+func TestSerializeToStreamWithAllEntryTypes(t *testing.T) {
 	st, cache := newDeltaState(t)
 
 	require.NoError(t, st.PutDelta(&DeltaEntry{

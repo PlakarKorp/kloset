@@ -67,7 +67,8 @@ var stateSchema = []string{
 
 	`CREATE TABLE IF NOT EXISTS configurations (
 		key TEXT NOT NULL PRIMARY KEY,
-		data BLOB NOT NULL
+		value BLOB NOT NULL,
+		created_at INTEGER NOT NULL
 	);`,
 }
 
@@ -532,58 +533,26 @@ func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
 }
 
 // Configuration handling
-func (c *SQLState) PutConfiguration(key string, data []byte) error {
-	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET data=excluded.data", key, data)
+func (st *SQLStateTx) PutConfiguration(key string, value []byte, timestamp time.Time) error {
+	_, err := st.tx.Exec(`INSERT INTO configurations(key, value, created_at) VALUES(?, ?, ?)
+						  ON CONFLICT(key)
+						  DO UPDATE SET value = excluded.value, created_at = excluded.created_at
+						  WHERE excluded.created_at > configurations.created_at;`,
+		key, value, timestamp.UnixNano())
 	return err
 }
 
-func (c *SQLState) GetConfiguration(key string) ([]byte, error) {
-	query := "SELECT data FROM configurations WHERE key = ?"
-	var data []byte
-	if err := c.db.QueryRow(query, key).Scan(&data); err != nil {
+func (c *SQLState) GetConfiguration(key string) ([]byte, bool, error) {
+	query := "SELECT value FROM configurations WHERE key = ?"
+	var value []byte
+	if err := c.db.QueryRow(query, key).Scan(&value); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, nil
+			return nil, false, nil
 		}
-		return nil, err
+		return nil, false, err
 	}
 
-	return data, nil
-}
-
-func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
-	return func(yield func([]byte) bool) {
-		query := "SELECT key, data FROM configurations;"
-
-		rows, err := c.db.Query(query)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([][]byte, 0)
-		for rows.Next() {
-			var key string
-			var data []byte
-
-			if err := rows.Scan(&key, &data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, data)
-		}
-		rows.Close()
-
-		if err := rows.Err(); err != nil {
-			return
-		}
-
-		for _, d := range result {
-			if !yield(d) {
-				return
-			}
-		}
-	}
+	return value, true, nil
 }
 
 func (c *SQLState) Close() error {

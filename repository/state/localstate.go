@@ -367,8 +367,7 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 				return nil, fmt.Errorf("failed to deserialize configuration entry %w", err)
 			}
 
-			err = l.insertOrUpdateConfiguration(ce)
-			if err != nil {
+			if err = tx.PutConfiguration(ce.Key, ce.Value, ce.CreatedAt); err != nil {
 				return nil, fmt.Errorf("failed to insert/update configuration entry %w", err)
 			}
 		default:
@@ -508,8 +507,7 @@ func deserializeFromStreamv100(l *LocalState, tx *caching.SQLStateTx, r io.Reade
 				return nil, fmt.Errorf("failed to deserialize configuration entry %w", err)
 			}
 
-			err = l.insertOrUpdateConfiguration(ce)
-			if err != nil {
+			if err := tx.PutConfiguration(ce.Key, ce.Value, ce.CreatedAt); err != nil {
 				return nil, fmt.Errorf("failed to insert/update configuration entry %w", err)
 			}
 		default:
@@ -580,8 +578,7 @@ func mergeFromCache(l *LocalState, tx *caching.SQLStateTx, from *caching.ScanCac
 			return fmt.Errorf("failed to deserialize configuration entry %w", err)
 		}
 
-		err = l.insertOrUpdateConfiguration(ce)
-		if err != nil {
+		if err := tx.PutConfiguration(ce.Key, ce.Value, ce.CreatedAt); err != nil {
 			return fmt.Errorf("failed to insert/update configuration entry %w", err)
 		}
 	}
@@ -768,47 +765,6 @@ func (ls *LocalState) ListOrphanDeltas() iter.Seq2[DeltaEntry, error] {
 
 func (ls *LocalState) HasColouredResource(rtype resources.Type, resource objects.MAC) (bool, error) {
 	return ls.cache.HasColoured(rtype, resource)
-}
-
-// Public function to insert a new configuration, beware this is to be
-// serialized and pushed to repository, in order to do so most of the time you
-// want to do it on a Derive'd State (in order to not repush existing
-// configuration entries)
-func (ls *LocalState) SetConfiguration(key string, value []byte) error {
-	ce := ConfigurationEntry{
-		Key:       key,
-		Value:     value,
-		CreatedAt: time.Now(),
-	}
-
-	return ls.insertOrUpdateConfiguration(ce)
-}
-
-// Internal function used by deserialization that only updates our local on
-// disk state if the provided configuration is more recent than the stored one
-func (ls *LocalState) insertOrUpdateConfiguration(ce ConfigurationEntry) error {
-	value, err := ls.cache.GetConfiguration(ce.Key)
-	if err != nil {
-		return err
-	}
-
-	if value == nil {
-		// not found, just insert it
-		return ls.cache.PutConfiguration(ce.Key, ce.ToBytes())
-	}
-
-	oldCe, err := ConfigurationEntryFromBytes(value)
-	if err != nil {
-		return err
-	}
-
-	if oldCe.CreatedAt.Before(ce.CreatedAt) {
-		if err := ls.cache.PutConfiguration(ce.Key, ce.ToBytes()); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 func (ls *LocalState) ListColouredResources(rtype resources.Type) iter.Seq2[ColouredEntry, error] {
