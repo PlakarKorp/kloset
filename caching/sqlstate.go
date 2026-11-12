@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"iter"
 	"runtime"
+	"sync"
 	"time"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
@@ -25,7 +26,8 @@ type SQLState struct {
 }
 
 type SQLStateTx struct {
-	tx *sql.Tx
+	tx    *sql.Tx
+	cache *packfileIDCache
 
 	putDeltaQ      *sql.Stmt
 	putColouredQ   *sql.Stmt
@@ -37,6 +39,50 @@ type SQLStateTx struct {
 	delColouredQ           *sql.Stmt
 	delPackfileQ           *sql.Stmt
 	delDeltasFromPackfileQ *sql.Stmt
+}
+
+// 64k packfiles is already a lot for a one-hour max checkpoint, and in memory
+// this amounts to something like 6MB.
+const cacheSz = 64 << 10
+
+type packfileIDCache struct {
+	m   map[objects.MAC]int64
+	mtx sync.RWMutex
+}
+
+func newPackfileIDCache() *packfileIDCache {
+	return &packfileIDCache{
+		m:   map[objects.MAC]int64{},
+		mtx: sync.RWMutex{},
+	}
+}
+
+func (c *packfileIDCache) Get(mac objects.MAC) (int64, bool) {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+
+	v, ok := c.m[mac]
+	return v, ok
+}
+
+func (c *packfileIDCache) Put(mac objects.MAC, v int64) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	// we are above the threshold, just clear the map, sure we'll have a few
+	// re-insert but that's fine.
+	if len(c.m) >= cacheSz {
+		clear(c.m)
+	}
+
+	c.m[mac] = v
+}
+
+func (c *packfileIDCache) Clear() {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	clear(c.m)
 }
 
 var stateSchema = []string{
@@ -186,7 +232,7 @@ func (c *SQLState) Begin() (*SQLStateTx, error) {
 		return nil, fmt.Errorf("SQLState failed to begin transaction %w", err)
 	}
 
-	st := &SQLStateTx{tx: tx}
+	st := &SQLStateTx{tx: tx, cache: newPackfileIDCache()}
 	st.putDeltaQ, err = tx.Prepare("INSERT OR IGNORE INTO deltas(mac, type, packfile_id, offset, length) VALUES(?, ?, ?, ?, ?);")
 	if err != nil {
 		tx.Rollback()
@@ -269,13 +315,19 @@ func (st *SQLStateTx) HasState(stateID objects.MAC) (bool, error) {
 }
 
 func (st *SQLStateTx) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
-	if _, err := st.putPackfileIDQ.Exec(packfileMAC[:]); err != nil {
-		return err
-	}
-
 	var id int64
-	if err := st.getPackfileIDQ.QueryRow(packfileMAC[:]).Scan(&id); err != nil {
-		return err
+	if v, ok := st.cache.Get(packfileMAC); ok {
+		id = v
+	} else {
+		if _, err := st.putPackfileIDQ.Exec(packfileMAC[:]); err != nil {
+			return err
+		}
+
+		if err := st.getPackfileIDQ.QueryRow(packfileMAC[:]).Scan(&id); err != nil {
+			return err
+		}
+
+		st.cache.Put(packfileMAC, id)
 	}
 
 	_, err := st.putDeltaQ.Exec(blobMAC[:], blobType, id, offset, length)
@@ -289,13 +341,19 @@ func (st *SQLStateTx) PutColoured(blobType resources.Type, blobMAC objects.MAC, 
 }
 
 func (st *SQLStateTx) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
-	if _, err := st.putPackfileIDQ.Exec(packfileMAC[:]); err != nil {
-		return err
-	}
-
 	var id int64
-	if err := st.getPackfileIDQ.QueryRow(packfileMAC[:]).Scan(&id); err != nil {
-		return err
+	if v, ok := st.cache.Get(packfileMAC); ok {
+		id = v
+	} else {
+		if _, err := st.putPackfileIDQ.Exec(packfileMAC[:]); err != nil {
+			return err
+		}
+
+		if err := st.getPackfileIDQ.QueryRow(packfileMAC[:]).Scan(&id); err != nil {
+			return err
+		}
+
+		st.cache.Put(packfileMAC, id)
 	}
 
 	_, err := st.putPackfileQ.Exec(id, stateMAC[:], timestamp.UnixNano())
@@ -328,6 +386,8 @@ func (st *SQLStateTx) Rollback() error {
 }
 
 func (st *SQLStateTx) Commit() error {
+	// Clear our cache in case the TX is re-used.
+	st.cache.Clear()
 	return st.tx.Commit()
 }
 
