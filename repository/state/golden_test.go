@@ -122,9 +122,10 @@ func newLocalState(t *testing.T) (*state.LocalState, *caching.SQLState) {
 	return ls, cache
 }
 
-// Backup-like state: delta entries plus their packfiles. gChunkOrphan
-// deliberately points to a packfile absent from the state to pin the
-// HasPackfile filtering in the List* methods.
+// Backup-like state: delta entries plus their packfiles. gChunkOrphan points
+// to a packfile absent from the state, which real writers never produce; it
+// predates the aggregate dropping that filtering and is kept so the fixture
+// bytes stay unchanged.
 func backupDeltas() []state.DeltaEntry {
 	return []state.DeltaEntry{
 		{Type: resources.RT_SNAPSHOT, Version: gBlobVersion, Blob: gSnap1, Location: state.Location{Packfile: gPack1, Offset: 0, Length: 100}},
@@ -365,10 +366,14 @@ func assertBackupMerged(t *testing.T, ls *state.LocalState, cache *caching.SQLSt
 	}
 	require.Equal(t, map[objects.MAC]bool{gPack1: true, gPack2: true, gPack3: true}, seenPacks)
 
+	// The aggregate no longer filters deltas on their packfile being known
+	// (a delta always comes with its packfile entry), so gChunkOrphan is listed.
 	chunks := collect2(t, ls.ListObjectsOfType(resources.RT_CHUNK))
-	require.ElementsMatch(t,
-		[]objects.MAC{gChunk1, gChunk2},
-		[]objects.MAC{chunks[0].Blob, chunks[1].Blob})
+	var chunkMACs []objects.MAC
+	for _, de := range chunks {
+		chunkMACs = append(chunkMACs, de.Blob)
+	}
+	require.ElementsMatch(t, []objects.MAC{gChunk1, gChunk2, gChunkOrphan}, chunkMACs)
 	for _, de := range chunks {
 		if de.Blob == gChunk1 {
 			// The aggregate keeps only the queryable fields (Location); the
@@ -381,12 +386,8 @@ func assertBackupMerged(t *testing.T, ls *state.LocalState, cache *caching.SQLSt
 	snapshots := collect2(t, ls.ListSnapshots())
 	require.ElementsMatch(t, []objects.MAC{gSnap1, gSnap2}, snapshots)
 
-	orphans := collect2(t, ls.ListOrphanDeltas())
-	require.Len(t, orphans, 1)
-	require.Equal(t, gChunkOrphan, orphans[0].Blob)
-
 	require.True(t, ls.BlobExists(resources.RT_CHUNK, gChunk1))
-	require.False(t, ls.BlobExists(resources.RT_CHUNK, gChunkOrphan))
+	require.True(t, ls.BlobExists(resources.RT_CHUNK, gChunkOrphan))
 	require.False(t, ls.BlobExists(resources.RT_CHUNK, filledMAC(0xEE)))
 
 	loc, exists, err := ls.GetSubpartForBlob(resources.RT_CHUNK, gChunk1)
@@ -498,19 +499,19 @@ func TestGoldenMergeLifecycle(t *testing.T) {
 	}
 	require.ElementsMatch(t, []objects.MAC{gPack1, gPack3}, packs)
 
-	// Deleting a packfile cascades over its remaining deltas: snap2's delta
-	// lived in pack2 and must be gone entirely (not even orphaned).
+	// Deleting a packfile cascades over its remaining deltas: chunk2 lived in
+	// pack2 and must be gone. gChunkOrphan's packfile was never deleted, so it
+	// stays.
 	chunks := collect2(t, ls.ListObjectsOfType(resources.RT_CHUNK))
-	require.Len(t, chunks, 1)
-	require.Equal(t, gChunk1, chunks[0].Blob)
+	var chunkMACs []objects.MAC
+	for _, de := range chunks {
+		chunkMACs = append(chunkMACs, de.Blob)
+	}
+	require.ElementsMatch(t, []objects.MAC{gChunk1, gChunkOrphan}, chunkMACs)
 
 	_, exists, err = ls.GetSubpartForBlob(resources.RT_SNAPSHOT, gSnap2)
 	require.NoError(t, err)
 	require.False(t, exists)
-
-	orphans := collect2(t, ls.ListOrphanDeltas())
-	require.Len(t, orphans, 1)
-	require.Equal(t, gChunkOrphan, orphans[0].Blob)
 
 	// All three states are published with their own stream metadata.
 	states, err := ls.GetStates()
