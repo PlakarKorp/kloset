@@ -29,11 +29,11 @@ type SQLStateTx struct {
 	tx    *sql.Tx
 	cache *packfileIDCache
 
-	putDeltaQ      *sql.Stmt
-	putColouredQ   *sql.Stmt
-	putPackfileQ   *sql.Stmt
-	putPackfileIDQ *sql.Stmt
-	getPackfileIDQ *sql.Stmt
+	putDeltaQ       *sql.Stmt
+	putColouredQ    *sql.Stmt
+	putPackfileQ    *sql.Stmt
+	putPackfileRefQ *sql.Stmt
+	getPackfileIDQ  *sql.Stmt
 
 	delDeltaQ              *sql.Stmt
 	delColouredQ           *sql.Stmt
@@ -92,14 +92,10 @@ var stateSchema = []string{
 	);`,
 
 	`CREATE TABLE IF NOT EXISTS packfiles (
-        packfile_id INTEGER NOT NULL PRIMARY KEY,
-		state BLOB NOT NULL,
-		timestamp INTEGER NOT NULL
-	);`,
-
-	`CREATE TABLE IF NOT EXISTS packfile_ids (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-		mac BLOB NOT NULL UNIQUE
+		mac BLOB NOT NULL UNIQUE,
+		state BLOB NULL,
+		timestamp INTEGER NULL
 	);`,
 
 	`CREATE TABLE IF NOT EXISTS deltas (
@@ -191,29 +187,29 @@ func NewSQLState(path string, ro bool) (_ *SQLState, err error) {
 
 	}
 
-	self.getDeltaQ, err = db.Prepare(`SELECT d.mac, d.type, pi.mac, d.offset, d.length
+	self.getDeltaQ, err = db.Prepare(`SELECT d.mac, d.type, p.mac, d.offset, d.length
 				FROM deltas d
-				INNER JOIN packfile_ids pi ON pi.id = d.packfile_id
+				INNER JOIN packfiles p ON p.id = d.packfile_id
 				WHERE d.mac = ? AND d.type = ?;`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare getDelta query %w", err)
 	}
 
-	self.getDeltasByTypeQ, err = db.Prepare(`SELECT d.mac, d.type, pi.mac, d.offset, d.length
+	self.getDeltasByTypeQ, err = db.Prepare(`SELECT d.mac, d.type, p.mac, d.offset, d.length
 				FROM deltas d
-				INNER JOIN packfile_ids pi ON pi.id = d.packfile_id
+				INNER JOIN packfiles p ON p.id = d.packfile_id
 				WHERE d.type = ?;`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare getDeltasByType query %w", err)
 	}
 
-	self.getAllDeltasQ, err = db.Prepare(`SELECT d.mac, d.type, pi.mac, d.offset, d.length FROM deltas d
-				INNER JOIN packfile_ids pi ON pi.id = d.packfile_id;`)
+	self.getAllDeltasQ, err = db.Prepare(`SELECT d.mac, d.type, p.mac, d.offset, d.length FROM deltas d
+				INNER JOIN packfiles p ON p.id = d.packfile_id;`)
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare getAllDeltas query %w", err)
 	}
 
-	self.hasPackfileQ, err = db.Prepare("SELECT 1 FROM packfiles p INNER JOIN packfile_ids as pid ON pid.id = p.packfile_id WHERE pid.mac = ?;")
+	self.hasPackfileQ, err = db.Prepare("SELECT 1 FROM packfiles WHERE mac = ?;")
 	if err != nil {
 		return nil, fmt.Errorf("failed to prepare hasPackfile query %w", err)
 	}
@@ -245,27 +241,30 @@ func (c *SQLState) Begin() (*SQLStateTx, error) {
 		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
 	}
 
-	st.putPackfileQ, err = tx.Prepare("INSERT OR IGNORE INTO packfiles(packfile_id, state, timestamp) VALUES(?,  ?, ?)")
+	st.putPackfileRefQ, err = tx.Prepare("INSERT OR IGNORE INTO packfiles(mac) VALUES(?);")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putPackfileRef query %w", err)
+	}
+
+	st.putPackfileQ, err = tx.Prepare(`INSERT INTO packfiles(mac, state, timestamp) VALUES(?, ?, ?)
+									   ON CONFLICT(mac) DO UPDATE
+											SET state = excluded.state, timestamp = excluded.timestamp
+									   WHERE packfiles.state IS NULL;`)
 	if err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("failed to prepare putPackfile query %w", err)
 	}
 
-	st.putPackfileIDQ, err = tx.Prepare("INSERT INTO packfile_ids(mac) VALUES(?) ON CONFLICT(mac) DO NOTHING")
+	st.getPackfileIDQ, err = tx.Prepare("SELECT id FROM packfiles WHERE mac = ?; ")
 	if err != nil {
 		tx.Rollback()
-		return nil, fmt.Errorf("failed to prepare putPackfileID query %w", err)
-	}
-
-	st.getPackfileIDQ, err = tx.Prepare("SELECT id FROM packfile_ids WHERE mac = ?")
-	if err != nil {
-		tx.Rollback()
-		return nil, fmt.Errorf("failed to prepare getPackfileID query %w", err)
+		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
 	}
 
 	st.delDeltaQ, err = tx.Prepare(`DELETE FROM deltas
 									WHERE mac = ? AND type = ? AND packfile_id =
-									(SELECT id FROM packfile_ids WHERE mac = ?);`)
+									(SELECT id FROM packfiles WHERE mac = ?);`)
 	if err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("failed to prepare delDelta query %w", err)
@@ -277,15 +276,15 @@ func (c *SQLState) Begin() (*SQLStateTx, error) {
 		return nil, fmt.Errorf("failed to prepare delColoured query %w", err)
 	}
 
-	st.delPackfileQ, err = tx.Prepare(`DELETE FROM packfiles WHERE packfile_id =
-									   (SELECT id FROM packfile_ids WHERE mac = ?);`)
+	st.delPackfileQ, err = tx.Prepare("DELETE FROM packfiles WHERE mac = ?;")
+
 	if err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("failed to prepare delPackfile query %w", err)
 	}
 
 	st.delDeltasFromPackfileQ, err = tx.Prepare(`DELETE FROM deltas WHERE packfile_id =
-												 (SELECT id FROM packfile_ids WHERE mac = ?);`)
+												 (SELECT id FROM packfiles WHERE mac = ?);`)
 	if err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("failed to prepare delDeltasFromPackfile query %w", err)
@@ -319,7 +318,7 @@ func (st *SQLStateTx) PutDelta(blobType resources.Type, blobMAC, packfileMAC obj
 	if v, ok := st.cache.Get(packfileMAC); ok {
 		id = v
 	} else {
-		if _, err := st.putPackfileIDQ.Exec(packfileMAC[:]); err != nil {
+		if _, err := st.putPackfileRefQ.Exec(packfileMAC[:]); err != nil {
 			return err
 		}
 
@@ -341,22 +340,7 @@ func (st *SQLStateTx) PutColoured(blobType resources.Type, blobMAC objects.MAC, 
 }
 
 func (st *SQLStateTx) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
-	var id int64
-	if v, ok := st.cache.Get(packfileMAC); ok {
-		id = v
-	} else {
-		if _, err := st.putPackfileIDQ.Exec(packfileMAC[:]); err != nil {
-			return err
-		}
-
-		if err := st.getPackfileIDQ.QueryRow(packfileMAC[:]).Scan(&id); err != nil {
-			return err
-		}
-
-		st.cache.Put(packfileMAC, id)
-	}
-
-	_, err := st.putPackfileQ.Exec(id, stateMAC[:], timestamp.UnixNano())
+	_, err := st.putPackfileQ.Exec(packfileMAC[:], stateMAC[:], timestamp.UnixNano())
 	return err
 }
 
@@ -593,8 +577,9 @@ func (c *SQLState) HasPackfile(packfileMAC objects.MAC) (bool, error) {
 
 func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
 	return func(yield func(Packfile, error) bool) {
-		query := `SELECT pi.mac, p.state, p.timestamp FROM packfiles p
-			  	  INNER JOIN packfile_ids pi ON pi.id = p.packfile_id;`
+		// Rows without a state are placeholders for deltas whose packfile entry
+		// was never ingested.
+		query := "SELECT p.mac, p.state, p.timestamp FROM packfiles p WHERE p.state IS NOT NULL;"
 
 		rows, err := c.db.Query(query)
 		if err != nil {

@@ -596,13 +596,8 @@ func (ls *LocalState) BlobExists(Type resources.Type, blobMAC objects.MAC) bool 
 			continue
 		}
 
-		ok, err := ls.cache.HasPackfile(b.Packfile)
-		if err != nil {
-			continue
-		}
-
 		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, b.Packfile)
-		if ok && !coloured {
+		if !coloured {
 			return true
 		}
 	}
@@ -617,13 +612,8 @@ func (ls *LocalState) GetSubpartForBlob(Type resources.Type, blobMAC objects.MAC
 			return Location{}, false, err
 		}
 
-		ok, err := ls.cache.HasPackfile(b.Packfile)
-		if err != nil {
-			return Location{}, false, err
-		}
-
 		coloured, _ := ls.HasColouredResource(resources.RT_PACKFILE, b.Packfile)
-		if ok && !coloured {
+		if !coloured {
 			blob = &b
 			break
 		}
@@ -690,18 +680,6 @@ func (ls *LocalState) ListSnapshots() iter.Seq2[objects.MAC, error] {
 					return
 				}
 
-				continue
-			}
-
-			ok, err := ls.cache.HasPackfile(b.Packfile)
-			if err != nil {
-				if !yield(objects.NilMac, err) {
-					return
-				}
-
-				continue
-			}
-			if !ok {
 				continue
 			}
 
@@ -798,19 +776,6 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 					return
 				}
 
-				continue
-			}
-
-			ok, err := ls.cache.HasPackfile(b.Packfile)
-			if err != nil {
-				if !yield(DeltaEntry{}, err) {
-					return
-				}
-
-				continue
-			}
-
-			if !ok {
 				continue
 			}
 

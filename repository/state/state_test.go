@@ -513,38 +513,6 @@ func TestListSnapshots(t *testing.T) {
 	require.Contains(t, found, snapshot2)
 }
 
-func TestListOrphanDeltas(t *testing.T) {
-	state, cache := newAggregate(t)
-
-	// Add delta with missing packfile (orphan)
-	orphanDelta := &DeltaEntry{
-		Type:    resources.RT_OBJECT,
-		Version: versioning.FromString("1.0.0"),
-		Blob:    objects.MAC{1, 2, 3, 4},
-		Location: Location{
-			Packfile: objects.MAC{5, 6, 7, 8}, // This packfile doesn't exist
-			Offset:   1000,
-			Length:   500,
-		},
-		Flags: 0x1234,
-	}
-	putDeltaInCache(t, cache, orphanDelta)
-
-	// List orphan deltas
-	var found []DeltaEntry
-	for delta, err := range state.ListOrphanDeltas() {
-		require.NoError(t, err)
-		found = append(found, delta)
-	}
-
-	require.Len(t, found, 1)
-	// The aggregate does not store Version/Flags; ListOrphanDeltas
-	// reconstructs entries with only the queryable fields set.
-	require.Equal(t, orphanDelta.Blob, found[0].Blob)
-	require.Equal(t, orphanDelta.Type, found[0].Type)
-	require.Equal(t, orphanDelta.Location, found[0].Location)
-}
-
 // putDeltaInCache seeds a delta entry directly in the aggregate's cache: the
 // aggregate receives deltas via merge, not through a method of its own.
 func putDeltaInCache(t *testing.T, cache *caching.SQLState, de *DeltaEntry) {

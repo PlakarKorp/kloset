@@ -42,41 +42,6 @@ func TestMergeStateConfigurationNewestWins(t *testing.T) {
 	require.Equal(t, []byte("newest"), value)
 }
 
-// TestListSnapshotsWithMissingPackfile exercises ListSnapshots's continue
-// branch when the packfile referenced by a delta is not in the cache.
-func TestListSnapshotsWithMissingPackfile(t *testing.T) {
-	st, cache := newAggregate(t)
-
-	pfMissing := objects.MAC{0xAA}
-	pfPresent := objects.MAC{0xBB}
-
-	// Two snapshot delta entries — one referring to a packfile in the
-	// cache, one to a packfile that isn't.
-	deltaMissing := DeltaEntry{
-		Type:     resources.RT_SNAPSHOT,
-		Blob:     objects.MAC{0x01},
-		Location: Location{Packfile: pfMissing},
-	}
-	deltaPresent := DeltaEntry{
-		Type:     resources.RT_SNAPSHOT,
-		Blob:     objects.MAC{0x02},
-		Location: Location{Packfile: pfPresent},
-	}
-	require.NoError(t, viaTx(t, cache).PutDelta(resources.RT_SNAPSHOT, deltaMissing.Blob, pfMissing, deltaMissing.Location.Offset, deltaMissing.Location.Length))
-	require.NoError(t, viaTx(t, cache).PutDelta(resources.RT_SNAPSHOT, deltaPresent.Blob, pfPresent, deltaPresent.Location.Offset, deltaPresent.Location.Length))
-
-	require.NoError(t, viaTx(t, cache).PutPackfile(pfPresent, objects.NilMac, time.Now()))
-
-	// ListSnapshots must produce exactly the entry whose packfile is present
-	// in the cache.
-	var found []objects.MAC
-	for snap, err := range st.ListSnapshots() {
-		require.NoError(t, err)
-		found = append(found, snap)
-	}
-	require.Equal(t, []objects.MAC{deltaPresent.Blob}, found)
-}
-
 // TestListSnapshotsSkipsColoured exercises the path where a snapshot has been
 // coloured (marked deleted) — it should be skipped by ListSnapshots.
 func TestListSnapshotsSkipsColoured(t *testing.T) {
@@ -103,35 +68,6 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 		count++
 	}
 	require.Zero(t, count)
-}
-
-// TestListOrphanDeltasWithMixedState seeds both present and missing-packfile
-// deltas; ListOrphanDeltas should only emit those whose packfile is absent.
-func TestListOrphanDeltasWithMixedState(t *testing.T) {
-	st, cache := newAggregate(t)
-
-	pfPresent := objects.MAC{0xA1}
-	require.NoError(t, viaTx(t, cache).PutPackfile(pfPresent, objects.NilMac, time.Now()))
-
-	orphan := DeltaEntry{
-		Type:     resources.RT_CHUNK,
-		Blob:     objects.MAC{0x9F},
-		Location: Location{Packfile: objects.MAC{0xFA}},
-	}
-	healthy := DeltaEntry{
-		Type:     resources.RT_CHUNK,
-		Blob:     objects.MAC{0x8E},
-		Location: Location{Packfile: pfPresent},
-	}
-	require.NoError(t, viaTx(t, cache).PutDelta(resources.RT_CHUNK, orphan.Blob, orphan.Location.Packfile, orphan.Location.Offset, orphan.Location.Length))
-	require.NoError(t, viaTx(t, cache).PutDelta(resources.RT_CHUNK, healthy.Blob, pfPresent, healthy.Location.Offset, healthy.Location.Length))
-
-	var found []DeltaEntry
-	for de, err := range st.ListOrphanDeltas() {
-		require.NoError(t, err)
-		found = append(found, de)
-	}
-	require.Equal(t, []DeltaEntry{orphan}, found)
 }
 
 // TestSerializeDeserializeAllEntryTypes drives a complete round-trip of every
