@@ -107,6 +107,10 @@ var stateSchema = []string{
 		PRIMARY KEY(type, mac, packfile_id)
 	) WITHOUT ROWID, STRICT;`,
 
+	// sadly we need this index for maintenance.
+	`CREATE INDEX IF NOT EXISTS deltas_packfiles_id
+		ON deltas(packfile_id);`,
+
 	`CREATE TABLE IF NOT EXISTS coloured (
 		mac BLOB NOT NULL,
 		type INTEGER NOT NULL,
