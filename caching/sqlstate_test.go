@@ -213,6 +213,50 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	require.False(t, ok)
 }
 
+// TestSQLStatePackfileIDsInterleaved writes deltas for two packfiles in an
+// interleaved order within one transaction, so ids come both from the
+// database (first sighting) and from the per-transaction cache. Every delta
+// must come back attached to the right packfile.
+func TestSQLStatePackfileIDsInterleaved(t *testing.T) {
+	st := newSQLState(t)
+
+	packA := objects.MAC{0xaa}
+	packB := objects.MAC{0xbb}
+	want := map[objects.MAC]objects.MAC{
+		{0x01}: packA,
+		{0x02}: packB,
+		{0x03}: packA,
+		{0x04}: packB,
+		{0x05}: packA,
+	}
+
+	inTx(t, st, func(tx *caching.SQLStateTx) error {
+		for _, blob := range []objects.MAC{{0x01}, {0x02}, {0x03}, {0x04}, {0x05}} {
+			if err := tx.PutDelta(resources.RT_CHUNK, blob, want[blob], 0, 1); err != nil {
+				return err
+			}
+		}
+		if err := tx.PutPackfile(packB, objects.MAC{0xff}, time.Now()); err != nil {
+			return err
+		}
+		return tx.PutPackfile(packA, objects.MAC{0xff}, time.Now())
+	})
+
+	got := map[objects.MAC]objects.MAC{}
+	for b, err := range st.GetDeltas() {
+		require.NoError(t, err)
+		got[b.MAC] = b.Packfile
+	}
+	require.Equal(t, want, got)
+
+	packs := map[objects.MAC]bool{}
+	for p, err := range st.GetPackfiles() {
+		require.NoError(t, err)
+		packs[p.MAC] = true
+	}
+	require.Equal(t, map[objects.MAC]bool{packA: true, packB: true}, packs)
+}
+
 func TestSQLStatePackfileOperations(t *testing.T) {
 	st := newSQLState(t)
 
