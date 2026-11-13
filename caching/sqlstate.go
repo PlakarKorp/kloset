@@ -35,10 +35,9 @@ type SQLStateTx struct {
 	putPackfileRefQ *sql.Stmt
 	getPackfileIDQ  *sql.Stmt
 
-	delDeltaQ              *sql.Stmt
-	delColouredQ           *sql.Stmt
-	delPackfileQ           *sql.Stmt
-	delDeltasFromPackfileQ *sql.Stmt
+	delDeltaQ    *sql.Stmt
+	delColouredQ *sql.Stmt
+	delPackfileQ *sql.Stmt
 }
 
 // 64k packfiles is already a lot for a one-hour max checkpoint, and in memory
@@ -95,8 +94,12 @@ var stateSchema = []string{
         id INTEGER PRIMARY KEY AUTOINCREMENT,
 		mac BLOB NOT NULL UNIQUE,
 		state BLOB NULL,
-		timestamp INTEGER NULL
+		timestamp INTEGER NULL,
+		deleted INTEGER NOT NULL DEFAULT 0
 	);`,
+
+	`CREATE INDEX IF NOT EXISTS packfiles_deleted
+		ON packfiles(id) WHERE deleted = 1;`,
 
 	`CREATE TABLE IF NOT EXISTS deltas (
 		mac BLOB NOT NULL,
@@ -276,18 +279,11 @@ func (c *SQLState) Begin() (*SQLStateTx, error) {
 		return nil, fmt.Errorf("failed to prepare delColoured query %w", err)
 	}
 
-	st.delPackfileQ, err = tx.Prepare("DELETE FROM packfiles WHERE mac = ?;")
+	st.delPackfileQ, err = tx.Prepare("UPDATE packfiles SET deleted = 1 WHERE mac = ?;")
 
 	if err != nil {
 		tx.Rollback()
 		return nil, fmt.Errorf("failed to prepare delPackfile query %w", err)
-	}
-
-	st.delDeltasFromPackfileQ, err = tx.Prepare(`DELETE FROM deltas WHERE packfile_id =
-												 (SELECT id FROM packfiles WHERE mac = ?);`)
-	if err != nil {
-		tx.Rollback()
-		return nil, fmt.Errorf("failed to prepare delDeltasFromPackfile query %w", err)
 	}
 
 	return st, nil
@@ -356,20 +352,29 @@ func (st *SQLStateTx) DelColoured(blobType resources.Type, blobMAC objects.MAC) 
 
 func (st *SQLStateTx) DelPackfile(packfileMAC objects.MAC) error {
 	_, err := st.delPackfileQ.Exec(packfileMAC[:])
-
-	if err != nil {
-		return err
-	}
-
-	_, err = st.delDeltasFromPackfileQ.Exec(packfileMAC[:])
 	return err
 }
 
 func (st *SQLStateTx) Rollback() error {
+	st.cache.Clear()
 	return st.tx.Rollback()
 }
 
 func (st *SQLStateTx) Commit() error {
+	// Allright, we have collected all our packfiles to be deleted (if any).
+	// We can now use that to do a one pass deletion of all their blobs, saving
+	// us an index on deltas(packfile_id).
+	query := "DELETE FROM deltas WHERE packfile_id IN (SELECT id FROM packfiles WHERE deleted=1);"
+	if _, err := st.tx.Exec(query); err != nil {
+		return fmt.Errorf("failed to cascade delete deltas from packfiles %w", err)
+	}
+
+	// now we can delete the soft deleted packfiles.
+	query = "DELETE FROM packfiles WHERE deleted=1;"
+	if _, err := st.tx.Exec(query); err != nil {
+		return fmt.Errorf("failed to delete packfiles %w", err)
+	}
+
 	// Clear our cache in case the TX is re-used.
 	st.cache.Clear()
 	return st.tx.Commit()
