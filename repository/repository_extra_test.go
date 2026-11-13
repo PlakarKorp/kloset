@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
 	"testing"
@@ -60,7 +61,7 @@ func TestOriginRootType(t *testing.T) {
 // exist in the store.
 func TestGetLockMissing(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	_, err := repo.GetLock(objects.MAC{0x01})
+	_, err := repo.GetLock(context.Background(), objects.MAC{0x01})
 	require.Error(t, err)
 }
 
@@ -73,12 +74,12 @@ func TestPutLockAndGet(t *testing.T) {
 	require.NoError(t, lock.SerializeToStream(&buf))
 
 	lockID := objects.MAC{0xFF, 0x01}
-	nbytes, err := repo.PutLock(lockID, &buf)
+	nbytes, err := repo.PutLock(context.Background(), lockID, &buf)
 	require.NoError(t, err)
 	require.Greater(t, nbytes, int64(0))
 
 	// Read it back.
-	rc, err := repo.GetLock(lockID)
+	rc, err := repo.GetLock(context.Background(), lockID)
 	require.NoError(t, err)
 	defer rc.Close()
 
@@ -210,7 +211,7 @@ func TestStorageSizeAfterBackup(t *testing.T) {
 // fresh repository.
 func TestGetLocksEmpty(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
-	locks, err := repo.GetLocks()
+	locks, err := repo.GetLocks(context.Background())
 	require.NoError(t, err)
 	require.NotNil(t, locks)
 }
@@ -363,8 +364,8 @@ func TestConfigurationHasID(t *testing.T) {
 func TestDeleteLockTwice(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 	lockID := objects.MAC{0xCA, 0xFE}
-	require.NoError(t, repo.DeleteLock(lockID))
-	require.NoError(t, repo.DeleteLock(lockID))
+	require.NoError(t, repo.DeleteLock(context.Background(), lockID))
+	require.NoError(t, repo.DeleteLock(context.Background(), lockID))
 }
 
 // TestCloseAfterBackup ensures Close returns nil even after a backup was done.

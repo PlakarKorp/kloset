@@ -2,6 +2,7 @@ package repository
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -1421,22 +1422,22 @@ func (r *Repository) Logger() *logging.Logger {
 	return r.AppContext().GetLogger()
 }
 
-func (r *Repository) GetLocks() ([]objects.MAC, error) {
+func (r *Repository) GetLocks(ctx context.Context) ([]objects.MAC, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetLocks(): %s", time.Since(t0))
 	}()
 
-	return r.store.List(r.appContext, storage.StorageResourceLock)
+	return r.store.List(ctx, storage.StorageResourceLock)
 }
 
-func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
+func (r *Repository) GetLock(ctx context.Context, lockID objects.MAC) (io.ReadCloser, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "GetLock(%x): %s", lockID, time.Since(t0))
 	}()
 
-	raw, err := r.store.Get(r.appContext, storage.StorageResourceLock, lockID, nil)
+	raw, err := r.store.Get(ctx, storage.StorageResourceLock, lockID, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1456,7 +1457,7 @@ func (r *Repository) GetLock(lockID objects.MAC) (io.ReadCloser, error) {
 	return r.decode(rd)
 }
 
-func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
+func (r *Repository) PutLock(ctx context.Context, lockID objects.MAC, rd io.Reader) (int64, error) {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "PutLock(%x, ...): %s", lockID, time.Since(t0))
@@ -1472,16 +1473,16 @@ func (r *Repository) PutLock(lockID objects.MAC, rd io.Reader) (int64, error) {
 		return 0, err
 	}
 
-	return r.store.Put(r.appContext, storage.StorageResourceLock, lockID, rd)
+	return r.store.Put(ctx, storage.StorageResourceLock, lockID, rd)
 }
 
-func (r *Repository) DeleteLock(lockID objects.MAC) error {
+func (r *Repository) DeleteLock(ctx context.Context, lockID objects.MAC) error {
 	t0 := time.Now()
 	defer func() {
 		r.Logger().Trace("repository", "DeleteLock(%x, ...): %s", lockID, time.Since(t0))
 	}()
 
-	return r.store.Delete(r.appContext, storage.StorageResourceLock, lockID)
+	return r.store.Delete(ctx, storage.StorageResourceLock, lockID)
 }
 
 func (r *Repository) ListPackfileEntries() iter.Seq2[state.PackfileEntry, error] {
