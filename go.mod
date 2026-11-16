@@ -21,7 +21,7 @@ require (
 	github.com/zeebo/blake3 v0.2.4
 	golang.org/x/crypto v0.58.0
 	golang.org/x/mod v0.42.0
-	golang.org/x/sync v0.24.0
+	golang.org/x/sync v0.25.0
 	modernc.org/sqlite v1.61.1
 )
 
