@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-const CACHE_VERSION = "2.0.0"
+const CACHE_VERSION = "3.0.0"
 
 var (
 	ErrClosed = fmt.Errorf("cache closed")
