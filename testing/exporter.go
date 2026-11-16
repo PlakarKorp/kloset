@@ -36,7 +36,7 @@ func (e *MockExporter) Type() string          { return e.rootDir }
 func (e *MockExporter) Root() string          { return e.rootDir }
 func (p *MockExporter) Flags() location.Flags { return 0 }
 
-func (e *MockExporter) Export(ctx context.Context, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
+func (e *MockExporter) Export(ctx context.Context, meta map[string]string, records <-chan *connectors.Record, results chan<- *connectors.Result) error {
 	defer close(results)
 
 	for record := range records {

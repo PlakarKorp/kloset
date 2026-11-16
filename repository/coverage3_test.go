@@ -19,7 +19,7 @@ func TestGetLockCorrupt(t *testing.T) {
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 
 	lockID := objects.MAC{0x5A, 0x5A}
-	_, err := repo.Store().Put(repo.AppContext(), storage.StorageResourceLock, lockID, bytes.NewReader([]byte("not a lock")))
+	_, err := repo.Store().Put(repo.AppContext(), storage.StorageResourceLock, 0, lockID, bytes.NewReader([]byte("not a lock")))
 	require.NoError(t, err)
 
 	_, err = repo.GetLock(context.Background(), lockID)
