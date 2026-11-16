@@ -15,24 +15,17 @@ type (
 	ExporterFn = integration.ExporterFn
 )
 
-var backends = location.New[ExporterFn]("fs")
-
 func Register(name string, flags location.Flags, backend ExporterFn) error {
-	if !backends.Register(name, backend, flags) {
-		return fmt.Errorf("exporter backend '%s' already registered", name)
-	}
-	return nil
+	return integration.RegisterExporter(name, flags, backend)
 }
 
 func Unregister(name string) error {
-	if !backends.Unregister(name) {
-		return fmt.Errorf("exporter backend '%s' not registered", name)
-	}
-	return nil
+	return integration.UnregisterExporter(name)
+
 }
 
 func Backends() []string {
-	return backends.Names()
+	return integration.ExporterBackends()
 }
 
 func NewExporter(ctx *kcontext.KContext, opts *connectors.Options, config map[string]string) (Exporter, error) {
@@ -41,7 +34,7 @@ func NewExporter(ctx *kcontext.KContext, opts *connectors.Options, config map[st
 		return nil, fmt.Errorf("missing location")
 	}
 
-	proto, loc, backend, flags, ok := backends.Lookup(loc)
+	proto, loc, backend, flags, ok := integration.LookupExporter(loc)
 	if !ok {
 		return nil, fmt.Errorf("unsupported exporter protocol")
 	}
