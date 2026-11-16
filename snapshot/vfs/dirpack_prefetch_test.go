@@ -138,7 +138,8 @@ func TestPrefetchDirsActuallyWarms(t *testing.T) {
 	fs := freshCacheFS(t, repo, base.Header.Identifier)
 	require.NoError(t, fs.PrefetchDirs(context.Background(), warmTreeParentDirs()))
 
-	for mac := range repo.ListPackfiles() {
+	for mac, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		require.NoError(t, repo.DeletePackfile(mac))
 	}
 
@@ -160,7 +161,8 @@ func TestPrefetchDirsUnknownDirsAreSoft(t *testing.T) {
 	require.NoError(t, fs.PrefetchDirs(context.Background(), dirs))
 
 	// The known dirs must have warmed regardless: destroy the backend and walk.
-	for mac := range repo.ListPackfiles() {
+	for mac, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		require.NoError(t, repo.DeletePackfile(mac))
 	}
 	walkForBackup(t, fs, warmTreeFilePaths())
@@ -176,7 +178,8 @@ func TestPrefetchDirsBackendGoneIsSoft(t *testing.T) {
 
 	fs := freshCacheFS(t, repo, base.Header.Identifier)
 
-	for mac := range repo.ListPackfiles() {
+	for mac, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		require.NoError(t, repo.DeletePackfile(mac))
 	}
 
@@ -202,7 +205,8 @@ func TestPrefetchDirsAlreadyWarm(t *testing.T) {
 
 	// Second warm runs against a dead backend: it must not need it (all
 	// dirs cached) and must not damage the cache.
-	for mac := range repo.ListPackfiles() {
+	for mac, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		require.NoError(t, repo.DeletePackfile(mac))
 	}
 	require.NoError(t, fs.PrefetchDirs(context.Background(), dirs))

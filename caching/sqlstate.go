@@ -2,11 +2,12 @@ package caching
 
 import (
 	"database/sql"
-	"encoding/hex"
 	"errors"
+	"fmt"
 	"iter"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/PlakarKorp/kloset/caching/sqlite"
 	"github.com/PlakarKorp/kloset/objects"
@@ -16,63 +17,149 @@ import (
 type SQLState struct {
 	db *sqlite.SQLiteCache
 
-	mtx  sync.RWMutex
-	blob map[objects.MAC]bool
+	// read hot queries
+	getDeltaQ        *sql.Stmt
+	getDeltasByTypeQ *sql.Stmt
+	getAllDeltasQ    *sql.Stmt
+	hasPackfileQ     *sql.Stmt
+	hasColouredQ     *sql.Stmt
 }
 
-// XXX: could we reuse something?!
-type sDelta struct {
-	mac     string
-	typ     int
-	pack    string
-	payload []byte
+type SQLStateTx struct {
+	tx    *sql.Tx
+	cache *packfileIDCache
+
+	putDeltaQ       *sql.Stmt
+	putColouredQ    *sql.Stmt
+	putPackfileQ    *sql.Stmt
+	putPackfileRefQ *sql.Stmt
+	getPackfileIDQ  *sql.Stmt
+
+	delDeltaQ              *sql.Stmt
+	delColouredQ           *sql.Stmt
+	delPackfileQ           *sql.Stmt
+	delDeltasFromPackfileQ *sql.Stmt
 }
 
-type sqlStateBatch struct {
-	parent *SQLState
+// 64k packfiles is already a lot for a one-hour max checkpoint, and in memory
+// this amounts to something like 6MB.
+const cacheSz = 64 << 10
 
-	deltas []sDelta
+type packfileIDCache struct {
+	m   map[objects.MAC]int64
+	mtx sync.RWMutex
 }
 
-// Used to flatten a map, because go is go.
-type kv struct {
-	mac  string
-	data []byte
+func newPackfileIDCache() *packfileIDCache {
+	return &packfileIDCache{
+		m:   map[objects.MAC]int64{},
+		mtx: sync.RWMutex{},
+	}
+}
+
+func (c *packfileIDCache) Get(mac objects.MAC) (int64, bool) {
+	c.mtx.RLock()
+	defer c.mtx.RUnlock()
+
+	v, ok := c.m[mac]
+	return v, ok
+}
+
+func (c *packfileIDCache) Put(mac objects.MAC, v int64) {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	// we are above the threshold, just clear the map, sure we'll have a few
+	// re-insert but that's fine.
+	if len(c.m) >= cacheSz {
+		clear(c.m)
+	}
+
+	c.m[mac] = v
+}
+
+func (c *packfileIDCache) Clear() {
+	c.mtx.Lock()
+	defer c.mtx.Unlock()
+
+	clear(c.m)
 }
 
 var stateSchema = []string{
 	`CREATE TABLE IF NOT EXISTS states (
-		mac TEXT NOT NULL PRIMARY KEY,
+		mac BLOB NOT NULL PRIMARY KEY,
 		payload BLOB NOT NULL
 	);`,
 
 	`CREATE TABLE IF NOT EXISTS packfiles (
-		mac TEXT NOT NULL PRIMARY KEY,
-		payload BLOB NOT NULL
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+		mac BLOB NOT NULL UNIQUE,
+		state BLOB NULL,
+		timestamp INTEGER NULL
 	);`,
 
 	`CREATE TABLE IF NOT EXISTS deltas (
-		mac TEXT NOT NULL,
+		mac BLOB NOT NULL,
 		type INTEGER NOT NULL,
-		packfile TEXT NOT NULL,
-		payload BLOB NOT NULL,
-		UNIQUE(type, mac, packfile)
-	);`,
+		packfile_id INTEGER NOT NULL,
+		offset INTEGER NOT NULL,
+		length INTEGER NOT NULL,
+		PRIMARY KEY(type, mac, packfile_id)
+	) WITHOUT ROWID, STRICT;`,
 
-	`CREATE TABLE IF NOT EXISTS deleteds (
-		mac TEXT NOT NULL,
+	`CREATE TABLE IF NOT EXISTS coloured (
+		mac BLOB NOT NULL,
 		type INTEGER NOT NULL,
-		payload BLOB NOT NULL,
+		timestamp INTEGER NOT NULL,
 		UNIQUE(type, mac)
 	);`,
 
 	`CREATE TABLE IF NOT EXISTS configurations (
 		key TEXT NOT NULL PRIMARY KEY,
-		data BLOB NOT NULL
+		value BLOB NOT NULL,
+		created_at INTEGER NOT NULL
 	);`,
 }
 
-func NewSQLState(path string, ro bool) (*SQLState, error) {
+// Small scanner for objects.MAC so we avoid going through the []byte dance.
+type macScanner struct{ dst *objects.MAC }
+
+func (m macScanner) Scan(src any) error {
+	b, ok := src.([]byte)
+	if !ok {
+		return fmt.Errorf("mac: incompatible type %T", src)
+	}
+
+	if len(b) != len(m.dst) {
+		return fmt.Errorf("mac: wrong length %d expected %d", len(b), len(m.dst))
+	}
+
+	copy(m.dst[:], b)
+	return nil
+}
+
+// We can't use the state own type because it's a circular dep.
+type Blob struct {
+	MAC      objects.MAC
+	Type     resources.Type
+	Packfile objects.MAC
+	Offset   uint64
+	Length   uint32
+}
+
+type ColouredBlob struct {
+	MAC  objects.MAC
+	Type resources.Type
+	When time.Time
+}
+
+type Packfile struct {
+	MAC       objects.MAC
+	State     objects.MAC
+	Timestamp time.Time
+}
+
+func NewSQLState(path string, ro bool) (_ *SQLState, err error) {
 	db, err := sqlite.New(path, "state.db", &sqlite.Options{
 		DeleteOnClose: false,
 		Compressed:    true,
@@ -84,74 +171,137 @@ func NewSQLState(path string, ro bool) (*SQLState, error) {
 		return nil, err
 	}
 
+	self := SQLState{db: db}
+	defer func() {
+		if err != nil {
+			self.closeStmts()
+			db.Close()
+		}
+	}()
+
 	if ro {
 		// This should be ctx.MaxConcurrency, but this is an import cycle and
 		// breaking it is out of the scope.
 		db.SetMaxOpenConns(runtime.NumCPU())
-		db.SetMaxIdleConns(runtime.NumCPU() / 2)
+		db.SetMaxIdleConns(runtime.NumCPU())
+
 	}
 
-	return &SQLState{db, sync.RWMutex{}, make(map[objects.MAC]bool)}, nil
-}
-
-func (c *SQLState) NewBatch() StateBatch {
-	return &sqlStateBatch{c, make([]sDelta, 0)}
-}
-
-func (c *sqlStateBatch) Put([]byte, []byte) error {
-	panic("NOT IMPLEMENTED")
-}
-
-func (c *sqlStateBatch) Count() uint32 {
-	return uint32(len(c.deltas))
-}
-
-func (c *sqlStateBatch) Commit() error {
-	if len(c.deltas) == 0 {
-		return nil
-	}
-
-	tx, err := c.parent.db.Begin()
+	self.getDeltaQ, err = db.Prepare(`SELECT d.mac, d.type, p.mac, d.offset, d.length
+				FROM deltas d
+				INNER JOIN packfiles p ON p.id = d.packfile_id
+				WHERE d.mac = ? AND d.type = ?;`)
 	if err != nil {
-		return err
+		return nil, fmt.Errorf("failed to prepare getDelta query %w", err)
 	}
 
-	stmt, err := tx.Prepare(`INSERT OR IGNORE INTO deltas (mac, type, packfile, payload) VALUES (?, ?, ?, ?);`)
+	self.getDeltasByTypeQ, err = db.Prepare(`SELECT d.mac, d.type, p.mac, d.offset, d.length
+				FROM deltas d
+				INNER JOIN packfiles p ON p.id = d.packfile_id
+				WHERE d.type = ?;`)
 	if err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	defer stmt.Close()
-
-	for _, rec := range c.deltas {
-		if _, err := stmt.Exec(rec.mac, rec.typ, rec.pack, rec.payload); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
+		return nil, fmt.Errorf("failed to prepare getDeltasByType query %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return err
+	self.getAllDeltasQ, err = db.Prepare(`SELECT d.mac, d.type, p.mac, d.offset, d.length FROM deltas d
+				INNER JOIN packfiles p ON p.id = d.packfile_id;`)
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare getAllDeltas query %w", err)
 	}
 
-	c.deltas = nil
-	return nil
+	self.hasPackfileQ, err = db.Prepare("SELECT 1 FROM packfiles WHERE mac = ?;")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare hasPackfile query %w", err)
+	}
+
+	self.hasColouredQ, err = db.Prepare("SELECT 1 FROM coloured WHERE mac = ? AND type = ? LIMIT 1;")
+	if err != nil {
+		return nil, fmt.Errorf("failed to prepare hasColoured query %w", err)
+	}
+
+	return &self, nil
 }
 
-// States handling, mostly unused.
-func (c *SQLState) PutState(stateID objects.MAC, data []byte) error {
-	stateHex := hex.EncodeToString(stateID[:])
+func (c *SQLState) Begin() (*SQLStateTx, error) {
+	tx, err := c.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("SQLState failed to begin transaction %w", err)
+	}
 
-	_, err := c.db.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateHex, data)
+	st := &SQLStateTx{tx: tx, cache: newPackfileIDCache()}
+	st.putDeltaQ, err = tx.Prepare("INSERT OR IGNORE INTO deltas(mac, type, packfile_id, offset, length) VALUES(?, ?, ?, ?, ?);")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putDelta query %w", err)
+	}
+
+	st.putColouredQ, err = tx.Prepare("INSERT OR IGNORE INTO coloured(mac, type, timestamp) VALUES(?, ?, ?)")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
+	}
+
+	st.putPackfileRefQ, err = tx.Prepare("INSERT OR IGNORE INTO packfiles(mac) VALUES(?);")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putPackfileRef query %w", err)
+	}
+
+	st.putPackfileQ, err = tx.Prepare(`INSERT INTO packfiles(mac, state, timestamp) VALUES(?, ?, ?)
+									   ON CONFLICT(mac) DO UPDATE
+											SET state = excluded.state, timestamp = excluded.timestamp
+									   WHERE packfiles.state IS NULL;`)
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putPackfile query %w", err)
+	}
+
+	st.getPackfileIDQ, err = tx.Prepare("SELECT id FROM packfiles WHERE mac = ?; ")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
+	}
+
+	st.delDeltaQ, err = tx.Prepare(`DELETE FROM deltas
+									WHERE mac = ? AND type = ? AND packfile_id =
+									(SELECT id FROM packfiles WHERE mac = ?);`)
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delDelta query %w", err)
+	}
+
+	st.delColouredQ, err = tx.Prepare("DELETE FROM coloured WHERE mac = ? AND type = ?;")
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delColoured query %w", err)
+	}
+
+	st.delPackfileQ, err = tx.Prepare("DELETE FROM packfiles WHERE mac = ?;")
+
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delPackfile query %w", err)
+	}
+
+	st.delDeltasFromPackfileQ, err = tx.Prepare(`DELETE FROM deltas WHERE packfile_id =
+												 (SELECT id FROM packfiles WHERE mac = ?);`)
+	if err != nil {
+		tx.Rollback()
+		return nil, fmt.Errorf("failed to prepare delDeltasFromPackfile query %w", err)
+	}
+
+	return st, nil
+}
+
+func (st *SQLStateTx) PutState(stateID objects.MAC, data []byte) error {
+	_, err := st.tx.Exec("INSERT INTO states(mac, payload) VALUES(?, ?)", stateID[:], data)
 	return err
 }
 
-func (c *SQLState) HasState(stateID objects.MAC) (bool, error) {
-	stateHex := hex.EncodeToString(stateID[:])
-
+func (st *SQLStateTx) HasState(stateID objects.MAC) (bool, error) {
 	query := "SELECT 1 FROM states WHERE mac = ? LIMIT 1;"
 	var dummy int
-	err := c.db.QueryRow(query, stateHex).Scan(&dummy)
+	err := st.tx.QueryRow(query, stateID[:]).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -163,12 +313,72 @@ func (c *SQLState) HasState(stateID objects.MAC) (bool, error) {
 	return true, nil
 }
 
-func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
-	stateHex := hex.EncodeToString(stateID[:])
+func (st *SQLStateTx) PutDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC, offset uint64, length uint32) error {
+	var id int64
+	if v, ok := st.cache.Get(packfileMAC); ok {
+		id = v
+	} else {
+		if _, err := st.putPackfileRefQ.Exec(packfileMAC[:]); err != nil {
+			return err
+		}
 
+		if err := st.getPackfileIDQ.QueryRow(packfileMAC[:]).Scan(&id); err != nil {
+			return err
+		}
+
+		st.cache.Put(packfileMAC, id)
+	}
+
+	_, err := st.putDeltaQ.Exec(blobMAC[:], blobType, id, offset, length)
+
+	return err
+}
+
+func (st *SQLStateTx) PutColoured(blobType resources.Type, blobMAC objects.MAC, when time.Time) error {
+	_, err := st.putColouredQ.Exec(blobMAC[:], blobType, when.UnixNano())
+	return err
+}
+
+func (st *SQLStateTx) PutPackfile(packfileMAC, stateMAC objects.MAC, timestamp time.Time) error {
+	_, err := st.putPackfileQ.Exec(packfileMAC[:], stateMAC[:], timestamp.UnixNano())
+	return err
+}
+
+func (st *SQLStateTx) DelDelta(blobType resources.Type, blobMAC, packfileMAC objects.MAC) error {
+	_, err := st.delDeltaQ.Exec(blobMAC[:], blobType, packfileMAC[:])
+	return err
+}
+
+func (st *SQLStateTx) DelColoured(blobType resources.Type, blobMAC objects.MAC) error {
+	_, err := st.delColouredQ.Exec(blobMAC[:], blobType)
+	return err
+}
+
+func (st *SQLStateTx) DelPackfile(packfileMAC objects.MAC) error {
+	_, err := st.delPackfileQ.Exec(packfileMAC[:])
+
+	if err != nil {
+		return err
+	}
+
+	_, err = st.delDeltasFromPackfileQ.Exec(packfileMAC[:])
+	return err
+}
+
+func (st *SQLStateTx) Rollback() error {
+	return st.tx.Rollback()
+}
+
+func (st *SQLStateTx) Commit() error {
+	// Clear our cache in case the TX is re-used.
+	st.cache.Clear()
+	return st.tx.Commit()
+}
+
+func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 	query := "SELECT payload FROM states WHERE mac = ? LIMIT 1;"
 	var payload []byte
-	err := c.db.QueryRow(query, stateHex).Scan(&payload)
+	err := c.db.QueryRow(query, stateID[:]).Scan(&payload)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, err
@@ -182,8 +392,8 @@ func (c *SQLState) GetState(stateID objects.MAC) ([]byte, error) {
 
 func (c *SQLState) GetLatestState() (objects.MAC, error) {
 	query := "SELECT mac FROM states ORDER BY ROWID DESC LIMIT 1"
-	var strMac string
-	err := c.db.QueryRow(query).Scan(&strMac)
+	var mac objects.MAC
+	err := c.db.QueryRow(query).Scan(macScanner{&mac})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return objects.NilMac, nil
@@ -192,12 +402,7 @@ func (c *SQLState) GetLatestState() (objects.MAC, error) {
 		return objects.NilMac, err
 	}
 
-	mac, err := hex.DecodeString(strMac)
-	if err != nil {
-		return objects.NilMac, err
-	}
-
-	return objects.MAC(mac), nil
+	return mac, nil
 }
 
 func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
@@ -212,178 +417,83 @@ func (c *SQLState) GetStates() (map[objects.MAC][]byte, error) {
 
 	result := make(map[objects.MAC][]byte)
 	for rows.Next() {
-		var strMac string
+		var mac objects.MAC
 		var payload []byte
 
-		if err := rows.Scan(&strMac, &payload); err != nil {
+		if err := rows.Scan(macScanner{&mac}, &payload); err != nil {
 			return nil, err
 		}
 
-		mac, err := hex.DecodeString(strMac)
-		if err != nil {
-			return nil, err
-		}
-
-		result[objects.MAC(mac)] = payload
+		result[mac] = payload
 	}
 
-	return result, nil
+	return result, rows.Err()
 }
 
 func (c *SQLState) DelState(stateID objects.MAC) error {
-	stateHex := hex.EncodeToString(stateID[:])
-	_, err := c.db.Exec("DELETE FROM states WHERE mac = ?;", stateHex)
+	_, err := c.db.Exec("DELETE FROM states WHERE mac = ?;", stateID[:])
 
 	return err
 }
 
-// Deltas handling
-func (c *sqlStateBatch) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	packMACHex := hex.EncodeToString(packfile[:])
-	c.deltas = append(c.deltas, sDelta{blobMACHex, int(blobType), packMACHex, data})
-
-	c.parent.mtx.Lock()
-	c.parent.blob[blobCsum] = true
-	c.parent.mtx.Unlock()
-
-	return nil
-}
-
-func (c *SQLState) GetDelta(blobType resources.Type, blobCsum objects.MAC) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := `SELECT mac, payload
-					FROM deltas
-					WHERE mac = ? AND type = ?;
-				`
-
-		blobMACHex := hex.EncodeToString(blobCsum[:])
-		rows, err := c.db.Query(query, blobMACHex, blobType)
+// Internal helper, the layout of the query must follow the Scan obviously
+func (c *SQLState) getDeltas(query *sql.Stmt, args ...any) iter.Seq2[Blob, error] {
+	return func(yield func(Blob, error) bool) {
+		rows, err := query.Query(args...)
 		if err != nil {
-			// XXX :/
+			// We can't proceed here. Ideally this should be pre-iteration.
+			yield(Blob{}, err)
 			return
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
+		result := make([]Blob, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			b := Blob{}
 
-			if err := rows.Scan(&mac, &payload); err != nil {
-				// XXX: who the f designed that interface :(
+			if err := rows.Scan(macScanner{&b.MAC}, &b.Type, macScanner{&b.Packfile}, &b.Offset, &b.Length); err != nil {
+				if !yield(Blob{}, err) {
+					rows.Close()
+					return
+				}
+
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			result = append(result, b)
 		}
 		rows.Close()
 
-		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+		// partial result let the consummer choose to continue or not.
+		if err := rows.Err(); err != nil {
+			if !yield(Blob{}, err) {
 				return
 			}
 		}
 
-	}
-}
-
-func (c *SQLState) PutDelta(blobType resources.Type, blobCsum, packfile objects.MAC, data []byte) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	packMACHex := hex.EncodeToString(packfile[:])
-
-	_, err := c.db.Exec("INSERT OR IGNORE INTO deltas(mac, type, packfile, payload) VALUES(?, ?, ?, ?);", blobMACHex, blobType, packMACHex, data)
-
-	return err
-}
-
-func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload  FROM deltas WHERE type = ?;"
-
-		rows, err := c.db.Query(query, blobType)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var mac string
-			var payload []byte
-
-			if err := rows.Scan(&mac, &payload); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv{mac, payload})
-		}
-		rows.Close()
-
-		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+		for _, b := range result {
+			if !yield(b, nil) {
 				return
 			}
 		}
 	}
 }
 
-func (c *SQLState) GetDeltas() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM deltas;"
-
-		rows, err := c.db.Query(query)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var mac string
-			var payload []byte
-
-			if err := rows.Scan(&mac, &payload); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv{mac, payload})
-		}
-		rows.Close()
-
-		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
-				return
-			}
-		}
-	}
+func (c *SQLState) GetDelta(blobType resources.Type, blobMAC objects.MAC) iter.Seq2[Blob, error] {
+	return c.getDeltas(c.getDeltaQ, blobMAC[:], blobType)
 }
 
-func (c *SQLState) DelDelta(blobType resources.Type, blobCsum, packfileMAC objects.MAC) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	packMACHex := hex.EncodeToString(packfileMAC[:])
-	_, err := c.db.Exec("DELETE FROM deltas WHERE mac = ? AND type = ? AND packfile = ?;", blobMACHex, blobType, packMACHex)
-	return err
+func (c *SQLState) GetDeltasByType(blobType resources.Type) iter.Seq2[Blob, error] {
+	return c.getDeltas(c.getDeltasByTypeQ, blobType)
 }
 
-func (c *SQLState) PutColoured(blobType resources.Type, blobCsum objects.MAC, data []byte) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-
-	_, err := c.db.Exec("INSERT OR IGNORE INTO deleteds(mac, type, payload) VALUES(?, ?, ?)", blobMACHex, blobType, data)
-	return err
+func (c *SQLState) GetDeltas() iter.Seq2[Blob, error] {
+	return c.getDeltas(c.getAllDeltasQ)
 }
 
-func (c *SQLState) HasColoured(blobType resources.Type, blobCsum objects.MAC) (bool, error) {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-
-	query := "SELECT 1 FROM deleteds WHERE mac = ? AND type = ? LIMIT 1;"
+func (c *SQLState) HasColoured(blobType resources.Type, blobMAC objects.MAC) (bool, error) {
 	var dummy int
-	err := c.db.QueryRow(query, blobMACHex, blobType).Scan(&dummy)
+	err := c.hasColouredQ.QueryRow(blobMAC[:], blobType).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -395,93 +505,65 @@ func (c *SQLState) HasColoured(blobType resources.Type, blobCsum objects.MAC) (b
 	return true, nil
 }
 
-func (c *SQLState) GetColouredEntries() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM deleteds;"
+func (c *SQLState) getColouredEntries(query string, args ...any) iter.Seq2[ColouredBlob, error] {
+	return func(yield func(ColouredBlob, error) bool) {
 
-		rows, err := c.db.Query(query)
+		rows, err := c.db.Query(query, args...)
 		if err != nil {
+			// We can't proceed here. Ideally this should be pre-iteration.
+			yield(ColouredBlob{}, err)
 			return
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
+		result := make([]ColouredBlob, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			cb := ColouredBlob{}
+			var when int64
 
-			if err := rows.Scan(&mac, &payload); err != nil {
-				// XXX: who the f designed that interface :(
+			if err := rows.Scan(macScanner{&cb.MAC}, &cb.Type, &when); err != nil {
+				if !yield(ColouredBlob{}, err) {
+					rows.Close()
+					return
+				}
+
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			cb.When = time.Unix(0, when)
+
+			result = append(result, cb)
 		}
 		rows.Close()
 
-		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+		// partial result let the consummer choose to continue or not.
+		if err := rows.Err(); err != nil {
+			if !yield(ColouredBlob{}, err) {
+				return
+			}
+		}
+
+		for _, cb := range result {
+			if !yield(cb, nil) {
 				return
 			}
 		}
 	}
 }
 
-func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload  FROM deleteds WHERE type = ?;"
-
-		rows, err := c.db.Query(query, blobType)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
-		for rows.Next() {
-			var mac string
-			var payload []byte
-
-			if err := rows.Scan(&mac, &payload); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, kv{mac, payload})
-		}
-
-		rows.Close()
-
-		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
-				return
-			}
-		}
-	}
+func (c *SQLState) GetColouredEntries() iter.Seq2[ColouredBlob, error] {
+	query := "SELECT mac, type, timestamp FROM coloured ;"
+	return c.getColouredEntries(query)
 }
 
-func (c *SQLState) DelColoured(blobType resources.Type, blobCsum objects.MAC) error {
-	blobMACHex := hex.EncodeToString(blobCsum[:])
-	_, err := c.db.Exec("DELETE FROM deleteds WHERE mac = ? AND type = ?;", blobMACHex, blobType)
-	return err
+func (c *SQLState) GetColouredEntriesByType(blobType resources.Type) iter.Seq2[ColouredBlob, error] {
+	query := "SELECT mac, type, timestamp FROM coloured WHERE type = ?;"
+	return c.getColouredEntries(query, blobType)
 }
 
-// Packfile handling
-func (c *SQLState) PutPackfile(packfile objects.MAC, data []byte) error {
-	packMACHex := hex.EncodeToString(packfile[:])
-
-	_, err := c.db.Exec("INSERT OR IGNORE INTO packfiles(mac, payload) VALUES(?,  ?)", packMACHex, data)
-	return err
-}
-
-func (c *SQLState) HasPackfile(packfile objects.MAC) (bool, error) {
-	packMACHex := hex.EncodeToString(packfile[:])
-
-	query := "SELECT 1 FROM packfiles WHERE mac = ? LIMIT 1;"
+func (c *SQLState) HasPackfile(packfileMAC objects.MAC) (bool, error) {
 	var dummy int
-	err := c.db.QueryRow(query, packMACHex).Scan(&dummy)
+	err := c.hasPackfileQ.QueryRow(packfileMAC[:]).Scan(&dummy)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return false, nil
@@ -493,51 +575,47 @@ func (c *SQLState) HasPackfile(packfile objects.MAC) (bool, error) {
 	return true, nil
 }
 
-func (c *SQLState) DelPackfile(packfile objects.MAC) error {
-	packMACHex := hex.EncodeToString(packfile[:])
-	_, err := c.db.Exec("DELETE FROM packfiles WHERE mac = ?;", packMACHex)
-
-	if err != nil {
-		return err
-	}
-
-	// XXX: This is a big layer violation, but the common interface is getting
-	// out of hand. When we end up splitting the various State implementation
-	// the local state will deal with cascading deletion of packfiles into the
-	// blob it contained. For now we do it here to ease the implementation.
-	_, err = c.db.Exec("DELETE FROM deltas WHERE packfile = ?;", packMACHex)
-
-	return err
-}
-
-func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
-	return func(yield func(objects.MAC, []byte) bool) {
-		query := "SELECT mac, payload FROM packfiles;"
+func (c *SQLState) GetPackfiles() iter.Seq2[Packfile, error] {
+	return func(yield func(Packfile, error) bool) {
+		// Rows without a state are placeholders for deltas whose packfile entry
+		// was never ingested.
+		query := "SELECT p.mac, p.state, p.timestamp FROM packfiles p WHERE p.state IS NOT NULL;"
 
 		rows, err := c.db.Query(query)
 		if err != nil {
+			yield(Packfile{}, err)
 			return
 		}
 
 		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([]kv, 0)
+		result := make([]Packfile, 0)
 		for rows.Next() {
-			var mac string
-			var payload []byte
+			p := Packfile{}
+			var t int64
 
-			if err := rows.Scan(&mac, &payload); err != nil {
-				// XXX: who the f designed that interface :(
+			if err := rows.Scan(macScanner{&p.MAC}, macScanner{&p.State}, &t); err != nil {
+				if !yield(Packfile{}, err) {
+					rows.Close()
+					return
+				}
+
 				continue
 			}
 
-			result = append(result, kv{mac, payload})
+			p.Timestamp = time.Unix(0, t)
+			result = append(result, p)
 		}
-
 		rows.Close()
 
-		for _, r := range result {
-			mac, _ := hex.DecodeString(r.mac)
-			if !yield(objects.MAC(mac), r.data) {
+		// partial result let the consummer choose to continue or not.
+		if err := rows.Err(); err != nil {
+			if !yield(Packfile{}, err) {
+				return
+			}
+		}
+
+		for _, p := range result {
+			if !yield(p, nil) {
 				return
 			}
 		}
@@ -545,60 +623,40 @@ func (c *SQLState) GetPackfiles() iter.Seq2[objects.MAC, []byte] {
 }
 
 // Configuration handling
-func (c *SQLState) PutConfiguration(key string, data []byte) error {
-	_, err := c.db.Exec("INSERT INTO configurations(key, data) VALUES(?,  ?)", key, data)
+func (st *SQLStateTx) PutConfiguration(key string, value []byte, timestamp time.Time) error {
+	_, err := st.tx.Exec(`INSERT INTO configurations(key, value, created_at) VALUES(?, ?, ?)
+						  ON CONFLICT(key)
+						  DO UPDATE SET value = excluded.value, created_at = excluded.created_at
+						  WHERE excluded.created_at > configurations.created_at;`,
+		key, value, timestamp.UnixNano())
 	return err
 }
 
-func (c *SQLState) GetConfiguration(key string) ([]byte, error) {
-	query := "SELECT data FROM configurations WHERE key = ?"
-	var data []byte
-	if err := c.db.QueryRow(query, key).Scan(&data); err != nil {
-		return nil, err
+func (c *SQLState) GetConfiguration(key string) ([]byte, bool, error) {
+	query := "SELECT value FROM configurations WHERE key = ?"
+	var value []byte
+	if err := c.db.QueryRow(query, key).Scan(&value); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, false, nil
+		}
+		return nil, false, err
 	}
 
-	return data, nil
+	return value, true, nil
 }
 
-func (c *SQLState) GetConfigurations() iter.Seq[[]byte] {
-	return func(yield func([]byte) bool) {
-		query := "SELECT key, data FROM configurations;"
+func (c *SQLState) Close() error {
+	c.closeStmts()
+	return c.db.Close()
+}
 
-		rows, err := c.db.Query(query)
-		if err != nil {
-			return
-		}
-
-		// Normalize in memory, before yielding to avoid deadlocks in sqlite.
-		result := make([][]byte, 0)
-		for rows.Next() {
-			var key string
-			var data []byte
-
-			if err := rows.Scan(&key, &data); err != nil {
-				// XXX: who the f designed that interface :(
-				continue
-			}
-
-			result = append(result, data)
-		}
-
-		rows.Close()
-
-		for _, d := range result {
-			if !yield(d) {
-				return
-			}
+func (c *SQLState) closeStmts() {
+	for _, stmt := range []*sql.Stmt{
+		c.getDeltaQ, c.getDeltasByTypeQ, c.getAllDeltasQ, c.hasPackfileQ,
+		c.hasColouredQ,
+	} {
+		if stmt != nil {
+			stmt.Close()
 		}
 	}
-}
-
-// Those two are only to construct deltas, when working with the local state we
-// do the actual deletion.
-func (c *SQLState) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) error {
-	panic("PutDeleted is not to be used with local state")
-}
-
-func (c *SQLState) GetDeletedEntries() iter.Seq[[]byte] {
-	panic("PutDeleted is not to be used with local state")
 }

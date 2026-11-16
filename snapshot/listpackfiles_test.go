@@ -58,9 +58,11 @@ func listPackfiles(t *testing.T, snap *snapshot.Snapshot) (map[objects.MAC]int, 
 	return seen, errs
 }
 
-func allPackfiles(repo *repository.Repository) map[objects.MAC]struct{} {
+func allPackfiles(t *testing.T, repo *repository.Repository) map[objects.MAC]struct{} {
+	t.Helper()
 	all := make(map[objects.MAC]struct{})
-	for pf := range repo.ListPackfiles() {
+	for pf, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		all[pf] = struct{}{}
 	}
 	return all
@@ -98,7 +100,7 @@ func TestListPackfilesReachesEveryBlobOnce(t *testing.T) {
 	seen, errs := listPackfiles(t, snap)
 	require.Empty(t, errs)
 
-	all := allPackfiles(repo)
+	all := allPackfiles(t, repo)
 	require.Len(t, seen, len(all))
 	for pf := range all {
 		require.Equal(t, 1, seen[pf], "packfile %x", pf)
@@ -131,7 +133,7 @@ func TestListPackfilesMissingObject(t *testing.T) {
 	require.Len(t, errs, 1)
 	require.ErrorContains(t, errs[0], fmt.Sprintf("%x", entry.Object))
 
-	for pf := range allPackfiles(repo) {
+	for pf := range allPackfiles(t, repo) {
 		if _, ok := unreachable[pf]; ok {
 			require.NotContains(t, seen, pf)
 		} else {

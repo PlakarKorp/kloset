@@ -2,6 +2,7 @@ package caching_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/PlakarKorp/kloset/caching"
 	"github.com/PlakarKorp/kloset/objects"
@@ -17,6 +18,61 @@ func newSQLState(t *testing.T) *caching.SQLState {
 	return st
 }
 
+// inTx runs fn in its own transaction and commits it: writes to the state
+// cache only go through transactions.
+func inTx(t *testing.T, st *caching.SQLState, fn func(tx *caching.SQLStateTx) error) {
+	t.Helper()
+
+	tx, err := st.Begin()
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.NoError(t, fn(tx))
+	require.NoError(t, tx.Commit())
+}
+
+func hasState(st *caching.SQLState, mac objects.MAC) (bool, error) {
+	tx, err := st.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback()
+
+	return tx.HasState(mac)
+}
+
+func TestSQLStateRollbackDiscardsWrites(t *testing.T) {
+	st := newSQLState(t)
+
+	stateMAC := objects.MAC{0x01}
+	blobMAC := objects.MAC{0x02}
+	packMAC := objects.MAC{0x03}
+
+	tx, err := st.Begin()
+	require.NoError(t, err)
+	require.NoError(t, tx.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, 0, 10))
+	require.NoError(t, tx.PutPackfile(packMAC, stateMAC, time.Now()))
+	require.NoError(t, tx.PutColoured(resources.RT_SNAPSHOT, blobMAC, time.Now()))
+	require.NoError(t, tx.PutState(stateMAC, []byte("metadata")))
+	require.NoError(t, tx.Rollback())
+
+	ok, err := hasState(st, stateMAC)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	ok, err = st.HasPackfile(packMAC)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	ok, err = st.HasColoured(resources.RT_SNAPSHOT, blobMAC)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	for range st.GetDeltas() {
+		t.Fatal("rolled back delta is visible")
+	}
+}
+
 func TestSQLStateStateRoundTrip(t *testing.T) {
 	st := newSQLState(t)
 
@@ -24,10 +80,10 @@ func TestSQLStateStateRoundTrip(t *testing.T) {
 	data := []byte("state payload")
 
 	// Put
-	require.NoError(t, st.PutState(mac, data))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.PutState(mac, data) })
 
 	// Has
-	ok, err := st.HasState(mac)
+	ok, err := hasState(st, mac)
 	require.NoError(t, err)
 	require.True(t, ok)
 
@@ -50,7 +106,7 @@ func TestSQLStateStateRoundTrip(t *testing.T) {
 	// Del
 	require.NoError(t, st.DelState(mac))
 
-	ok, err = st.HasState(mac)
+	ok, err = hasState(st, mac)
 	require.NoError(t, err)
 	require.False(t, ok)
 }
@@ -63,63 +119,42 @@ func TestSQLStateGetLatestStateEmpty(t *testing.T) {
 	require.Equal(t, objects.NilMac, latest)
 }
 
-func TestSQLStateBatchPutDeltaCommit(t *testing.T) {
-	st := newSQLState(t)
-
-	blobMAC := objects.MAC{0xaa}
-	packMAC := objects.MAC{0xbb}
-	payload := []byte("delta data")
-
-	batch := st.NewBatch()
-	require.NoError(t, batch.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, payload))
-	require.Equal(t, uint32(1), batch.Count())
-	require.NoError(t, batch.Commit())
-
-	// Verify via GetDelta
-	found := false
-	for _, got := range st.GetDelta(resources.RT_CHUNK, blobMAC) {
-		require.Equal(t, payload, got)
-		found = true
-	}
-	require.True(t, found)
-}
-
-func TestSQLStateBatchEmptyCommit(t *testing.T) {
-	st := newSQLState(t)
-	batch := st.NewBatch()
-	require.Equal(t, uint32(0), batch.Count())
-	require.NoError(t, batch.Commit())
-}
-
 func TestSQLStateDeltaOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	blobMAC := objects.MAC{0x01}
 	packMAC := objects.MAC{0x02}
-	data := []byte("delta payload")
 
 	// Direct PutDelta
-	require.NoError(t, st.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, data))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.PutDelta(resources.RT_CHUNK, blobMAC, packMAC, 42, 1337) })
 
-	// GetDeltasByType
+	// GetDeltasByType round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetDeltasByType(resources.RT_CHUNK) {
+	for b, err := range st.GetDeltasByType(resources.RT_CHUNK) {
+		require.NoError(t, err)
+		require.Equal(t, blobMAC, b.MAC)
+		require.Equal(t, resources.RT_CHUNK, b.Type)
+		require.Equal(t, packMAC, b.Packfile)
+		require.Equal(t, uint64(42), b.Offset)
+		require.Equal(t, uint32(1337), b.Length)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// GetDeltas
 	count = 0
-	for _, _ = range st.GetDeltas() {
+	for _, err := range st.GetDeltas() {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// DelDelta
-	require.NoError(t, st.DelDelta(resources.RT_CHUNK, blobMAC, packMAC))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.DelDelta(resources.RT_CHUNK, blobMAC, packMAC) })
 
 	count = 0
-	for _, _ = range st.GetDeltas() {
+	for _, err := range st.GetDeltas() {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 0, count)
@@ -129,7 +164,7 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	blobMAC := objects.MAC{0xcc}
-	data := []byte("coloured data")
+	when := time.Unix(0, 1700000000000000000).UTC()
 
 	// Not present yet
 	ok, err := st.HasColoured(resources.RT_CHUNK, blobMAC)
@@ -137,46 +172,97 @@ func TestSQLStateColouredOperations(t *testing.T) {
 	require.False(t, ok)
 
 	// Put
-	require.NoError(t, st.PutColoured(resources.RT_CHUNK, blobMAC, data))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.PutColoured(resources.RT_CHUNK, blobMAC, when) })
 
 	ok, err = st.HasColoured(resources.RT_CHUNK, blobMAC)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// GetColouredEntries
+	// GetColouredEntries round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetColouredEntries() {
+	for cb, err := range st.GetColouredEntries() {
+		require.NoError(t, err)
+		require.Equal(t, blobMAC, cb.MAC)
+		require.Equal(t, resources.RT_CHUNK, cb.Type)
+		require.Equal(t, when.UnixNano(), cb.When.UnixNano())
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// GetColouredEntriesByType
 	count = 0
-	for _, _ = range st.GetColouredEntriesByType(resources.RT_CHUNK) {
+	for _, err := range st.GetColouredEntriesByType(resources.RT_CHUNK) {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// Wrong type returns nothing
 	count = 0
-	for _, _ = range st.GetColouredEntriesByType(resources.RT_PACKFILE) {
+	for _, err := range st.GetColouredEntriesByType(resources.RT_PACKFILE) {
+		require.NoError(t, err)
 		count++
 	}
 	require.Equal(t, 0, count)
 
 	// Del
-	require.NoError(t, st.DelColoured(resources.RT_CHUNK, blobMAC))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.DelColoured(resources.RT_CHUNK, blobMAC) })
 
 	ok, err = st.HasColoured(resources.RT_CHUNK, blobMAC)
 	require.NoError(t, err)
 	require.False(t, ok)
 }
 
+// TestSQLStatePackfileIDsInterleaved writes deltas for two packfiles in an
+// interleaved order within one transaction, so ids come both from the
+// database (first sighting) and from the per-transaction cache. Every delta
+// must come back attached to the right packfile.
+func TestSQLStatePackfileIDsInterleaved(t *testing.T) {
+	st := newSQLState(t)
+
+	packA := objects.MAC{0xaa}
+	packB := objects.MAC{0xbb}
+	want := map[objects.MAC]objects.MAC{
+		{0x01}: packA,
+		{0x02}: packB,
+		{0x03}: packA,
+		{0x04}: packB,
+		{0x05}: packA,
+	}
+
+	inTx(t, st, func(tx *caching.SQLStateTx) error {
+		for _, blob := range []objects.MAC{{0x01}, {0x02}, {0x03}, {0x04}, {0x05}} {
+			if err := tx.PutDelta(resources.RT_CHUNK, blob, want[blob], 0, 1); err != nil {
+				return err
+			}
+		}
+		if err := tx.PutPackfile(packB, objects.MAC{0xff}, time.Now()); err != nil {
+			return err
+		}
+		return tx.PutPackfile(packA, objects.MAC{0xff}, time.Now())
+	})
+
+	got := map[objects.MAC]objects.MAC{}
+	for b, err := range st.GetDeltas() {
+		require.NoError(t, err)
+		got[b.MAC] = b.Packfile
+	}
+	require.Equal(t, want, got)
+
+	packs := map[objects.MAC]bool{}
+	for p, err := range st.GetPackfiles() {
+		require.NoError(t, err)
+		packs[p.MAC] = true
+	}
+	require.Equal(t, map[objects.MAC]bool{packA: true, packB: true}, packs)
+}
+
 func TestSQLStatePackfileOperations(t *testing.T) {
 	st := newSQLState(t)
 
 	packMAC := objects.MAC{0xde}
-	data := []byte("packfile data")
+	stateMAC := objects.MAC{0xad}
+	when := time.Unix(0, 1700000000000000000).UTC()
 
 	// Not present
 	ok, err := st.HasPackfile(packMAC)
@@ -184,21 +270,25 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 	require.False(t, ok)
 
 	// Put
-	require.NoError(t, st.PutPackfile(packMAC, data))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.PutPackfile(packMAC, stateMAC, when) })
 
 	ok, err = st.HasPackfile(packMAC)
 	require.NoError(t, err)
 	require.True(t, ok)
 
-	// GetPackfiles
+	// GetPackfiles round-trips the typed columns
 	count := 0
-	for _, _ = range st.GetPackfiles() {
+	for p, err := range st.GetPackfiles() {
+		require.NoError(t, err)
+		require.Equal(t, packMAC, p.MAC)
+		require.Equal(t, stateMAC, p.State)
+		require.Equal(t, when.UnixNano(), p.Timestamp.UnixNano())
 		count++
 	}
 	require.Equal(t, 1, count)
 
 	// DelPackfile (also cascades deltas for that packfile)
-	require.NoError(t, st.DelPackfile(packMAC))
+	inTx(t, st, func(tx *caching.SQLStateTx) error { return tx.DelPackfile(packMAC) })
 
 	ok, err = st.HasPackfile(packMAC)
 	require.NoError(t, err)
@@ -208,32 +298,49 @@ func TestSQLStatePackfileOperations(t *testing.T) {
 func TestSQLStateConfigurationOperations(t *testing.T) {
 	st := newSQLState(t)
 
-	// Put and Get
-	require.NoError(t, st.PutConfiguration("key1", []byte("value1")))
-	require.NoError(t, st.PutConfiguration("key2", []byte("value2")))
-
-	got, err := st.GetConfiguration("key1")
-	require.NoError(t, err)
-	require.Equal(t, []byte("value1"), got)
-
-	// GetConfigurations iterates all
-	count := 0
-	for range st.GetConfigurations() {
-		count++
+	t0 := time.Unix(0, 1700000000000000000)
+	put := func(key, value string, when time.Time) {
+		t.Helper()
+		inTx(t, st, func(tx *caching.SQLStateTx) error {
+			return tx.PutConfiguration(key, []byte(value), when)
+		})
 	}
-	require.Equal(t, 2, count)
-}
+	get := func(key string) ([]byte, bool) {
+		t.Helper()
+		value, found, err := st.GetConfiguration(key)
+		require.NoError(t, err)
+		return value, found
+	}
 
-func TestSQLStatePanics(t *testing.T) {
-	st := newSQLState(t)
+	// Missing key.
+	_, found := get("key1")
+	require.False(t, found)
 
-	require.Panics(t, func() {
-		_ = st.PutDeleted(0, objects.MAC{}, nil)
-	})
-	require.Panics(t, func() {
-		for range st.GetDeletedEntries() {
-		}
-	})
+	put("key1", "value1", t0)
+	put("key2", "value2", t0)
+
+	value, found := get("key1")
+	require.True(t, found)
+	require.Equal(t, []byte("value1"), value)
+
+	value, found = get("key2")
+	require.True(t, found)
+	require.Equal(t, []byte("value2"), value)
+
+	// A newer entry replaces the stored one.
+	put("key1", "newer", t0.Add(time.Hour))
+	value, _ = get("key1")
+	require.Equal(t, []byte("newer"), value)
+
+	// An older entry is ignored.
+	put("key1", "older", t0)
+	value, _ = get("key1")
+	require.Equal(t, []byte("newer"), value)
+
+	// An entry with the same timestamp is ignored too.
+	put("key1", "same-time", t0.Add(time.Hour))
+	value, _ = get("key1")
+	require.Equal(t, []byte("newer"), value)
 }
 
 func TestSQLStateReadOnly(t *testing.T) {
@@ -242,7 +349,9 @@ func TestSQLStateReadOnly(t *testing.T) {
 	// First create the database in write mode.
 	st, err := caching.NewSQLState(dir, false)
 	require.NoError(t, err)
-	require.NoError(t, st.PutPackfile(objects.MAC{0x01}, []byte("pack")))
+	inTx(t, st, func(tx *caching.SQLStateTx) error {
+		return tx.PutPackfile(objects.MAC{0x01}, objects.MAC{0x02}, time.Now())
+	})
 
 	// Open read-only.
 	ro, err := caching.NewSQLState(dir, true)

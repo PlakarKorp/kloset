@@ -14,7 +14,8 @@ func TestListBlobs(t *testing.T) {
 	reqs := chunkRequests(t, repo, "/a.txt", "/b.txt")
 
 	packfiles := make(map[objects.MAC]struct{})
-	for mac := range repo.ListPackfiles() {
+	for mac, err := range repo.ListPackfiles() {
+		require.NoError(t, err)
 		packfiles[mac] = struct{}{}
 	}
 	require.NotEmpty(t, packfiles)

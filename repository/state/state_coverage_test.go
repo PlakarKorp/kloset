@@ -8,99 +8,47 @@ import (
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/versioning"
-	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 )
 
-// TestSetConfigurationOverwriteNewer exercises the
-// "oldCe.CreatedAt.Before(ce.CreatedAt)" branch of insertOrUpdateConfiguration:
-// after seeding an older entry, a newer SetConfiguration call replaces it.
-func TestSetConfigurationOverwriteNewer(t *testing.T) {
-	st, cache := newStateWithCache(t)
+// configStream serializes a delta state carrying a single configuration entry.
+func configStream(t *testing.T, key, value string, when time.Time) *bytes.Buffer {
+	t.Helper()
 
-	older := ConfigurationEntry{
-		Key:       "k",
-		Value:     []byte("older"),
-		CreatedAt: time.Now().Add(-1 * time.Hour),
-	}
-	require.NoError(t, cache.PutConfiguration(older.Key, older.ToBytes()))
+	src, sc := newDeltaState(t)
+	ce := ConfigurationEntry{Key: key, Value: []byte(value), CreatedAt: when}
+	require.NoError(t, sc.PutConfiguration(ce.Key, ce.ToBytes()))
 
-	// Now SetConfiguration writes a newer entry; the "newer" branch overwrites.
-	require.NoError(t, st.SetConfiguration("k", []byte("newer")))
-
-	got, err := cache.GetConfiguration("k")
-	require.NoError(t, err)
-	ce, err := ConfigurationEntryFromBytes(got)
-	require.NoError(t, err)
-	require.Equal(t, []byte("newer"), ce.Value)
+	var buf bytes.Buffer
+	require.NoError(t, src.SerializeToStream(&buf))
+	return &buf
 }
 
-// TestSetConfigurationKeepsOlder exercises the "no overwrite" branch:
-// when the stored entry is newer than the incoming one, insertOrUpdate keeps
-// the stored value.
-func TestSetConfigurationKeepsOlder(t *testing.T) {
-	st, cache := newStateWithCache(t)
+// TestMergeStateConfigurationNewestWins merges configuration entries for the
+// same key out of order: whatever the merge order, the aggregate keeps the
+// most recent one, and a merge carrying an older entry doesn't overwrite it.
+func TestMergeStateConfigurationNewestWins(t *testing.T) {
+	st, cache := newAggregate(t)
+	ver := versioning.FromString("1.1.0")
+	t0 := time.Unix(0, 1700000000000000000)
 
-	// Seed cache with a future-dated entry so subsequent SetConfiguration
-	// won't replace it.
-	future := ConfigurationEntry{
-		Key:       "k",
-		Value:     []byte("future"),
-		CreatedAt: time.Now().Add(1 * time.Hour),
-	}
-	require.NoError(t, cache.PutConfiguration(future.Key, future.ToBytes()))
+	require.NoError(t, st.MergeState(objects.MAC{0x01}, configStream(t, "k", "middle", t0), ver))
+	require.NoError(t, st.MergeState(objects.MAC{0x02}, configStream(t, "k", "newest", t0.Add(time.Hour)), ver))
+	require.NoError(t, st.MergeState(objects.MAC{0x03}, configStream(t, "k", "oldest", t0.Add(-time.Hour)), ver))
 
-	require.NoError(t, st.SetConfiguration("k", []byte("now")))
-
-	got, err := cache.GetConfiguration("k")
+	value, found, err := cache.GetConfiguration("k")
 	require.NoError(t, err)
-	ce, err := ConfigurationEntryFromBytes(got)
-	require.NoError(t, err)
-	require.Equal(t, []byte("future"), ce.Value)
-}
-
-// TestListSnapshotsWithMissingPackfile exercises ListSnapshots's continue
-// branch when the packfile referenced by a delta is not in the cache.
-func TestListSnapshotsWithMissingPackfile(t *testing.T) {
-	st, cache := newStateWithCache(t)
-
-	pfMissing := objects.MAC{0xAA}
-	pfPresent := objects.MAC{0xBB}
-
-	// Two snapshot delta entries — one referring to a packfile in the
-	// cache, one to a packfile that isn't.
-	deltaMissing := DeltaEntry{
-		Type:     resources.RT_SNAPSHOT,
-		Blob:     objects.MAC{0x01},
-		Location: Location{Packfile: pfMissing},
-	}
-	deltaPresent := DeltaEntry{
-		Type:     resources.RT_SNAPSHOT,
-		Blob:     objects.MAC{0x02},
-		Location: Location{Packfile: pfPresent},
-	}
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaMissing.Blob, pfMissing, deltaMissing.ToBytes()))
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, deltaPresent.Blob, pfPresent, deltaPresent.ToBytes()))
-
-	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf-data")))
-
-	// ListSnapshots should produce exactly the entry whose packfile is
-	// present in the cache. The mockStateCache.GetDelta iterator yields
-	// all deltas regardless of key parsing, so order is not deterministic.
-	count := 0
-	for range st.ListSnapshots() {
-		count++
-	}
-	require.GreaterOrEqual(t, count, 0)
+	require.True(t, found)
+	require.Equal(t, []byte("newest"), value)
 }
 
 // TestListSnapshotsSkipsColoured exercises the path where a snapshot has been
 // coloured (marked deleted) — it should be skipped by ListSnapshots.
 func TestListSnapshotsSkipsColoured(t *testing.T) {
-	st, cache := newStateWithCache(t)
+	st, cache := newAggregate(t)
 
 	pf := objects.MAC{0xCC}
-	require.NoError(t, cache.PutPackfile(pf, []byte("pf")))
+	require.NoError(t, viaTx(t, cache).PutPackfile(pf, objects.NilMac, time.Now()))
 
 	snapID := objects.MAC{0xDD}
 	delta := DeltaEntry{
@@ -108,83 +56,26 @@ func TestListSnapshotsSkipsColoured(t *testing.T) {
 		Blob:     snapID,
 		Location: Location{Packfile: pf},
 	}
-	require.NoError(t, cache.PutDelta(resources.RT_SNAPSHOT, snapID, pf, delta.ToBytes()))
+	require.NoError(t, viaTx(t, cache).PutDelta(resources.RT_SNAPSHOT, snapID, pf, delta.Location.Offset, delta.Location.Length))
 
-	// Mark the snapshot as coloured (deleted).
-	require.NoError(t, st.ColourResource(resources.RT_SNAPSHOT, snapID))
-
-	for range st.ListSnapshots() {
-		// We don't strongly assert non-iteration here because the mock's
-		// HasColoured may return false for various reasons; the point is
-		// to execute the coloured-check branch.
-	}
-}
-
-// TestListObjectsOfTypeMixed exercises ListObjectsOfType including the
-// missing packfile continue branch.
-func TestListObjectsOfTypeMixed(t *testing.T) {
-	st, cache := newStateWithCache(t)
-
-	pfPresent := objects.MAC{0x33}
-	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf")))
-
-	deltaWithPf := DeltaEntry{
-		Type:     resources.RT_OBJECT,
-		Blob:     objects.MAC{0x44},
-		Location: Location{Packfile: pfPresent},
-	}
-	deltaWithoutPf := DeltaEntry{
-		Type:     resources.RT_OBJECT,
-		Blob:     objects.MAC{0x55},
-		Location: Location{Packfile: objects.MAC{0xEF}},
-	}
-	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, deltaWithPf.Blob, pfPresent, deltaWithPf.ToBytes()))
-	require.NoError(t, cache.PutDelta(resources.RT_OBJECT, deltaWithoutPf.Blob, deltaWithoutPf.Location.Packfile, deltaWithoutPf.ToBytes()))
+	// Mark the snapshot as coloured (deleted); the aggregate receives coloured
+	// entries via merge, so seed the cache directly.
+	colourInCache(t, cache, resources.RT_SNAPSHOT, snapID)
 
 	count := 0
-	for range st.ListObjectsOfType(resources.RT_OBJECT) {
+	for _, err := range st.ListSnapshots() {
+		require.NoError(t, err)
 		count++
 	}
-	require.GreaterOrEqual(t, count, 0)
-}
-
-// TestListOrphanDeltasWithMixedState seeds both present and missing-packfile
-// deltas; ListOrphanDeltas should only emit those whose packfile is absent.
-func TestListOrphanDeltasWithMixedState(t *testing.T) {
-	st, cache := newStateWithCache(t)
-
-	pfPresent := objects.MAC{0xA1}
-	require.NoError(t, cache.PutPackfile(pfPresent, []byte("pf")))
-
-	orphan := DeltaEntry{
-		Type:     resources.RT_CHUNK,
-		Blob:     objects.MAC{0x9F},
-		Location: Location{Packfile: objects.MAC{0xFA}},
-	}
-	healthy := DeltaEntry{
-		Type:     resources.RT_CHUNK,
-		Blob:     objects.MAC{0x8E},
-		Location: Location{Packfile: pfPresent},
-	}
-	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, orphan.Blob, orphan.Location.Packfile, orphan.ToBytes()))
-	require.NoError(t, cache.PutDelta(resources.RT_CHUNK, healthy.Blob, pfPresent, healthy.ToBytes()))
-
-	count := 0
-	for range st.ListOrphanDeltas() {
-		count++
-	}
-	require.GreaterOrEqual(t, count, 0)
+	require.Zero(t, count)
 }
 
 // TestSerializeDeserializeAllEntryTypes drives a complete round-trip of every
-// entry type the on-stream format supports, so both SerializeToStream and
-// deserializeFromStream cover the per-entry branches (DELETE, LOCATIONS,
-// COLOURED, PACKFILE, CONFIGURATION, METADATA).
+// entry type the on-stream format supports, so both State.SerializeToStream
+// and LocalState.deserializeFromStream cover the per-entry branches (DELETE,
+// LOCATIONS, COLOURED, PACKFILE, CONFIGURATION, METADATA).
 func TestSerializeDeserializeAllEntryTypes(t *testing.T) {
-	cache := newMockStateCache()
-	src, err := NewLocalState(cache)
-	require.NoError(t, err)
-	src.Metadata.Serial = uuid.New()
+	src, srcCache := newDeltaState(t)
 
 	// LOCATIONS / delta
 	require.NoError(t, src.PutDelta(&DeltaEntry{
@@ -204,25 +95,23 @@ func TestSerializeDeserializeAllEntryTypes(t *testing.T) {
 	require.NoError(t, src.DelDelta(resources.RT_CHUNK, objects.MAC{0xDE}, objects.MAC{0xAD}))
 
 	// CONFIGURATION
-	require.NoError(t, src.SetConfiguration("ck", []byte("cv")))
+	ce := ConfigurationEntry{Key: "ck", Value: []byte("cv"), CreatedAt: time.Now()}
+	require.NoError(t, srcCache.PutConfiguration(ce.Key, ce.ToBytes()))
 
 	var buf bytes.Buffer
 	require.NoError(t, src.SerializeToStream(&buf))
 
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
+	dst, _ := newAggregate(t)
+	mt, err := ingestMeta(dst, &buf)
 	require.NoError(t, err)
-	require.NoError(t, dst.deserializeFromStream(&buf))
-	require.Equal(t, src.Metadata.Serial, dst.Metadata.Serial)
+	require.Equal(t, src.Metadata.Serial, mt.Serial)
 }
 
 // TestDeserializeFromStreamShortHeader feeds too few bytes so reading the
 // state header returns an error.
 func TestDeserializeFromStreamShortHeader(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
-	require.Error(t, st.deserializeFromStream(bytes.NewReader(make([]byte, 5))))
+	st, _ := newAggregate(t)
+	require.Error(t, ingest(st, bytes.NewReader(make([]byte, 5))))
 }
 
 // TestDeserializeFromStreamBadEntryLength constructs a header plus an entry
@@ -236,10 +125,8 @@ func TestDeserializeFromStreamBadEntryLength(t *testing.T) {
 	// Wrong length (0).
 	buf.Write([]byte{0, 0, 0, 0})
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
-	require.Error(t, st.deserializeFromStream(buf))
+	st, _ := newAggregate(t)
+	require.Error(t, ingest(st, buf))
 }
 
 // TestDeserializeFromStreamUnknownEntryType writes an unrecognised entry
@@ -257,10 +144,8 @@ func TestDeserializeFromStreamUnknownEntryType(t *testing.T) {
 	buf.Write(make([]byte, 8))    // timestamp
 	buf.Write(make([]byte, 16))   // serial
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
-	require.NoError(t, st.deserializeFromStream(buf))
+	st, _ := newAggregate(t)
+	require.NoError(t, ingest(st, buf))
 }
 
 // TestDeserializeFromStreamV100AllEntryTypes feeds a hand-rolled v1.0.0
@@ -314,14 +199,12 @@ func TestDeserializeFromStreamV100AllEntryTypes(t *testing.T) {
 
 	// METADATA terminator + fields
 	buf.WriteByte(byte(ET_METADATA))
-	writeUint32LE(buf, 0)            // version
-	writeUint64LE(buf, uint64(0))    // timestamp
-	buf.Write(make([]byte, 16))      // serial
+	writeUint32LE(buf, 0)         // version
+	writeUint64LE(buf, uint64(0)) // timestamp
+	buf.Write(make([]byte, 16))   // serial
 
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
-	require.NoError(t, st.deserializeFromStreamv100(buf))
+	st, _ := newAggregate(t)
+	require.NoError(t, ingestV100(st, buf))
 }
 
 func writeUint32LE(buf *bytes.Buffer, v uint32) {
@@ -340,9 +223,7 @@ func writeUint64LE(buf *bytes.Buffer, v uint64) {
 // TestMergeFromCachePopulated exercises mergeFromCache with all four cache
 // categories populated, so each loop body in the merge function runs.
 func TestMergeFromCachePopulated(t *testing.T) {
-	srcCache := newMockStateCache()
-	src, err := NewLocalState(srcCache)
-	require.NoError(t, err)
+	src, srcCache := newDeltaState(t)
 
 	require.NoError(t, src.PutDelta(&DeltaEntry{
 		Type: resources.RT_OBJECT, Blob: objects.MAC{0x01},
@@ -350,39 +231,34 @@ func TestMergeFromCachePopulated(t *testing.T) {
 	}))
 	require.NoError(t, src.ColourResource(resources.RT_OBJECT, objects.MAC{0x02}))
 	require.NoError(t, src.PutPackfile(objects.MAC{0x03}, objects.MAC{0x30}))
-	require.NoError(t, src.SetConfiguration("mfk", []byte("mfv")))
+	ce := ConfigurationEntry{Key: "mfk", Value: []byte("mfv"), CreatedAt: time.Now()}
+	require.NoError(t, srcCache.PutConfiguration(ce.Key, ce.ToBytes()))
 
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
+	dst, _ := newAggregate(t)
 
-	require.NoError(t, dst.mergeFromCache(srcCache))
+	require.NoError(t, ingestCache(dst, srcCache))
 }
 
 // TestMergeStateFromCacheAlreadyHas exercises the early-return branch of
 // MergeStateFromCache when HasState already returns true.
 func TestMergeStateFromCacheAlreadyHas(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, cache := newAggregate(t)
 
 	stateID := objects.MAC{0xCA, 0xFE}
 	mt := Metadata{Version: versioning.FromString(VERSION), Timestamp: time.Now()}
 	mtBytes, err := mt.ToBytes()
 	require.NoError(t, err)
-	require.NoError(t, cache.PutState(stateID, mtBytes))
+	require.NoError(t, viaTx(t, cache).PutState(stateID, mtBytes))
 
-	src := newMockStateCache()
+	src := newScanCache(t)
 	require.NoError(t, st.MergeStateFromCache(stateID, src))
 }
 
 // TestSerializeToStreamWithAllEntryTypes follows up by triggering each
-// SerializeToStream branch (DELETE / LOCATIONS / COLOURED / PACKFILE /
+// State.SerializeToStream branch (DELETE / LOCATIONS / COLOURED / PACKFILE /
 // CONFIGURATION) with a non-empty cache.
 func TestSerializeToStreamWithAllEntryTypes(t *testing.T) {
-	cache := newMockStateCache()
-	st, err := NewLocalState(cache)
-	require.NoError(t, err)
+	st, cache := newDeltaState(t)
 
 	require.NoError(t, st.PutDelta(&DeltaEntry{
 		Type: resources.RT_OBJECT, Blob: objects.MAC{0x01},
@@ -391,19 +267,14 @@ func TestSerializeToStreamWithAllEntryTypes(t *testing.T) {
 	require.NoError(t, st.ColourResource(resources.RT_OBJECT, objects.MAC{0x02}))
 	require.NoError(t, st.PutPackfile(objects.MAC{0x03}, objects.MAC{0x30}))
 	require.NoError(t, st.DelDelta(resources.RT_OBJECT, objects.MAC{0x04}, objects.MAC{0x40}))
-	require.NoError(t, st.SetConfiguration("sk", []byte("sv")))
+	ce := ConfigurationEntry{Key: "sk", Value: []byte("sv"), CreatedAt: time.Now()}
+	require.NoError(t, cache.PutConfiguration(ce.Key, ce.ToBytes()))
 
 	var buf bytes.Buffer
 	require.NoError(t, st.SerializeToStream(&buf))
 	require.NotZero(t, buf.Len())
 
 	// And read it back too, so deserializeFromStream gets all branches.
-	dstCache := newMockStateCache()
-	dst, err := NewLocalState(dstCache)
-	require.NoError(t, err)
-	require.NoError(t, dst.deserializeFromStream(&buf))
-
-	// also ensure the FromStream public wrapper still works
-	st2 := time.Now()
-	_ = st2
+	dst, _ := newAggregate(t)
+	require.NoError(t, ingest(dst, &buf))
 }
