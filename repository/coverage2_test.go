@@ -110,7 +110,7 @@ func TestGetStateCorrupt(t *testing.T) {
 	// store handle so GetState's read path encounters invalid content.
 	badMac := objects.MAC{0x99}
 	store := repo.Store()
-	_, err := store.Put(repo.AppContext(), storage.StorageResourceState, badMac, bytes.NewReader([]byte("not a valid serialized state")))
+	_, err := store.Put(repo.AppContext(), storage.StorageResourceState, 0, badMac, bytes.NewReader([]byte("not a valid serialized state")))
 	require.NoError(t, err)
 
 	_, _, err = repo.GetState(badMac)
@@ -124,7 +124,7 @@ func TestGetPackfileCorrupt(t *testing.T) {
 
 	mac := objects.MAC{0xAB, 0xCD}
 	store := repo.Store()
-	_, err := store.Put(repo.AppContext(), storage.StorageResourcePackfile, mac, bytes.NewReader([]byte("not a packfile")))
+	_, err := store.Put(repo.AppContext(), storage.StorageResourcePackfile, 0, mac, bytes.NewReader([]byte("not a packfile")))
 	require.NoError(t, err)
 
 	_, err = repo.GetPackfile(mac)

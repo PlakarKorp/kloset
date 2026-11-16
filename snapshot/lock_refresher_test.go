@@ -10,6 +10,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
@@ -41,9 +42,9 @@ func (s *lockStore) landedLocks() []time.Time {
 	return append([]time.Time(nil), s.landed...)
 }
 
-func (s *lockStore) Put(ctx context.Context, res storage.StorageResource, mac objects.MAC, rd io.Reader) (int64, error) {
+func (s *lockStore) Put(ctx context.Context, res storage.StorageResource, flag storage.StorageFlag, mac objects.MAC, rd io.Reader) (int64, error) {
 	if res != storage.StorageResourceLock {
-		return s.Store.Put(ctx, res, mac, rd)
+		return s.Store.Put(ctx, res, 0, mac, rd)
 	}
 
 	s.mu.Lock()
@@ -64,26 +65,26 @@ func (s *lockStore) Put(ctx context.Context, res storage.StorageResource, mac ob
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	n, err := s.Store.Put(ctx, res, mac, rd)
+	n, err := s.Store.Put(ctx, res, 0, mac, rd)
 	if err == nil {
 		s.landed = append(s.landed, time.Now())
 	}
 	return n, err
 }
 
-func (s *lockStore) Get(ctx context.Context, res storage.StorageResource, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
+func (s *lockStore) Get(ctx context.Context, res storage.StorageResource, falg storage.StorageFlag, mac objects.MAC, rg *storage.Range) (io.ReadCloser, error) {
 	if res == storage.StorageResourceLock {
 		s.mu.Lock()
 		defer s.mu.Unlock()
 	}
-	return s.Store.Get(ctx, res, mac, rg)
+	return s.Store.Get(ctx, res, 0, mac, rg)
 }
 
 // removeLock deletes a lock the way maintenance removes one it thinks stale.
 func (s *lockStore) removeLock(mac objects.MAC) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.Store.Delete(context.Background(), storage.StorageResourceLock, mac)
+	return s.Store.Delete(context.Background(), storage.StorageResourceLock, 0, mac)
 }
 
 func newLockStoreRepository(t *testing.T) (*repository.Repository, *lockStore) {
@@ -120,9 +121,10 @@ func newRefresherBuilder(t *testing.T) (*snapshot.Builder, *lockStore) {
 func requireReleased(t *testing.T, builder *snapshot.Builder, store *lockStore) {
 	require.NoError(t, builder.Close())
 
-	locks, err := store.List(context.Background(), storage.StorageResourceLock)
-	require.NoError(t, err)
-	require.Empty(t, locks)
+	// All lock must have been released
+	for range store.List(context.Background(), storage.StorageResourceLock, 0) {
+		require.FailNow(t, "not all lock were released")
+	}
 }
 
 func TestLockRefresherKeepsLockFresh(t *testing.T) {
@@ -238,16 +240,22 @@ func TestCommitChecksLock(t *testing.T) {
 			require.NoError(t, err)
 
 			ctx := context.Background()
-			states, err := store.List(ctx, storage.StorageResourceState)
-			require.NoError(t, err)
+			var states []*integration.StorageResourceEntry
+			for s, err := range store.List(ctx, storage.StorageResourceState, 0) {
+				require.NoError(t, err)
+				states = append(states, s)
+			}
 
 			if tc.lockLost {
 				require.NoError(t, store.removeLock(builder.Header.Identifier))
 			}
 
 			err = builder.Commit()
-			after, listErr := store.List(ctx, storage.StorageResourceState)
-			require.NoError(t, listErr)
+			var after []*integration.StorageResourceEntry
+			for s, err := range store.List(ctx, storage.StorageResourceState, 0) {
+				require.NoError(t, err)
+				after = append(after, s)
+			}
 
 			if tc.lockLost {
 				require.ErrorContains(t, err, "repository lock lost")
