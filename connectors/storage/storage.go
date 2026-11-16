@@ -136,24 +136,16 @@ func (c *Configuration) ToBytes() ([]byte, error) {
 	return msgpack.Marshal(c)
 }
 
-var backends = location.New[StoreFn]("fs")
-
 func Register(name string, flags location.Flags, backend StoreFn) error {
-	if !backends.Register(name, backend, flags) {
-		return fmt.Errorf("storage backend '%s' already registered", name)
-	}
-	return nil
+	return integration.RegisterStore(name, flags, backend)
 }
 
 func Unregister(name string) error {
-	if !backends.Unregister(name) {
-		return fmt.Errorf("storage backend '%s' not registered", name)
-	}
-	return nil
+	return integration.UnregisterStore(name)
 }
 
 func Backends() []string {
-	return backends.Names()
+	return integration.StoreBackends()
 }
 
 func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
@@ -162,7 +154,7 @@ func New(ctx *kcontext.KContext, storeConfig map[string]string) (Store, error) {
 		return nil, fmt.Errorf("missing location")
 	}
 
-	proto, loc, backend, flags, ok := backends.Lookup(loc)
+	proto, loc, backend, flags, ok := integration.LookupStore(loc)
 	if !ok {
 		return nil, fmt.Errorf("backend '%s' does not exist", proto)
 	}
