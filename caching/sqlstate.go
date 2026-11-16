@@ -262,7 +262,7 @@ func (c *SQLState) Begin() (*SQLStateTx, error) {
 	st.getPackfileIDQ, err = tx.Prepare("SELECT id FROM packfiles WHERE mac = ?; ")
 	if err != nil {
 		tx.Rollback()
-		return nil, fmt.Errorf("failed to prepare putColoured query %w", err)
+		return nil, fmt.Errorf("failed to prepare getPackfileID query %w", err)
 	}
 
 	st.delDeltaQ, err = tx.Prepare(`DELETE FROM deltas
