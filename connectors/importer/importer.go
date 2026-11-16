@@ -31,24 +31,16 @@ type (
 	ImporterFn = integration.ImporterFn
 )
 
-var backends = location.New[ImporterFn]("fs")
-
 func Register(name string, flags location.Flags, backend ImporterFn) error {
-	if !backends.Register(name, backend, flags) {
-		return fmt.Errorf("importer backend '%s' already registered", name)
-	}
-	return nil
+	return integration.RegisterImporter(name, flags, backend)
 }
 
 func Unregister(name string) error {
-	if !backends.Unregister(name) {
-		return fmt.Errorf("importer backend '%s' not registered", name)
-	}
-	return nil
+	return integration.UnregisterImporter(name)
 }
 
 func Backends() []string {
-	return backends.Names()
+	return integration.ImporterBackends()
 }
 
 func NewImporter(ctx *kcontext.KContext, opts *connectors.Options, config map[string]string) (Importer, error) {
@@ -57,7 +49,7 @@ func NewImporter(ctx *kcontext.KContext, opts *connectors.Options, config map[st
 		return nil, fmt.Errorf("missing location")
 	}
 
-	proto, loc, backend, flags, ok := backends.Lookup(loc)
+	proto, loc, backend, flags, ok := integration.LookupImporter(loc)
 	if !ok {
 		return nil, fmt.Errorf("unsupported importer protocol")
 	}
