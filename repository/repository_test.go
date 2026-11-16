@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"maps"
@@ -76,18 +77,18 @@ func TestRepository(t *testing.T) {
 	})
 
 	t.Run("GetLocks", func(t *testing.T) {
-		locks, err := repo.GetLocks()
+		locks, err := repo.GetLocks(context.Background())
 		require.NoError(t, err)
 		require.NotNil(t, locks)
 	})
 
 	t.Run("GetLock", func(t *testing.T) {
-		_, err := repo.GetLock(objects.MAC{})
+		_, err := repo.GetLock(context.Background(), objects.MAC{})
 		require.Error(t, err)
 	})
 
 	t.Run("DeleteLock", func(t *testing.T) {
-		err := repo.DeleteLock(objects.MAC{})
+		err := repo.DeleteLock(context.Background(), objects.MAC{})
 		require.NoError(t, err)
 	})
 

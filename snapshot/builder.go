@@ -2,6 +2,7 @@ package snapshot
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
 	"runtime"
@@ -45,6 +46,7 @@ type Builder struct {
 
 	lockReleaser chan bool
 	lockReleased chan error
+	lockless     bool
 
 	beginTime time.Time
 
@@ -246,6 +248,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
 	lockReleaser := make(chan bool)
 	snap.lockReleased = make(chan error, 1)
+	snap.lockless = lockless
 	if lockless {
 		close(snap.lockReleased)
 		return lockReleaser, nil
@@ -259,16 +262,16 @@ func (snap *Builder) Lock() (chan bool, error) {
 		return nil, err
 	}
 
-	_, err = snap.repository.PutLock(snap.Header.Identifier, buffer)
+	_, err = snap.repository.PutLock(snap.AppContext(), snap.Header.Identifier, buffer)
 	if err != nil {
 		return nil, err
 	}
 
 	// We installed the lock, now let's see if there is a conflicting exclusive lock or not.
-	locksID, err := snap.repository.GetLocks()
+	locksID, err := snap.repository.GetLocks(snap.AppContext())
 	if err != nil {
 		// We still need to delete it, and we need to do so manually.
-		snap.repository.DeleteLock(snap.Header.Identifier)
+		snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 		return nil, err
 	}
 
@@ -277,32 +280,32 @@ func (snap *Builder) Lock() (chan bool, error) {
 			continue
 		}
 
-		rd, err := snap.repository.GetLock(lockID)
+		rd, err := snap.repository.GetLock(snap.AppContext(), lockID)
 		if err != nil {
 			// Err can't tell us if it's not found or a transport error, so
 			// relist because it might have been Deleted by another process in
 			// which case it's fine to continue
-			if lockIDs, err := snap.repository.GetLocks(); err == nil {
+			if lockIDs, err := snap.repository.GetLocks(snap.AppContext()); err == nil {
 				if !slices.Contains(lockIDs, lockID) {
 					continue
 				}
 			}
 
 			// Okay it was an actual error we can't proceed further
-			snap.repository.DeleteLock(snap.Header.Identifier)
+			snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 			return nil, err
 		}
 
 		lock, err := repository.NewLockFromStream(rd)
 		rd.Close()
 		if err != nil {
-			snap.repository.DeleteLock(snap.Header.Identifier)
+			snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 			return nil, err
 		}
 
 		/* Kick out stale locks */
 		if lock.IsStale() {
-			if err := snap.repository.DeleteLock(lockID); err != nil {
+			if err := snap.repository.DeleteLock(snap.AppContext(), lockID); err != nil {
 				// Failure to delete is not an hardstop, either it was already
 				// deleted, or there is a real failure to do it, but this lock
 				// is Shared so we can keep going on.
@@ -314,7 +317,7 @@ func (snap *Builder) Lock() (chan bool, error) {
 
 		// There is an exclusive lock in place, we need to abort.
 		if lock.Exclusive {
-			err := snap.repository.DeleteLock(snap.Header.Identifier)
+			err := snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 			if err != nil {
 				return nil, err
 			}
@@ -327,13 +330,13 @@ func (snap *Builder) Lock() (chan bool, error) {
 	// we are just refreshing the existing lock so that the others don't consider
 	// us stale and kick us out.
 	go func() {
-		lastRefresh := time.Now()
-		refresh := time.After(repository.LOCK_REFRESH_RATE)
+		lastRefresh := lock.Timestamp
+		refresh := time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
 
 		for {
 			select {
 			case <-lockReleaser:
-				snap.lockReleased <- snap.repository.DeleteLock(snap.Header.Identifier)
+				snap.lockReleased <- snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
 				return
 			case <-refresh:
 
@@ -347,11 +350,21 @@ func (snap *Builder) Lock() (chan bool, error) {
 				}
 
 				lock := repository.NewSharedLock(snap.appContext.Hostname)
-
 				buffer := &bytes.Buffer{}
-
 				lock.SerializeToStream(buffer)
-				if _, err := snap.repository.PutLock(snap.Header.Identifier, buffer); err != nil {
+				tctx, cancel := context.WithDeadline(snap.AppContext(), lastRefresh.Add(repository.LOCK_TTL))
+
+				// Before updating our lock, check if it's still present. If it
+				// was removed, either someone is doing something fishy, or
+				// another process thought we were stale. In any case this will
+				// lead to an abort (after a retry period).
+				_, err := snap.getLock(tctx)
+				if err == nil {
+					_, err = snap.repository.PutLock(tctx, snap.Header.Identifier, buffer)
+				}
+				cancel()
+
+				if err != nil {
 					// For some storage reason the refresh failed, warn the user
 					// and retry sooner than the normal rate so that we don't
 					// have to abort the backup.
@@ -360,13 +373,46 @@ func (snap *Builder) Lock() (chan bool, error) {
 					continue
 				}
 
-				lastRefresh = time.Now()
-				refresh = time.After(repository.LOCK_REFRESH_RATE)
+				lastRefresh = lock.Timestamp
+				refresh = time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
 			}
 		}
 	}()
 
 	return lockReleaser, nil
+}
+
+func (snap *Builder) getLock(ctx context.Context) (*repository.Lock, error) {
+	rd, err := snap.repository.GetLock(ctx, snap.Header.Identifier)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch the repository lock: %w", err)
+	}
+	defer rd.Close()
+
+	lock, err := repository.NewLockFromStream(rd)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read the repository lock: %w", err)
+	}
+
+	return lock, nil
+}
+
+// commitState pushes the final state, which is what makes the snapshot
+// visible. Refuse to if our lock is gone or stale: maintenance may have run
+// under us and removed packfiles this snapshot references.
+func (snap *Builder) commitState(stateID objects.MAC) error {
+	if !snap.lockless {
+		lock, err := snap.getLock(snap.AppContext())
+		if err != nil {
+			return fmt.Errorf("snapshot not committed, repository lock lost: %w", err)
+		}
+
+		if lock.IsStale() {
+			return fmt.Errorf("snapshot not committed, repository lock went stale")
+		}
+	}
+
+	return snap.repository.CommitTransaction(stateID)
 }
 
 func (snap *Builder) Unlock() error {
@@ -379,7 +425,7 @@ func (snap *Builder) flushDeltaState() {
 		select {
 		case <-snap.flushEnd:
 			// End of backup we push the last and final State.
-			err := snap.repository.CommitTransaction(snap.stateId)
+			err := snap.commitState(snap.stateId)
 			if err != nil {
 				snap.Logger().Warn("Failed to push the final state to the repository %s", err)
 			}
@@ -503,7 +549,7 @@ func (snap *Builder) Commit() error {
 		close(snap.flushEnd)
 		err = <-snap.flushEnded
 	} else {
-		err = snap.repository.CommitTransaction(snap.Header.Identifier)
+		err = snap.commitState(snap.Header.Identifier)
 	}
 	if err != nil {
 		snap.Logger().Warn("Failed to push the state to the repository %s", err)

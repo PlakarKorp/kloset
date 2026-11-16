@@ -2,6 +2,7 @@ package repository_test
 
 import (
 	"bytes"
+	"context"
 	"testing"
 
 	"github.com/PlakarKorp/kloset/connectors/storage"
@@ -21,7 +22,7 @@ func TestGetLockCorrupt(t *testing.T) {
 	_, err := repo.Store().Put(repo.AppContext(), storage.StorageResourceLock, lockID, bytes.NewReader([]byte("not a lock")))
 	require.NoError(t, err)
 
-	_, err = repo.GetLock(lockID)
+	_, err = repo.GetLock(context.Background(), lockID)
 	require.Error(t, err)
 }
 
