@@ -152,9 +152,9 @@ func (ls *LocalState) MergeState(stateID objects.MAC, rd io.Reader, ver versioni
 	// parent. This is all way too intricated and will be fixed by a refacto.
 	var mt *Metadata
 	if ver.Equals(versioning.FromString("1.1.0")) {
-		mt, err = deserializeFromStream(ls, tx, bufio.NewReaderSize(rd, 256<<10))
+		mt, err = deserializeFromStream(tx, bufio.NewReaderSize(rd, 256<<10))
 	} else {
-		mt, err = deserializeFromStreamv100(ls, tx, bufio.NewReaderSize(rd, 256<<10))
+		mt, err = deserializeFromStreamv100(tx, bufio.NewReaderSize(rd, 256<<10))
 	}
 
 	if err != nil {
@@ -198,7 +198,7 @@ func (ls *LocalState) MergeStateFromCache(stateID objects.MAC, from *caching.Sca
 		return nil
 	}
 
-	err = mergeFromCache(ls, tx, from)
+	err = mergeFromCache(tx, from)
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,7 @@ func (ls *LocalState) GetStates() (map[objects.MAC][]byte, error) {
 	return ls.cache.GetStates()
 }
 
-func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (*Metadata, error) {
+func deserializeFromStream(tx *caching.SQLStateTx, r io.Reader) (*Metadata, error) {
 	readUint64 := func() (uint64, error) {
 		buf := make([]byte, 8)
 		if _, err := io.ReadFull(r, buf); err != nil {
@@ -398,7 +398,7 @@ func deserializeFromStream(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (
 	return mt, nil
 }
 
-func deserializeFromStreamv100(l *LocalState, tx *caching.SQLStateTx, r io.Reader) (*Metadata, error) {
+func deserializeFromStreamv100(tx *caching.SQLStateTx, r io.Reader) (*Metadata, error) {
 	readUint64 := func() (uint64, error) {
 		buf := make([]byte, 8)
 		if _, err := io.ReadFull(r, buf); err != nil {
@@ -538,7 +538,7 @@ func deserializeFromStreamv100(l *LocalState, tx *caching.SQLStateTx, r io.Reade
 	return mt, nil
 }
 
-func mergeFromCache(l *LocalState, tx *caching.SQLStateTx, from *caching.ScanCache) error {
+func mergeFromCache(tx *caching.SQLStateTx, from *caching.ScanCache) error {
 	for _, entry := range from.GetDeltas() {
 		delta, err := DeltaEntryFromBytes(entry)
 		if err != nil {
@@ -793,4 +793,8 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 			}
 		}
 	}
+}
+
+func (ls *LocalState) Close() error {
+	return ls.cache.Close()
 }

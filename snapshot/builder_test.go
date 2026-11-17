@@ -57,7 +57,7 @@ func TestCreateIgnoresStaleLockDeleteFailure(t *testing.T) {
 
 	var buf bytes.Buffer
 	require.NoError(t, staleLock.SerializeToStream(&buf))
-	_, err := repo.PutLock(staleLockID, &buf)
+	_, err := repo.PutLock(t.Context(), staleLockID, &buf)
 	require.NoError(t, err)
 
 	mockStore, ok := repo.Store().(*ptesting.MockBackend)

@@ -111,7 +111,7 @@ func ingestMeta(ls *LocalState, r io.Reader) (*Metadata, error) {
 	}
 	defer tx.Rollback()
 
-	mt, err := deserializeFromStream(ls, tx, r)
+	mt, err := deserializeFromStream(tx, r)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func ingestV100(ls *LocalState, r io.Reader) error {
 	}
 	defer tx.Rollback()
 
-	if _, err := deserializeFromStreamv100(ls, tx, r); err != nil {
+	if _, err := deserializeFromStreamv100(tx, r); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -143,7 +143,7 @@ func ingestCache(ls *LocalState, from *caching.ScanCache) error {
 	}
 	defer tx.Rollback()
 
-	if err := mergeFromCache(ls, tx, from); err != nil {
+	if err := mergeFromCache(tx, from); err != nil {
 		return err
 	}
 	return tx.Commit()
