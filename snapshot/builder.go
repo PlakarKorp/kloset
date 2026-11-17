@@ -545,9 +545,13 @@ func (snap *Builder) Commit() error {
 	// We are done with packfiles we can flush the last state, either through
 	// the flusher, or manually here.
 	if snap.flushTick != nil {
-		snap.flushEnd <- true
-		close(snap.flushEnd)
-		err = <-snap.flushEnded
+		select {
+		case snap.flushEnd <- true:
+			close(snap.flushEnd)
+			err = <-snap.flushEnded
+		case <-snap.appContext.Done():
+			err = context.Cause(snap.appContext)
+		}
 	} else {
 		err = snap.commitState(snap.Header.Identifier)
 	}
