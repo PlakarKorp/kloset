@@ -117,3 +117,37 @@ func TestLockRefresherDoesNotRecreateRemovedLock(t *testing.T) {
 		requireReleased(t, lock, store)
 	})
 }
+
+func TestUnlockTwice(t *testing.T) {
+	repo, store := newLockRepository(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		lock, err := repo.Lock(objects.RandomMAC())
+		require.NoError(t, err)
+
+		requireReleased(t, lock, store)
+		requireReleased(t, lock, store)
+	})
+}
+
+func TestUnlockInterruptsRefresh(t *testing.T) {
+	repo, store := newLockRepository(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		lock, err := repo.Lock(objects.RandomMAC())
+		require.NoError(t, err)
+
+		// The refresh at 5m hangs: left alone it would only give up at its
+		// 10m deadline.
+		store.Set(false, repository.LOCK_REFRESH_RATE)
+		time.Sleep(repository.LOCK_REFRESH_RATE + time.Second)
+		synctest.Wait()
+
+		start := time.Now()
+		requireReleased(t, lock, store)
+		require.Equal(t, start, time.Now(), "Unlock waited for the refresh in flight")
+
+		require.NoError(t, repo.AppContext().Err(), "Unlock cancelled the application")
+		require.Len(t, store.LandedLocks(), 1)
+	})
+}

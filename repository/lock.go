@@ -68,25 +68,24 @@ func (lock *Lock) IsStale() bool {
 type LockedRepository struct {
 	Lockless bool
 
-	repo         *Repository
-	lockid       objects.MAC
-	lockReleased chan error
-	lockReleaser chan bool
+	repo    *Repository
+	lockid  objects.MAC
+	cancel  context.CancelFunc
+	stopped chan struct{}
 }
 
 func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
 	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
 	l := &LockedRepository{
-		Lockless:     lockless,
-		repo:         repo,
-		lockid:       lockid,
-		lockReleased: make(chan error, 1),
-		lockReleaser: make(chan bool),
+		Lockless: lockless,
+		repo:     repo,
+		lockid:   lockid,
 	}
 	if lockless {
-		close(l.lockReleased)
 		return l, nil
 	}
+
+	l.stopped = make(chan struct{})
 
 	lock := NewSharedLock(repo.AppContext().Hostname)
 
@@ -160,29 +159,37 @@ func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
 		}
 	}
 
-	go l.ping(lock.Timestamp)
+	ctx, cancel := context.WithCancel(repo.AppContext())
+	l.cancel = cancel
+	go l.ping(ctx, lock.Timestamp)
 
 	return l, nil
 }
 
 func (l *LockedRepository) Unlock() error {
-	close(l.lockReleaser)
-	return <-l.lockReleased
+	if l.stopped == nil {
+		return nil
+	}
+
+	// Cancel the ping goroutine.
+	l.cancel()
+	<-l.stopped
+
+	return l.repo.DeleteLock(l.repo.AppContext(), l.lockid)
 }
 
 // The following bit is a "ping" mechanism, Lock() is a bit badly named at this point,
 // we are just refreshing the existing lock so that the others don't consider
 // us stale and kick us out.
-func (l *LockedRepository) ping(lastRefresh time.Time) {
+func (l *LockedRepository) ping(ctx context.Context, lastRefresh time.Time) {
 	refresh := time.After(time.Until(lastRefresh.Add(LOCK_REFRESH_RATE)))
+	defer close(l.stopped)
 
 	for {
 		select {
-		case <-l.lockReleaser:
-			l.lockReleased <- l.repo.DeleteLock(l.repo.AppContext(), l.lockid)
+		case <-ctx.Done():
 			return
 		case <-refresh:
-
 			// We retried hard to update the lock but failed and it's now
 			// stale, so abort everything before a concurrent operation
 			// thinks it's okay to start.
@@ -195,7 +202,7 @@ func (l *LockedRepository) ping(lastRefresh time.Time) {
 			lock := NewSharedLock(l.repo.AppContext().Hostname)
 			buffer := &bytes.Buffer{}
 			lock.SerializeToStream(buffer)
-			tctx, cancel := context.WithDeadline(l.repo.AppContext(), lastRefresh.Add(LOCK_TTL))
+			tctx, cancel := context.WithDeadline(ctx, lastRefresh.Add(LOCK_TTL))
 
 			// Before updating our lock, check if it's still present. If it
 			// was removed, either someone is doing something fishy, or
