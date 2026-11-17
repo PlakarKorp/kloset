@@ -264,6 +264,10 @@ func (m *mockStateCache) NewBatch() caching.StateBatch {
 	return &mockStateBatch{cache: m}
 }
 
+func (b *mockStateCache) Close() error {
+	return nil
+}
+
 type mockStateBatch struct {
 	cache *mockStateCache
 }

@@ -41,6 +41,8 @@ type StateCache interface {
 	GetConfigurations() iter.Seq[[]byte]
 
 	NewBatch() StateBatch
+
+	Close() error
 }
 
 type StateBatch interface {

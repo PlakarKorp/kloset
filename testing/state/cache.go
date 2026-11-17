@@ -161,6 +161,10 @@ func (c *cache) GetDeletedEntries() iter.Seq[[]byte] {
 	panic("nop")
 }
 
+func (c *cache) Close() error {
+	return nil
+}
+
 type batch struct {
 	cache *cache
 }

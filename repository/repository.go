@@ -191,6 +191,7 @@ func NewRepository(ctx *kcontext.KContext, secret []byte, store storage.Store, c
 
 	r.state, err = state.NewLocalState(cacheInstance)
 	if err != nil {
+		cacheInstance.Close()
 		return nil, err
 	}
 
@@ -202,6 +203,7 @@ func NewRepository(ctx *kcontext.KContext, secret []byte, store storage.Store, c
 
 	if opts.DoRebuild {
 		if err := r.RebuildState(); err != nil {
+			cacheInstance.Close()
 			return nil, err
 		}
 	}
@@ -551,6 +553,10 @@ func (r *Repository) Close() error {
 	defer func() {
 		r.Logger().Trace("repository", "Close(): %s", time.Since(t0))
 	}()
+
+	if r.state != nil {
+		return r.state.Close()
+	}
 
 	return nil
 }

@@ -613,3 +613,7 @@ func (c *SQLState) PutDeleted(typ uint8, blobCsum objects.MAC, data []byte) erro
 func (c *SQLState) GetDeletedEntries() iter.Seq[[]byte] {
 	panic("PutDeleted is not to be used with local state")
 }
+
+func (c *SQLState) Close() error {
+	return c.db.Close()
+}

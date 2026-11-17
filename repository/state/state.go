@@ -1322,6 +1322,10 @@ func (ls *LocalState) DelColouredResource(rtype resources.Type, resourceMAC obje
 	return ls.cache.PutDeleted(uint8(ET_COLOURED), resourceMAC, del.ToBytes())
 }
 
+func (ls *LocalState) Close() error {
+	return ls.cache.Close()
+}
+
 func (mt *Metadata) ToBytes() ([]byte, error) {
 	return msgpack.Marshal(mt)
 }
