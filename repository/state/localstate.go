@@ -794,3 +794,7 @@ func (ls *LocalState) ListObjectsOfType(Type resources.Type) iter.Seq2[DeltaEntr
 		}
 	}
 }
+
+func (ls *LocalState) Close() error {
+	return ls.cache.Close()
+}
