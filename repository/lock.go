@@ -129,7 +129,7 @@ func (repo *Repository) lock(lockid objects.MAC, exclusive bool) (*LockedReposit
 			return nil, err
 		}
 
-		lock, err := NewLockFromStream(rd)
+		other, err := NewLockFromStream(rd)
 		rd.Close()
 		if err != nil {
 			repo.DeleteLock(repo.AppContext(), l.lockid)
@@ -137,7 +137,7 @@ func (repo *Repository) lock(lockid objects.MAC, exclusive bool) (*LockedReposit
 		}
 
 		/* Kick out stale locks */
-		if lock.IsStale() {
+		if other.IsStale() {
 			if err := repo.DeleteLock(repo.AppContext(), lockID); err != nil {
 				// Failure to delete is not an hardstop, except for exclusive
 				// locks, either it was already deleted, or there is a real
@@ -156,13 +156,13 @@ func (repo *Repository) lock(lockid objects.MAC, exclusive bool) (*LockedReposit
 
 		// There is a lock in place, it's a conflict if either we are trying to
 		// lock excludively, or the lock in place is an exclusive one.
-		if exclusive || lock.Exclusive {
+		if exclusive || other.Exclusive {
 			err := repo.DeleteLock(repo.AppContext(), l.lockid)
 			if err != nil {
 				return nil, err
 			}
 
-			return nil, fmt.Errorf("can't take repository lock, it's already locked by %s", lock.Hostname)
+			return nil, fmt.Errorf("can't take repository lock, it's already locked by %s", other.Hostname)
 		}
 	}
 
