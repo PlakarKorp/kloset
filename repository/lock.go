@@ -66,19 +66,29 @@ func (lock *Lock) IsStale() bool {
 }
 
 type LockedRepository struct {
-	lockless bool
-	repo     *Repository
-	lockid   objects.MAC
-	cancel   context.CancelFunc
-	stopped  chan struct{}
+	lockless  bool
+	exclusive bool
+	repo      *Repository
+	lockid    objects.MAC
+	cancel    context.CancelFunc
+	stopped   chan struct{}
 }
 
-func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
+func (repo *Repository) LockShared(lockid objects.MAC) (*LockedRepository, error) {
+	return repo.lock(lockid, false)
+}
+
+func (repo *Repository) LockExclusive(lockid objects.MAC) (*LockedRepository, error) {
+	return repo.lock(lockid, true)
+}
+
+func (repo *Repository) lock(lockid objects.MAC, exclusive bool) (*LockedRepository, error) {
 	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
 	l := &LockedRepository{
-		lockless: lockless,
-		repo:     repo,
-		lockid:   lockid,
+		lockless:  lockless,
+		exclusive: exclusive,
+		repo:      repo,
+		lockid:    lockid,
 	}
 	if lockless {
 		return l, nil
@@ -86,7 +96,7 @@ func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
 
 	l.stopped = make(chan struct{})
 
-	lock := NewSharedLock(repo.AppContext().Hostname)
+	lock := l.newLock()
 
 	buffer := &bytes.Buffer{}
 	err := lock.SerializeToStream(buffer)
@@ -138,23 +148,30 @@ func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
 		/* Kick out stale locks */
 		if lock.IsStale() {
 			if err := repo.DeleteLock(repo.AppContext(), lockID); err != nil {
-				// Failure to delete is not an hardstop, either it was already
-				// deleted, or there is a real failure to do it, but this lock
-				// is Shared so we can keep going on.
+				// Failure to delete is not an hardstop, except for exclusive
+				// locks, either it was already deleted, or there is a real
+				// failure to do it, but this lock is Shared so we can keep
+				// going on.
+				if exclusive {
+					repo.DeleteLock(repo.AppContext(), l.lockid)
+					return nil, fmt.Errorf("failed to remove stale lock %x: %w", lockID, err)
+				}
+
 				repo.Logger().Warn("failed to remove stale lock %x: %s", lockID, err)
 			}
 
 			continue
 		}
 
-		// There is an exclusive lock in place, we need to abort.
-		if lock.Exclusive {
+		// There is a lock in place, it's a conflict if either we are trying to
+		// lock excludively, or the lock in place is an exclusive one.
+		if exclusive || lock.Exclusive {
 			err := repo.DeleteLock(repo.AppContext(), l.lockid)
 			if err != nil {
 				return nil, err
 			}
 
-			return nil, fmt.Errorf("Can't take repository lock, it's already locked by maintenance.")
+			return nil, fmt.Errorf("can't take repository lock, it's already locked by %s", lock.Hostname)
 		}
 	}
 
@@ -198,7 +215,7 @@ func (l *LockedRepository) ping(ctx context.Context, lastRefresh time.Time) {
 				continue
 			}
 
-			lock := NewSharedLock(l.repo.AppContext().Hostname)
+			lock := l.newLock()
 			buffer := &bytes.Buffer{}
 			lock.SerializeToStream(buffer)
 			tctx, cancel := context.WithDeadline(ctx, lastRefresh.Add(LOCK_TTL))
@@ -243,6 +260,13 @@ func (l *LockedRepository) Check(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (l *LockedRepository) newLock() *Lock {
+	if l.exclusive {
+		return NewExclusiveLock(l.repo.AppContext().Hostname)
+	}
+	return NewSharedLock(l.repo.AppContext().Hostname)
 }
 
 func (l *LockedRepository) getLock(ctx context.Context) (*Lock, error) {

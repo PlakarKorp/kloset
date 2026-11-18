@@ -121,7 +121,7 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	snap.repository = repo.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
 	snap.emitter = snap.Emitter("backup")
 
-	lock, err := snap.repository.Lock(snap.Header.Identifier)
+	lock, err := snap.repository.LockShared(snap.Header.Identifier)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return nil, err
@@ -150,7 +150,7 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 	snap.repository = repo
 	snap.emitter = snap.Emitter("backup")
 
-	lock, err := snap.repository.Lock(snap.Header.Identifier)
+	lock, err := snap.repository.LockShared(snap.Header.Identifier)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return nil, err
@@ -199,7 +199,7 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	snap.repository = src.repository.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, "")
 	snap.emitter = snap.Emitter("backup")
 
-	lock, err := snap.repository.Lock(snap.Header.Identifier)
+	lock, err := snap.repository.LockShared(snap.Header.Identifier)
 	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return nil, err

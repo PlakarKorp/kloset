@@ -1,11 +1,13 @@
 package repository_test
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"testing/synctest"
 	"time"
 
+	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
 	"github.com/PlakarKorp/kloset/repository"
 	ptesting "github.com/PlakarKorp/kloset/testing"
@@ -32,7 +34,7 @@ func TestLockRefresherKeepsLockFresh(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		start := time.Now()
-		lock, err := repo.Lock(objects.RandomMAC())
+		lock, err := repo.LockShared(objects.RandomMAC())
 		require.NoError(t, err)
 
 		time.Sleep(3*repository.LOCK_TTL + time.Minute)
@@ -54,7 +56,7 @@ func TestLockRefresherAbortsWhenRefreshFails(t *testing.T) {
 	repo, store := newLockRepository(t)
 
 	synctest.Test(t, func(t *testing.T) {
-		lock, err := repo.Lock(objects.RandomMAC())
+		lock, err := repo.LockShared(objects.RandomMAC())
 		require.NoError(t, err)
 		store.Set(true, 0)
 
@@ -75,7 +77,7 @@ func TestLockRefresherRejectsLateRefresh(t *testing.T) {
 	repo, store := newLockRepository(t)
 
 	synctest.Test(t, func(t *testing.T) {
-		lock, err := repo.Lock(objects.RandomMAC())
+		lock, err := repo.LockShared(objects.RandomMAC())
 		require.NoError(t, err)
 
 		// Refreshes fail fast until 8m45s, then the retry issued at 9m is
@@ -100,7 +102,7 @@ func TestLockRefresherDoesNotRecreateRemovedLock(t *testing.T) {
 
 	synctest.Test(t, func(t *testing.T) {
 		lockID := objects.RandomMAC()
-		lock, err := repo.Lock(lockID)
+		lock, err := repo.LockShared(lockID)
 		require.NoError(t, err)
 
 		// Someone removes our lock between two refreshes, e.g. a host whose
@@ -122,7 +124,7 @@ func TestUnlockTwice(t *testing.T) {
 	repo, store := newLockRepository(t)
 
 	synctest.Test(t, func(t *testing.T) {
-		lock, err := repo.Lock(objects.RandomMAC())
+		lock, err := repo.LockShared(objects.RandomMAC())
 		require.NoError(t, err)
 
 		requireReleased(t, lock, store)
@@ -134,7 +136,7 @@ func TestUnlockInterruptsRefresh(t *testing.T) {
 	repo, store := newLockRepository(t)
 
 	synctest.Test(t, func(t *testing.T) {
-		lock, err := repo.Lock(objects.RandomMAC())
+		lock, err := repo.LockShared(objects.RandomMAC())
 		require.NoError(t, err)
 
 		// The refresh at 5m hangs: left alone it would only give up at its
@@ -157,7 +159,7 @@ func TestLockCheck(t *testing.T) {
 		repo, store := newLockRepository(t)
 
 		synctest.Test(t, func(t *testing.T) {
-			lock, err := repo.Lock(objects.RandomMAC())
+			lock, err := repo.LockShared(objects.RandomMAC())
 			require.NoError(t, err)
 
 			require.NoError(t, lock.Check(repo.AppContext()))
@@ -171,7 +173,7 @@ func TestLockCheck(t *testing.T) {
 
 		synctest.Test(t, func(t *testing.T) {
 			lockID := objects.RandomMAC()
-			lock, err := repo.Lock(lockID)
+			lock, err := repo.LockShared(lockID)
 			require.NoError(t, err)
 
 			require.NoError(t, store.RemoveLock(lockID))
@@ -185,7 +187,7 @@ func TestLockCheck(t *testing.T) {
 		repo, store := newLockRepository(t)
 
 		synctest.Test(t, func(t *testing.T) {
-			lock, err := repo.Lock(objects.RandomMAC())
+			lock, err := repo.LockShared(objects.RandomMAC())
 			require.NoError(t, err)
 
 			// Refreshes fail fast, then the retry issued at 9m hangs until
@@ -204,5 +206,111 @@ func TestLockCheck(t *testing.T) {
 
 			requireReleased(t, lock, store)
 		})
+	})
+}
+
+// plantLock writes another process's lock into the repository.
+func plantLock(t *testing.T, repo *repository.Repository, exclusive, stale bool) objects.MAC {
+	lock := repository.NewSharedLock("other-host")
+	if exclusive {
+		lock = repository.NewExclusiveLock("other-host")
+	}
+	if stale {
+		lock.Timestamp = time.Now().Add(-repository.LOCK_TTL)
+	}
+
+	buffer := &bytes.Buffer{}
+	require.NoError(t, lock.SerializeToStream(buffer))
+
+	lockID := objects.RandomMAC()
+	_, err := repo.PutLock(context.Background(), lockID, buffer)
+	require.NoError(t, err)
+
+	return lockID
+}
+
+func lockExists(t *testing.T, store *ptesting.LockStore, lockID objects.MAC) bool {
+	for entry, err := range store.List(context.Background(), storage.StorageResourceLock, 0) {
+		require.NoError(t, err)
+		if entry.MAC == lockID {
+			return true
+		}
+	}
+	return false
+}
+
+func TestLockConflicts(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		exclusive      bool
+		otherExclusive bool
+		otherStale     bool
+		refused        bool
+	}{
+		{"shared vs shared", false, false, false, false},
+		{"shared vs exclusive", false, true, false, true},
+		{"exclusive vs shared", true, false, false, true},
+		{"exclusive vs exclusive", true, true, false, true},
+		{"shared vs stale shared", false, false, true, false},
+		{"shared vs stale exclusive", false, true, true, false},
+		{"exclusive vs stale shared", true, false, true, false},
+		{"exclusive vs stale exclusive", true, true, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo, store := newLockRepository(t)
+
+			synctest.Test(t, func(t *testing.T) {
+				otherID := plantLock(t, repo, tc.otherExclusive, tc.otherStale)
+
+				lockID := objects.RandomMAC()
+				var lock *repository.LockedRepository
+				var err error
+				if tc.exclusive {
+					lock, err = repo.LockExclusive(lockID)
+				} else {
+					lock, err = repo.LockShared(lockID)
+				}
+
+				if tc.refused {
+					require.ErrorContains(t, err, "already locked by other-host")
+					require.False(t, lockExists(t, store, lockID), "refused lock left behind")
+					require.True(t, lockExists(t, store, otherID), "live lock removed")
+					return
+				}
+
+				require.NoError(t, err)
+				require.True(t, lockExists(t, store, lockID))
+				require.Equal(t, !tc.otherStale, lockExists(t, store, otherID), "stale lock kept or live lock removed")
+
+				require.NoError(t, lock.Unlock())
+				require.False(t, lockExists(t, store, lockID))
+			})
+		})
+	}
+}
+
+func TestLockExclusiveRefreshesExclusive(t *testing.T) {
+	repo, store := newLockRepository(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		start := time.Now()
+		lockID := objects.RandomMAC()
+		lock, err := repo.LockExclusive(lockID)
+		require.NoError(t, err)
+
+		time.Sleep(repository.LOCK_REFRESH_RATE + time.Second)
+		synctest.Wait()
+		require.Len(t, store.LandedLocks(), 2)
+
+		rd, err := repo.GetLock(context.Background(), lockID)
+		require.NoError(t, err)
+		refreshed, err := repository.NewLockFromStream(rd)
+		rd.Close()
+		require.NoError(t, err)
+
+		require.Equal(t, start.Add(repository.LOCK_REFRESH_RATE), refreshed.Timestamp)
+		require.True(t, refreshed.Exclusive, "the refresher downgraded the exclusive lock")
+
+		requireReleased(t, lock, store)
 	})
 }
