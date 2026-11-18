@@ -5,9 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"slices"
-	"strconv"
 	"time"
 
 	"github.com/PlakarKorp/kloset/objects"
@@ -66,7 +64,6 @@ func (lock *Lock) IsStale() bool {
 }
 
 type LockedRepository struct {
-	lockless  bool
 	exclusive bool
 	repo      *Repository
 	lockid    objects.MAC
@@ -83,18 +80,12 @@ func (repo *Repository) LockExclusive(lockid objects.MAC) (*LockedRepository, er
 }
 
 func (repo *Repository) lock(lockid objects.MAC, exclusive bool) (*LockedRepository, error) {
-	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
 	l := &LockedRepository{
-		lockless:  lockless,
 		exclusive: exclusive,
 		repo:      repo,
 		lockid:    lockid,
+		stopped:   make(chan struct{}),
 	}
-	if lockless {
-		return l, nil
-	}
-
-	l.stopped = make(chan struct{})
 
 	lock := l.newLock()
 
@@ -183,10 +174,6 @@ func (repo *Repository) lock(lockid objects.MAC, exclusive bool) (*LockedReposit
 }
 
 func (l *LockedRepository) Unlock() error {
-	if l.lockless {
-		return nil
-	}
-
 	// Cancel the ping goroutine.
 	l.cancel()
 	<-l.stopped
@@ -246,10 +233,6 @@ func (l *LockedRepository) ping(ctx context.Context, lastRefresh time.Time) {
 }
 
 func (l *LockedRepository) Check(ctx context.Context) error {
-	if l.lockless {
-		return nil
-	}
-
 	lck, err := l.getLock(ctx)
 	if err != nil {
 		return fmt.Errorf("repository lock lost %x: %w", l.lockid, err)
