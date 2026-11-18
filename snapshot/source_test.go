@@ -2,8 +2,10 @@ package snapshot_test
 
 import (
 	"context"
+	"path"
 	"testing"
 
+	"github.com/PlakarKorp/integration-sdk"
 	"github.com/PlakarKorp/kloset/snapshot"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
@@ -66,4 +68,28 @@ func TestSourceDedupCommonPrefix(t *testing.T) {
 	}
 	require.Len(t, s.Importers(), 2)
 	require.ElementsMatch(t, roots, []string{"/home/bar", "/home/foo"}) // It should be sorted
+}
+
+func TestSourceSanitizeRoot(t *testing.T) {
+	for _, tc := range []struct {
+		roots []string
+		want  string
+	}{
+		{[]string{"home/foo"}, "/home/foo"},
+		{[]string{"home/foo/"}, "/home/foo"},
+		{[]string{""}, "/"},
+		{[]string{"."}, "/"},
+		{[]string{"./home/foo/../bar"}, "/home/bar"},
+		{[]string{"home/bar", "/home/bar/baz"}, "/home/bar"},
+		{[]string{"home/bar/baz", "/home/bar/quux"}, "/home/bar"},
+	} {
+		imps := []integration.Importer{}
+		for _, r := range tc.roots {
+			imps = append(imps, &ptesting.MockImporter{FakeRoot: r})
+		}
+		s, err := snapshot.NewSource(t.Context(), imps...)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, s.Root(), "roots %q", tc.roots)
+		require.True(t, path.IsAbs(s.Root()))
+	}
 }
