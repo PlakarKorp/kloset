@@ -14,13 +14,13 @@ import (
 )
 
 func TestBuilderCommitReturnsFailedCheckpoint(t *testing.T) {
-	t.Setenv("PLAKAR_LOCKLESS", "true")
 	repo := ptesting.GenerateRepository(t, nil, nil, nil)
 	checkpointErr := errors.New("checkpoint refresh failed")
 	tick := make(chan time.Time)
 	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
 		Name:         "failed-checkpoint",
 		NoCheckpoint: true,
+		NoLock:       true,
 		StateRefresher: func(_ objects.MAC, final bool) error {
 			if !final {
 				return checkpointErr

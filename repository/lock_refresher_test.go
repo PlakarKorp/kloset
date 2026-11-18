@@ -14,11 +14,10 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// newLockRepository returns a repository over a LockStore with locking
-// enabled. The lock itself must be taken inside the test's synctest bubble so
-// that the refresher runs on the fake clock.
+// newLockRepository returns a repository over a LockStore. The lock itself
+// must be taken inside the test's synctest bubble so that the refresher runs
+// on the fake clock.
 func newLockRepository(t *testing.T) (*repository.Repository, *ptesting.LockStore) {
-	t.Setenv("PLAKAR_LOCKLESS", "false")
 	return ptesting.GenerateLockStoreRepository(t)
 }
 

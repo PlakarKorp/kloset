@@ -33,7 +33,6 @@ func TestCommitChecksLock(t *testing.T) {
 		{"lost with checkpoints", true, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("PLAKAR_LOCKLESS", "false")
 			repo, store := ptesting.GenerateLockStoreRepository(t)
 			builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
 				NoCheckpoint: !tc.checkpoint,
@@ -58,4 +57,21 @@ func TestCommitChecksLock(t *testing.T) {
 			require.NoError(t, builder.Close())
 		})
 	}
+}
+
+func TestCommitWithoutLock(t *testing.T) {
+	repo, store := ptesting.GenerateLockStoreRepository(t)
+	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
+		NoCheckpoint: true,
+		NoLock:       true,
+	})
+	require.NoError(t, err)
+	store.RequireNoLocks(t)
+
+	states := countStates(t, store)
+	require.NoError(t, builder.Commit())
+	require.Equal(t, states+1, countStates(t, store))
+
+	require.NoError(t, builder.Close())
+	require.Empty(t, store.LandedLocks())
 }

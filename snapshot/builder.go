@@ -121,12 +121,14 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	snap.repository = repo.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
 	snap.emitter = snap.Emitter("backup")
 
-	lock, err := snap.repository.LockShared(snap.Header.Identifier)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil, err
+	if !builderOptions.NoLock {
+		lock, err := snap.repository.LockShared(snap.Header.Identifier)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil, err
+		}
+		snap.lock = lock
 	}
-	snap.lock = lock
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
@@ -150,12 +152,14 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 	snap.repository = repo
 	snap.emitter = snap.Emitter("backup")
 
-	lock, err := snap.repository.LockShared(snap.Header.Identifier)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil, err
+	if !builderOptions.NoLock {
+		lock, err := snap.repository.LockShared(snap.Header.Identifier)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil, err
+		}
+		snap.lock = lock
 	}
-	snap.lock = lock
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
@@ -199,13 +203,14 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	snap.repository = src.repository.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, "")
 	snap.emitter = snap.Emitter("backup")
 
-	lock, err := snap.repository.LockShared(snap.Header.Identifier)
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil, err
+	if !builderOptions.NoLock {
+		lock, err := snap.repository.LockShared(snap.Header.Identifier)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil, err
+		}
+		snap.lock = lock
 	}
-
-	snap.lock = lock
 
 	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
 
@@ -220,8 +225,10 @@ func (snap *Builder) Close() error {
 	snap.Logger().Trace("snapshotBuilder", "%x: Close(): %x", snap.Header.Identifier, snap.Header.GetIndexShortID())
 	defer snap.emitter.Close()
 
-	if err := snap.lock.Unlock(); err != nil {
-		snap.Logger().Warn("failed to release lock %x (%s), you might need to remove it manually", snap.Header.Identifier, err)
+	if snap.lock != nil {
+		if err := snap.lock.Unlock(); err != nil {
+			snap.Logger().Warn("failed to release lock %x (%s), you might need to remove it manually", snap.Header.Identifier, err)
+		}
 	}
 
 	if snap.scanCache != nil {
@@ -243,8 +250,10 @@ func (snap *Builder) AppContext() *kcontext.KContext {
 // visible. Refuse to if our lock is gone or stale: maintenance may have run
 // under us and removed packfiles this snapshot references.
 func (snap *Builder) commitState(stateID objects.MAC) error {
-	if err := snap.lock.Check(snap.AppContext()); err != nil {
-		return fmt.Errorf("snapshot not committed: %w", err)
+	if snap.lock != nil {
+		if err := snap.lock.Check(snap.AppContext()); err != nil {
+			return fmt.Errorf("snapshot not committed: %w", err)
+		}
 	}
 
 	return snap.repository.CommitTransaction(stateID)
