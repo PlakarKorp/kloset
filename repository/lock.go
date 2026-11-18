@@ -66,18 +66,17 @@ func (lock *Lock) IsStale() bool {
 }
 
 type LockedRepository struct {
-	Lockless bool
-
-	repo    *Repository
-	lockid  objects.MAC
-	cancel  context.CancelFunc
-	stopped chan struct{}
+	lockless bool
+	repo     *Repository
+	lockid   objects.MAC
+	cancel   context.CancelFunc
+	stopped  chan struct{}
 }
 
 func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
 	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
 	l := &LockedRepository{
-		Lockless: lockless,
+		lockless: lockless,
 		repo:     repo,
 		lockid:   lockid,
 	}
@@ -167,7 +166,7 @@ func (repo *Repository) Lock(lockid objects.MAC) (*LockedRepository, error) {
 }
 
 func (l *LockedRepository) Unlock() error {
-	if l.stopped == nil {
+	if l.lockless {
 		return nil
 	}
 
@@ -208,7 +207,7 @@ func (l *LockedRepository) ping(ctx context.Context, lastRefresh time.Time) {
 			// was removed, either someone is doing something fishy, or
 			// another process thought we were stale. In any case this will
 			// lead to an abort (after a retry period).
-			_, err := l.GetLock(tctx)
+			_, err := l.getLock(tctx)
 			if err == nil {
 				_, err = l.repo.PutLock(tctx, l.lockid, buffer)
 			}
@@ -229,7 +228,24 @@ func (l *LockedRepository) ping(ctx context.Context, lastRefresh time.Time) {
 	}
 }
 
-func (l *LockedRepository) GetLock(ctx context.Context) (*Lock, error) {
+func (l *LockedRepository) Check(ctx context.Context) error {
+	if l.lockless {
+		return nil
+	}
+
+	lck, err := l.getLock(ctx)
+	if err != nil {
+		return fmt.Errorf("repository lock lost %x: %w", l.lockid, err)
+	}
+
+	if lck.IsStale() {
+		return fmt.Errorf("repository lock stale %x", l.lockid)
+	}
+
+	return nil
+}
+
+func (l *LockedRepository) getLock(ctx context.Context) (*Lock, error) {
 	rd, err := l.repo.GetLock(ctx, l.lockid)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch the repository lock: %w", err)

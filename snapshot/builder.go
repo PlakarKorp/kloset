@@ -243,15 +243,8 @@ func (snap *Builder) AppContext() *kcontext.KContext {
 // visible. Refuse to if our lock is gone or stale: maintenance may have run
 // under us and removed packfiles this snapshot references.
 func (snap *Builder) commitState(stateID objects.MAC) error {
-	if !snap.lock.Lockless {
-		lock, err := snap.lock.GetLock(snap.AppContext())
-		if err != nil {
-			return fmt.Errorf("snapshot not committed, repository lock lost: %w", err)
-		}
-
-		if lock.IsStale() {
-			return fmt.Errorf("snapshot not committed, repository lock went stale")
-		}
+	if err := snap.lock.Check(snap.AppContext()); err != nil {
+		return fmt.Errorf("snapshot not committed: %w", err)
 	}
 
 	return snap.repository.CommitTransaction(stateID)

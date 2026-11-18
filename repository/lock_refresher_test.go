@@ -151,3 +151,58 @@ func TestUnlockInterruptsRefresh(t *testing.T) {
 		require.Len(t, store.LandedLocks(), 1)
 	})
 }
+
+func TestLockCheck(t *testing.T) {
+	t.Run("held", func(t *testing.T) {
+		repo, store := newLockRepository(t)
+
+		synctest.Test(t, func(t *testing.T) {
+			lock, err := repo.Lock(objects.RandomMAC())
+			require.NoError(t, err)
+
+			require.NoError(t, lock.Check(repo.AppContext()))
+
+			requireReleased(t, lock, store)
+		})
+	})
+
+	t.Run("removed", func(t *testing.T) {
+		repo, store := newLockRepository(t)
+
+		synctest.Test(t, func(t *testing.T) {
+			lockID := objects.RandomMAC()
+			lock, err := repo.Lock(lockID)
+			require.NoError(t, err)
+
+			require.NoError(t, store.RemoveLock(lockID))
+			require.ErrorContains(t, lock.Check(repo.AppContext()), "repository lock lost")
+
+			requireReleased(t, lock, store)
+		})
+	})
+
+	t.Run("stale", func(t *testing.T) {
+		repo, store := newLockRepository(t)
+
+		synctest.Test(t, func(t *testing.T) {
+			lock, err := repo.Lock(objects.RandomMAC())
+			require.NoError(t, err)
+
+			// Refreshes fail fast, then the retry issued at 9m hangs until
+			// its deadline at 10m: the refresher only notices at its next
+			// tick, 10m30s, leaving the lock stale but the application not
+			// yet cancelled.
+			store.Set(true, 0)
+			time.Sleep(repository.LOCK_TTL - repository.LOCK_REFRESH_RATE/4)
+			store.Set(false, repository.LOCK_REFRESH_RATE)
+
+			time.Sleep(repository.LOCK_REFRESH_RATE/4 + repository.LOCK_REFRESH_RATE/30)
+			synctest.Wait()
+			require.NoError(t, repo.AppContext().Err())
+
+			require.ErrorContains(t, lock.Check(repo.AppContext()), "repository lock stale")
+
+			requireReleased(t, lock, store)
+		})
+	})
+}

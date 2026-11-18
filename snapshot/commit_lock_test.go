@@ -3,8 +3,6 @@ package snapshot_test
 import (
 	"context"
 	"testing"
-	"testing/synctest"
-	"time"
 
 	"github.com/PlakarKorp/kloset/connectors/storage"
 	"github.com/PlakarKorp/kloset/objects"
@@ -60,34 +58,4 @@ func TestCommitChecksLock(t *testing.T) {
 			require.NoError(t, builder.Close())
 		})
 	}
-}
-
-func TestCommitRefusesStaleLock(t *testing.T) {
-	t.Setenv("PLAKAR_LOCKLESS", "false")
-	repo, store := ptesting.GenerateLockStoreRepository(t)
-
-	synctest.Test(t, func(t *testing.T) {
-		// Create takes the lock, so it must run in the bubble for the
-		// refresher to run on the fake clock.
-		builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac, &snapshot.BuilderOptions{
-			NoCheckpoint: true,
-		})
-		require.NoError(t, err)
-
-		// Refreshes fail fast, then the retry issued at 9m hangs until its
-		// deadline at 10m: the refresher only notices at its next tick,
-		// 10m30s, leaving the lock stale but the backup not yet cancelled.
-		store.Set(true, 0)
-		time.Sleep(repository.LOCK_TTL - repository.LOCK_REFRESH_RATE/4)
-		store.Set(false, repository.LOCK_REFRESH_RATE)
-
-		time.Sleep(repository.LOCK_REFRESH_RATE/4 + repository.LOCK_REFRESH_RATE/30)
-		synctest.Wait()
-		require.NoError(t, builder.AppContext().Err())
-
-		require.ErrorContains(t, builder.Commit(), "repository lock went stale")
-
-		require.NoError(t, builder.Close())
-		store.RequireNoLocks(t)
-	})
 }
