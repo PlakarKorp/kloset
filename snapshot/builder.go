@@ -1,13 +1,9 @@
 package snapshot
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"os"
 	"runtime"
-	"slices"
-	"strconv"
 	"sync/atomic"
 	"time"
 
@@ -44,9 +40,7 @@ type Builder struct {
 	Header  *header.Header
 	emitter *events.Emitter
 
-	lockReleaser chan bool
-	lockReleased chan error
-	lockless     bool
+	lock *repository.LockedRepository
 
 	beginTime time.Time
 
@@ -127,12 +121,14 @@ func Create(repo *repository.Repository, packingStrategy repository.RepositoryTy
 	snap.repository = repo.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, packfileTmpDir)
 	snap.emitter = snap.Emitter("backup")
 
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil, err
+	if !builderOptions.NoLock {
+		lock, err := snap.repository.LockShared(snap.Header.Identifier)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil, err
+		}
+		snap.lock = lock
 	}
-	snap.lockReleaser = done
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
@@ -156,12 +152,14 @@ func CreateWithRepositoryWriter(repo *repository.RepositoryWriter, builderOption
 	snap.repository = repo
 	snap.emitter = snap.Emitter("backup")
 
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil, err
+	if !builderOptions.NoLock {
+		lock, err := snap.repository.LockShared(snap.Header.Identifier)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil, err
+		}
+		snap.lock = lock
 	}
-	snap.lockReleaser = done
 
 	repo.Logger().Trace("snapshot", "%x: Create()", snap.Header.GetIndexShortID())
 
@@ -205,12 +203,14 @@ func (src *Snapshot) Fork(builderOptions *BuilderOptions) (*Builder, error) {
 	snap.repository = src.repository.NewRepositoryWriter(snap.scanCache, snap.Header.Identifier, packingStrategy, "")
 	snap.emitter = snap.Emitter("backup")
 
-	done, err := snap.Lock()
-	if err != nil {
-		snap.repository.PackerManager.Wait()
-		return nil, err
+	if !builderOptions.NoLock {
+		lock, err := snap.repository.LockShared(snap.Header.Identifier)
+		if err != nil {
+			snap.repository.PackerManager.Wait()
+			return nil, err
+		}
+		snap.lock = lock
 	}
-	snap.lockReleaser = done
 
 	src.repository.Logger().Trace("snapshot", "%x: Fork()", snap.Header.GetIndexShortID())
 
@@ -225,8 +225,10 @@ func (snap *Builder) Close() error {
 	snap.Logger().Trace("snapshotBuilder", "%x: Close(): %x", snap.Header.Identifier, snap.Header.GetIndexShortID())
 	defer snap.emitter.Close()
 
-	if err := snap.Unlock(); err != nil {
-		snap.Logger().Warn("failed to release lock %x (%s), you might need to remove it manually", snap.Header.Identifier, err)
+	if snap.lock != nil {
+		if err := snap.lock.Unlock(); err != nil {
+			snap.Logger().Warn("failed to release lock %x (%s), you might need to remove it manually", snap.Header.Identifier, err)
+		}
 	}
 
 	if snap.scanCache != nil {
@@ -244,180 +246,17 @@ func (snap *Builder) AppContext() *kcontext.KContext {
 	return snap.repository.AppContext()
 }
 
-func (snap *Builder) Lock() (chan bool, error) {
-	lockless, _ := strconv.ParseBool(os.Getenv("PLAKAR_LOCKLESS"))
-	lockReleaser := make(chan bool)
-	snap.lockReleased = make(chan error, 1)
-	snap.lockless = lockless
-	if lockless {
-		close(snap.lockReleased)
-		return lockReleaser, nil
-	}
-
-	lock := repository.NewSharedLock(snap.appContext.Hostname)
-
-	buffer := &bytes.Buffer{}
-	err := lock.SerializeToStream(buffer)
-	if err != nil {
-		return nil, err
-	}
-
-	_, err = snap.repository.PutLock(snap.AppContext(), snap.Header.Identifier, buffer)
-	if err != nil {
-		return nil, err
-	}
-
-	// We installed the lock, now let's see if there is a conflicting exclusive lock or not.
-	locksID, err := snap.repository.GetLocks(snap.AppContext())
-	if err != nil {
-		// We still need to delete it, and we need to do so manually.
-		snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
-		return nil, err
-	}
-
-	for _, lockID := range locksID {
-		if lockID == snap.Header.Identifier {
-			continue
-		}
-
-		rd, err := snap.repository.GetLock(snap.AppContext(), lockID)
-		if err != nil {
-			// Err can't tell us if it's not found or a transport error, so
-			// relist because it might have been Deleted by another process in
-			// which case it's fine to continue
-			if lockIDs, err := snap.repository.GetLocks(snap.AppContext()); err == nil {
-				if !slices.Contains(lockIDs, lockID) {
-					continue
-				}
-			}
-
-			// Okay it was an actual error we can't proceed further
-			snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
-			return nil, err
-		}
-
-		lock, err := repository.NewLockFromStream(rd)
-		rd.Close()
-		if err != nil {
-			snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
-			return nil, err
-		}
-
-		/* Kick out stale locks */
-		if lock.IsStale() {
-			if err := snap.repository.DeleteLock(snap.AppContext(), lockID); err != nil {
-				// Failure to delete is not an hardstop, either it was already
-				// deleted, or there is a real failure to do it, but this lock
-				// is Shared so we can keep going on.
-				snap.Logger().Warn("failed to remove stale lock %x: %s", lockID, err)
-			}
-
-			continue
-		}
-
-		// There is an exclusive lock in place, we need to abort.
-		if lock.Exclusive {
-			err := snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
-			if err != nil {
-				return nil, err
-			}
-
-			return nil, fmt.Errorf("Can't take repository lock, it's already locked by maintenance.")
-		}
-	}
-
-	// The following bit is a "ping" mechanism, Lock() is a bit badly named at this point,
-	// we are just refreshing the existing lock so that the others don't consider
-	// us stale and kick us out.
-	go func() {
-		lastRefresh := lock.Timestamp
-		refresh := time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
-
-		for {
-			select {
-			case <-lockReleaser:
-				snap.lockReleased <- snap.repository.DeleteLock(snap.AppContext(), snap.Header.Identifier)
-				return
-			case <-refresh:
-
-				// We retried hard to update the lock but failed and it's now
-				// stale, so abort everything before a concurrent operation
-				// thinks it's okay to start.
-				if time.Since(lastRefresh) >= repository.LOCK_TTL {
-					snap.appContext.Cancel(fmt.Errorf("lock refresher: failed to refresh the repository lock for %s", time.Since(lastRefresh)))
-					refresh = nil
-					continue
-				}
-
-				lock := repository.NewSharedLock(snap.appContext.Hostname)
-				buffer := &bytes.Buffer{}
-				lock.SerializeToStream(buffer)
-				tctx, cancel := context.WithDeadline(snap.AppContext(), lastRefresh.Add(repository.LOCK_TTL))
-
-				// Before updating our lock, check if it's still present. If it
-				// was removed, either someone is doing something fishy, or
-				// another process thought we were stale. In any case this will
-				// lead to an abort (after a retry period).
-				_, err := snap.getLock(tctx)
-				if err == nil {
-					_, err = snap.repository.PutLock(tctx, snap.Header.Identifier, buffer)
-				}
-				cancel()
-
-				if err != nil {
-					// For some storage reason the refresh failed, warn the user
-					// and retry sooner than the normal rate so that we don't
-					// have to abort the backup.
-					snap.Logger().Warn("failed to refresh the repository lock: %s", err)
-					refresh = time.After(repository.LOCK_REFRESH_RATE / 10)
-					continue
-				}
-
-				lastRefresh = lock.Timestamp
-				refresh = time.After(time.Until(lastRefresh.Add(repository.LOCK_REFRESH_RATE)))
-			}
-		}
-	}()
-
-	return lockReleaser, nil
-}
-
-func (snap *Builder) getLock(ctx context.Context) (*repository.Lock, error) {
-	rd, err := snap.repository.GetLock(ctx, snap.Header.Identifier)
-	if err != nil {
-		return nil, fmt.Errorf("failed to fetch the repository lock: %w", err)
-	}
-	defer rd.Close()
-
-	lock, err := repository.NewLockFromStream(rd)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read the repository lock: %w", err)
-	}
-
-	return lock, nil
-}
-
 // commitState pushes the final state, which is what makes the snapshot
 // visible. Refuse to if our lock is gone or stale: maintenance may have run
 // under us and removed packfiles this snapshot references.
 func (snap *Builder) commitState(stateID objects.MAC) error {
-	if !snap.lockless {
-		lock, err := snap.getLock(snap.AppContext())
-		if err != nil {
-			return fmt.Errorf("snapshot not committed, repository lock lost: %w", err)
-		}
-
-		if lock.IsStale() {
-			return fmt.Errorf("snapshot not committed, repository lock went stale")
+	if snap.lock != nil {
+		if err := snap.lock.Check(snap.AppContext()); err != nil {
+			return fmt.Errorf("snapshot not committed: %w", err)
 		}
 	}
 
 	return snap.repository.CommitTransaction(stateID)
-}
-
-func (snap *Builder) Unlock() error {
-	close(snap.lockReleaser)
-	return <-snap.lockReleased
 }
 
 func (snap *Builder) flushDeltaState() {
