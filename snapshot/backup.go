@@ -76,6 +76,7 @@ type BuilderOptions struct {
 	NoCheckpoint    bool
 	NoCommit        bool
 	NoXattr         bool
+	NoLock          bool
 	ForcedTimestamp time.Time
 	StateRefresher  func(objects.MAC, bool) error
 }
