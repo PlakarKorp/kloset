@@ -1,52 +1,10 @@
 package caching
 
 import (
-	"fmt"
-
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/caching/sqlite"
 	"github.com/vmihailenco/msgpack/v5"
 )
-
-// DBStore implements btree.Storer
-type DBStore[K any, V any] struct {
-	Prefix string
-	idx    int
-	Cache  *ScanCache
-}
-
-func (ds *DBStore[K, V]) Get(idx int) (*btree.Node[K, int, V], error) {
-	bytes, err := ds.Cache.cache.Get(fmt.Appendf(nil, "%s:%d", ds.Prefix, idx))
-	if err != nil {
-		return nil, err
-	}
-	node := &btree.Node[K, int, V]{}
-	err = msgpack.Unmarshal(bytes, node)
-	return node, nil
-}
-
-func (ds *DBStore[K, V]) Update(idx int, node *btree.Node[K, int, V]) error {
-	bytes, err := msgpack.Marshal(node)
-	if err != nil {
-		return err
-	}
-	return ds.Cache.cache.Put(fmt.Appendf(nil, "%s:%d", ds.Prefix, idx), bytes)
-}
-
-func (ds *DBStore[K, V]) Put(node *btree.Node[K, int, V]) (int, error) {
-	ds.idx++
-	idx := ds.idx
-	bytes, err := msgpack.Marshal(node)
-	if err != nil {
-		return 0, err
-	}
-	return idx, ds.Cache.cache.Put(fmt.Appendf(nil, "%s:%d", ds.Prefix, idx), bytes)
-}
-
-func (ds *DBStore[K, V]) Close() error {
-	// We do not own the cache.
-	return nil
-}
 
 // SQLiteDBStore implements btree.Storer
 type SQLiteDBStore[K any, V any] struct {
