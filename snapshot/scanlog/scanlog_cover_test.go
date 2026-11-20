@@ -44,9 +44,8 @@ func TestListEarlyStop(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/x/a", mac, []byte("a")))
 	require.NoError(t, sl.PutDirectory("/x/b", mac, []byte("b")))
 
-	// list() with withEntry=false (ListDirectories).
 	count := 0
-	for _, err := range sl.ListDirectories("/x/", false) {
+	for _, err := range sl.ListPathnames("/x/", false) {
 		require.NoError(t, err)
 		count++
 		break
@@ -173,10 +172,6 @@ func TestQueryErrorsAfterClose(t *testing.T) {
 	require.Error(t, b.Commit())
 
 	// list iterators: Query() error path => no entries yielded, no panic.
-	for _, err := range sl.ListDirectories("/q/", false) {
-		require.NoError(t, err)
-		t.Fatal("expected no entries from a closed db")
-	}
 	for _, err := range sl.ListDirectPathnames("/q", false) {
 		require.NoError(t, err)
 		t.Fatal("expected no entries from a closed db")

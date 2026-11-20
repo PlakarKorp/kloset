@@ -358,14 +358,6 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bo
 	}
 }
 
-func (s *ScanLog) ListFiles(kind EntryKind, prefix string, reverse bool) iter.Seq2[*Entry, error] {
-	return s.list(KindFile, prefix, reverse, false)
-}
-
-func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq2[*Entry, error] {
-	return s.list(KindDirectory, prefix, reverse, false)
-}
-
 func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq2[*Entry, error] {
 	return s.list(0, prefix, reverse, false)
 }
