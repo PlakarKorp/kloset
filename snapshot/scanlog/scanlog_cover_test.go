@@ -44,9 +44,8 @@ func TestListEarlyStop(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/x/a", mac, []byte("a")))
 	require.NoError(t, sl.PutDirectory("/x/b", mac, []byte("b")))
 
-	// list() with withEntry=false (ListDirectories).
 	count := 0
-	for _, err := range sl.ListDirectories("/x/", false) {
+	for _, err := range sl.ListPathnames("/x/", false) {
 		require.NoError(t, err)
 		count++
 		break
@@ -173,9 +172,6 @@ func TestQueryErrorsAfterClose(t *testing.T) {
 	require.Error(t, b.Commit())
 
 	// list iterators: Query() error path => only one error yielded.
-	for _, err := range sl.ListDirectories("/q/", false) {
-		require.Error(t, err)
-	}
 	for _, err := range sl.ListDirectPathnames("/q", false) {
 		require.Error(t, err)
 	}

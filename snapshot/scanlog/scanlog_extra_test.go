@@ -20,11 +20,11 @@ func TestListReverse(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/c", mac, []byte("c")))
 
 	var fwd, rev []scanlog.Entry
-	for e, err := range sl.ListDirectories("/", false) {
+	for e, err := range sl.ListPathnames("/", false) {
 		require.NoError(t, err)
 		fwd = append(fwd, *e)
 	}
-	for e, err := range sl.ListDirectories("/", true) {
+	for e, err := range sl.ListPathnames("/", true) {
 		require.NoError(t, err)
 		rev = append(rev, *e)
 	}
@@ -35,31 +35,6 @@ func TestListReverse(t *testing.T) {
 	for i, j := 0, len(rev)-1; i < len(fwd); i, j = i+1, j-1 {
 		require.Equal(t, fwd[i].Path, rev[j].Path)
 	}
-}
-
-// TestListFilesReverse verifies reverse listing of files.
-func TestListFilesReverse(t *testing.T) {
-	sl := newScanLog(t)
-	defer sl.Close()
-
-	mac := objects.MAC{2}
-	require.NoError(t, sl.PutFile("/f1.txt", "text/plain", mac, []byte("1"), nil))
-	require.NoError(t, sl.PutFile("/f2.txt", "text/plain", mac, []byte("2"), nil))
-
-	var fwd, rev []scanlog.Entry
-	for e, err := range sl.ListFiles(scanlog.KindFile, "/", false) {
-		require.NoError(t, err)
-		fwd = append(fwd, *e)
-	}
-	for e, err := range sl.ListFiles(scanlog.KindFile, "/", true) {
-		require.NoError(t, err)
-		rev = append(rev, *e)
-	}
-
-	require.Len(t, fwd, 2)
-	require.Len(t, rev, 2)
-	require.Equal(t, fwd[0].Path, rev[1].Path)
-	require.Equal(t, fwd[1].Path, rev[0].Path)
 }
 
 // TestListDirectPathnamesReverse verifies the reverse flag in ListDirectPathnames.

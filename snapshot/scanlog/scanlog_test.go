@@ -69,39 +69,6 @@ func TestGetMissingFile(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestListDirectories(t *testing.T) {
-	sl := newScanLog(t)
-	defer sl.Close()
-
-	mac := objects.MAC{10}
-	require.NoError(t, sl.PutDirectory("/alpha", mac, []byte("a")))
-	require.NoError(t, sl.PutDirectory("/beta", mac, []byte("b")))
-	require.NoError(t, sl.PutDirectory("/gamma", mac, []byte("c")))
-
-	var dirs []string
-	for entry, err := range sl.ListDirectories("/", false) {
-		require.NoError(t, err)
-		dirs = append(dirs, entry.Path)
-	}
-	require.GreaterOrEqual(t, len(dirs), 3)
-}
-
-func TestListFiles(t *testing.T) {
-	sl := newScanLog(t)
-	defer sl.Close()
-
-	mac := objects.MAC{20}
-	require.NoError(t, sl.PutFile("/a.txt", "text/plain", mac, []byte("a"), nil))
-	require.NoError(t, sl.PutFile("/b.txt", "text/plain", mac, []byte("b"), nil))
-
-	var files []string
-	for entry, err := range sl.ListFiles(0, "/", false) {
-		require.NoError(t, err)
-		files = append(files, entry.Path)
-	}
-	require.GreaterOrEqual(t, len(files), 2)
-}
-
 func TestListPathnames(t *testing.T) {
 	sl := newScanLog(t)
 	defer sl.Close()
