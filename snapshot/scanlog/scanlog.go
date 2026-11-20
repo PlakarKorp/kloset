@@ -277,8 +277,8 @@ type Entry struct {
 	Summary []byte
 }
 
-func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bool) iter.Seq[Entry] {
-	return func(yield func(Entry) bool) {
+func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bool) iter.Seq2[*Entry, error] {
+	return func(yield func(*Entry, error) bool) {
 		hi := prefix + string([]byte{0xFF})
 
 		order := "ASC"
@@ -325,50 +325,49 @@ func (s *ScanLog) list(kind EntryKind, prefix string, reverse bool, withEntry bo
 
 			if !withEntry {
 				if err := rows.Scan(&kInt, &p, &ctype, &mac); err != nil {
+					yield(nil, err)
 					return
 				}
 			} else {
 				if err := rows.Scan(&kInt, &p, &ctype, &mac, &storedPayload); err != nil {
+					yield(nil, err)
 					return
 				}
 				payload, err = s.db.Decode(storedPayload)
 				if err != nil {
+					yield(nil, err)
 					return
 				}
 			}
 
-			if !yield(Entry{
+			if !yield(&Entry{
 				Kind:    EntryKind(kInt),
 				Path:    p,
 				Ctype:   ctype,
 				MAC:     objects.MAC(mac[:]),
 				Payload: payload,
-			}) {
+			}, nil) {
 				return
 			}
+		}
+
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
+			return
 		}
 	}
 }
 
-func (s *ScanLog) ListFiles(kind EntryKind, prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindFile, prefix, reverse, false)
-}
-
-func (s *ScanLog) ListDirectories(prefix string, reverse bool) iter.Seq[Entry] {
-	return s.list(KindDirectory, prefix, reverse, false)
-}
-
-func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq[Entry] {
+func (s *ScanLog) ListPathnames(prefix string, reverse bool) iter.Seq2[*Entry, error] {
 	return s.list(0, prefix, reverse, false)
 }
 
-func (s *ScanLog) ListPathnameEntries(prefix string, reverse bool) iter.Seq[Entry] {
+func (s *ScanLog) ListPathnameEntries(prefix string, reverse bool) iter.Seq2[*Entry, error] {
 	return s.list(0, prefix, reverse, true)
 }
 
-func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entry] {
-
-	return func(yield func(Entry) bool) {
+func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq2[*Entry, error] {
+	return func(yield func(*Entry, error) bool) {
 		query := s.listPathnamesAscQ
 		if reverse {
 			query = s.listPathnamesDescQ
@@ -388,11 +387,13 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 			var storedPayload []byte
 			var storedSummary []byte
 			if err := rows.Scan(&k, &p, &storedPayload, &storedSummary); err != nil {
+				yield(nil, err)
 				return
 			}
 
 			payload, err := s.db.Decode(storedPayload)
 			if err != nil {
+				yield(nil, err)
 				return
 			}
 
@@ -400,18 +401,24 @@ func (s *ScanLog) ListDirectPathnames(parent string, reverse bool) iter.Seq[Entr
 			if storedSummary != nil {
 				summary, err = s.db.Decode(storedSummary)
 				if err != nil {
+					yield(nil, err)
 					return
 				}
 			}
 
-			if !yield(Entry{
+			if !yield(&Entry{
 				Kind:    EntryKind(k),
 				Path:    p,
 				Payload: payload,
 				Summary: summary,
-			}) {
+			}, nil) {
 				return
 			}
+		}
+
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
+			return
 		}
 	}
 }
@@ -448,8 +455,8 @@ func (s *ScanLog) GetPathMAC(kind PathMACKind, p string) (objects.MAC, error) {
 	return objects.MAC(stored[:]), nil
 }
 
-func (s *ScanLog) ListPathMACsFrom(kind PathMACKind, prefix string) iter.Seq[PathMACEntry] {
-	return func(yield func(PathMACEntry) bool) {
+func (s *ScanLog) ListPathMACsFrom(kind PathMACKind, prefix string) iter.Seq2[*PathMACEntry, error] {
+	return func(yield func(*PathMACEntry, error) bool) {
 		hi := prefix + string([]byte{0xFF})
 
 		rows, err := s.db.Query(
@@ -470,9 +477,14 @@ func (s *ScanLog) ListPathMACsFrom(kind PathMACKind, prefix string) iter.Seq[Pat
 			if len(stored) != 32 {
 				return
 			}
-			if !yield(PathMACEntry{Path: p, MAC: objects.MAC(stored[:])}) {
+			if !yield(&PathMACEntry{Path: p, MAC: objects.MAC(stored[:])}, nil) {
 				return
 			}
+		}
+
+		if err := rows.Err(); err != nil {
+			yield(nil, err)
+			return
 		}
 	}
 }
