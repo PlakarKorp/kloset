@@ -46,7 +46,8 @@ func TestListEarlyStop(t *testing.T) {
 
 	// list() with withEntry=false (ListDirectories).
 	count := 0
-	for range sl.ListDirectories("/x/", false) {
+	for _, err := range sl.ListDirectories("/x/", false) {
+		require.NoError(t, err)
 		count++
 		break
 	}
@@ -55,7 +56,8 @@ func TestListEarlyStop(t *testing.T) {
 	// list() with withEntry=true (ListPathnameEntries) — also exercises the
 	// payload Decode path.
 	count = 0
-	for e := range sl.ListPathnameEntries("/x/", false) {
+	for e, err := range sl.ListPathnameEntries("/x/", false) {
+		require.NoError(t, err)
 		require.NotNil(t, e.Payload)
 		count++
 		break
@@ -76,7 +78,8 @@ func TestListDirectPathnamesWithSummaryAndStop(t *testing.T) {
 
 	// Full iteration to hit the summary path on at least one entry.
 	var withSummary int
-	for e := range sl.ListDirectPathnames("/parent", false) {
+	for e, err := range sl.ListDirectPathnames("/parent", false) {
+		require.NoError(t, err)
 		if e.Summary != nil {
 			withSummary++
 		}
@@ -85,7 +88,8 @@ func TestListDirectPathnamesWithSummaryAndStop(t *testing.T) {
 
 	// Early stop after the first entry.
 	count := 0
-	for range sl.ListDirectPathnames("/parent", false) {
+	for _, err := range sl.ListDirectPathnames("/parent", false) {
+		require.NoError(t, err)
 		count++
 		break
 	}
@@ -102,13 +106,15 @@ func TestListPathMACsFromWithDataAndStop(t *testing.T) {
 	require.NoError(t, sl.PutPathMAC(scanlog.KindError, "/e/two", objects.MAC{0x22}))
 
 	var all []scanlog.PathMACEntry
-	for e := range sl.ListPathMACsFrom(scanlog.KindError, "/e/") {
-		all = append(all, e)
+	for e, err := range sl.ListPathMACsFrom(scanlog.KindError, "/e/") {
+		require.NoError(t, err)
+		all = append(all, *e)
 	}
 	require.Len(t, all, 2)
 
 	count := 0
-	for range sl.ListPathMACsFrom(scanlog.KindError, "/e/") {
+	for _, err := range sl.ListPathMACsFrom(scanlog.KindError, "/e/") {
+		require.NoError(t, err)
 		count++
 		break
 	}
@@ -167,13 +173,16 @@ func TestQueryErrorsAfterClose(t *testing.T) {
 	require.Error(t, b.Commit())
 
 	// list iterators: Query() error path => no entries yielded, no panic.
-	for range sl.ListDirectories("/q/", false) {
+	for _, err := range sl.ListDirectories("/q/", false) {
+		require.NoError(t, err)
 		t.Fatal("expected no entries from a closed db")
 	}
-	for range sl.ListDirectPathnames("/q", false) {
+	for _, err := range sl.ListDirectPathnames("/q", false) {
+		require.NoError(t, err)
 		t.Fatal("expected no entries from a closed db")
 	}
-	for range sl.ListPathMACsFrom(scanlog.KindError, "/q/") {
+	for _, err := range sl.ListPathMACsFrom(scanlog.KindError, "/q/") {
+		require.NoError(t, err)
 		t.Fatal("expected no entries from a closed db")
 	}
 }
