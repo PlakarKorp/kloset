@@ -58,32 +58,39 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 	}
 
 	slices.SortFunc(is, func(a, b importer.Importer) int {
-		return strings.Compare(a.Root(), b.Root())
+		return strings.Compare(sanitizeRoot(a.Root()), sanitizeRoot(b.Root()))
 	})
 
 	// Dedup common paths and shadowed paths eg:
 	// /etc/foo, /etc would be one /etc import.
 	paths := []string{}
 	for _, p := range is {
+		root := sanitizeRoot(p.Root())
 		foundPrefix := false
-		for _, m := range s.importers {
-			if pathIsWithin(p.Root(), m.Root()) || pathEqual(p.Root(), m.Root()) {
+		for _, m := range paths {
+			if pathIsWithin(root, m) || pathEqual(root, m) {
 				foundPrefix = true
 				break
 			}
 		}
 		if !foundPrefix {
 			s.importers = append(s.importers, p)
-			paths = append(paths, p.Root())
+			paths = append(paths, root)
 		}
 	}
 
 	// Now that everything is dedup'ed find the common root prefix eg:
 	// /etc/bar, /etc/baz would have /etc as the common root.
-	s.root = commonPathPrefixSlice(paths)
-	s.root = path.Clean(s.root)
+	s.root = sanitizeRoot(commonPathPrefixSlice(paths))
 
 	return s, nil
+}
+
+func sanitizeRoot(root string) string {
+	if !path.IsAbs(root) {
+		root = "/" + root
+	}
+	return path.Clean(root)
 }
 
 func pathIsWithin(pathname string, within string) bool {
