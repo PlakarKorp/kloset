@@ -25,6 +25,8 @@ type Source struct {
 	failure error
 
 	maxReadRate int64
+
+	PreviousSnap *Snapshot
 }
 
 func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, error) {

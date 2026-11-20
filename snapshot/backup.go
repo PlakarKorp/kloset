@@ -24,12 +24,14 @@ import (
 	"github.com/PlakarKorp/kloset/iostat"
 	"github.com/PlakarKorp/kloset/logging"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/repository"
 	"github.com/PlakarKorp/kloset/resources"
 	"github.com/PlakarKorp/kloset/snapshot/header"
 	"github.com/PlakarKorp/kloset/snapshot/scanlog"
 	"github.com/PlakarKorp/kloset/snapshot/vfs"
 	"github.com/PlakarKorp/kloset/throttle"
 	"github.com/gabriel-vasile/mimetype"
+	"github.com/vmihailenco/msgpack/v5"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -748,61 +750,131 @@ func (snap *Builder) tmpCacheDir() string {
 	return path.Join(snap.AppContext().CacheDir, caching.CACHE_VERSION, fmt.Sprintf("dbstorer-%x", snap.Header.Identifier))
 }
 
-func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
+func (sc *sourceContext) makeBackupIndexes() (*sourceIndexes, error) {
 	bi := &sourceIndexes{}
 
-	vfsstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "vfs")
+	makeStore := func(rootType, nodeType resources.Type, name string, btreeRoot objects.MAC) (btree.Storer[string, int, objects.MAC], error) {
+		rd, err := sc.builder.repository.GetBlob(rootType, btreeRoot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch btreeRoot %w", err)
+		}
+
+		backing := repository.NewRepositoryStore[string, objects.MAC](sc.builder.repository.Repository, nodeType)
+
+		var root btree.BTree[string, objects.MAC, objects.MAC]
+		if err := msgpack.NewDecoder(rd).Decode(&root); err != nil {
+			return nil, fmt.Errorf("failed to decode btreeRoot %w", err)
+		}
+
+		cowStore, err := caching.NewCowSQLiteDBStore(sc.builder.tmpCacheDir(), name, root.Root, backing)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create cowsqlite store %w", err)
+		}
+
+		return cowStore, nil
+
+	}
+
+	if ps := sc.source.PreviousSnap; ps != nil {
+	vfsstore, err := makeStore(resources.RT_VFS_BTREE, resources.RT_VFS_NODE, "vfs", ps.Header.Sources[0].VFS.Root)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make cow vfs store %w", err)
+		}
+
+		errstore, err := makeStore(resources.RT_ERROR_BTREE, resources.RT_ERROR_NODE, "error", ps.Header.Sources[0].VFS.Errors)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make cow err store %w", err)
+		}
+
+		xattrstore, err := makeStore(resources.RT_XATTR_BTREE, resources.RT_XATTR_NODE, "xattr", ps.Header.Sources[0].VFS.Xattrs)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make cow xattr store %w", err)
+		}
+
+		ctroot, _ := ps.ContentTypeIdxRoot()
+		ctstore, err := makeStore(resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, "contenttype", ctroot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make cow ctindex store %w", err)
+		}
+
+		dproot, _ := ps.DirPackRoot()
+		dirpackstore, err := makeStore(resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, "dirpack", dproot)
+		if err != nil {
+			return nil, fmt.Errorf("failed to make cow dirpack store %w", err)
+		}
+
+		if bi.vfsidx, err = btree.FromStorage(1, vfsstore, vfs.PathCmp, 50); err !=nil {
+			return nil, fmt.Errorf("failed to open vfs cow store %w", err)
+		}
+
+		if bi.erridx, err = btree.FromStorage(1, errstore, strings.Compare, 50); err != nil {
+			return nil, fmt.Errorf("failed to open err cow store %w", err)
+		}
+
+		if bi.xattridx, err = btree.FromStorage(1, xattrstore, vfs.PathCmp, 50); err != nil {
+			return nil, fmt.Errorf("failed to open xattr cow store %w", err)
+		}
+
+		if bi.ctidx, err = btree.FromStorage(1, ctstore, strings.Compare, 50); err != nil {
+			return nil, fmt.Errorf("failed to open ctindex cow store %w", err)
+		}
+
+		if bi.dirpackidx, err = btree.FromStorage(1, dirpackstore, strings.Compare, 50); err != nil {
+			return nil, fmt.Errorf("failed to open dirpack cow store %w", err)
+		}
+
+	} else {
+		vfsstore, err := caching.NewSQLiteDBStore[string, objects.MAC](sc.builder.tmpCacheDir(), "vfs")
+		if err != nil {
+			return nil, err
+		}
+
+		errstore, err := caching.NewSQLiteDBStore[string, objects.MAC](sc.builder.tmpCacheDir(), "error")
+		if err != nil {
+			return nil, err
+		}
+
+		xattrstore, err := caching.NewSQLiteDBStore[string, objects.MAC](sc.builder.tmpCacheDir(), "xattr")
+		if err != nil {
+			return nil, err
+		}
+
+		ctstore, err := caching.NewSQLiteDBStore[string, objects.MAC](sc.builder.tmpCacheDir(), "contenttype")
+		if err != nil {
+			return nil, err
+		}
+
+		dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](sc.builder.tmpCacheDir(), "dirpack")
+		if err != nil {
+			return nil, err
+		}
+		bi.vfsidx, err = btree.New(vfsstore, vfs.PathCmp, 50)
+		if err != nil {
+			return nil, err
+		}
+
+		if bi.erridx, err = btree.New(errstore, strings.Compare, 50); err != nil {
+			return nil, err
+		}
+
+		if bi.xattridx, err = btree.New(xattrstore, vfs.PathCmp, 50); err != nil {
+			return nil, err
+		}
+
+		if bi.ctidx, err = btree.New(ctstore, strings.Compare, 50); err != nil {
+			return nil, err
+		}
+
+		if bi.dirpackidx, err = btree.New(dirpackstore, strings.Compare, 50); err != nil {
+			return nil, err
+		}
+	}
+
+	summarystore, err := caching.NewSQLiteDBStore[string, []byte](sc.builder.tmpCacheDir(), "summary")
 	if err != nil {
 		return nil, err
 	}
-
-	summarystore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "summary")
-	if err != nil {
-		return nil, err
-	}
-
-	errstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "error")
-	if err != nil {
-		return nil, err
-	}
-
-	xattrstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "xattr")
-	if err != nil {
-		return nil, err
-	}
-
-	ctstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "contenttype")
-	if err != nil {
-		return nil, err
-	}
-
-	dirpackstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "dirpack")
-	if err != nil {
-		return nil, err
-	}
-
-	bi.vfsidx, err = btree.New(vfsstore, vfs.PathCmp, 50)
-	if err != nil {
-		return nil, err
-	}
-
 	if bi.summaryidx, err = btree.New(summarystore, strings.Compare, 50); err != nil {
-		return nil, err
-	}
-
-	if bi.erridx, err = btree.New(errstore, strings.Compare, 50); err != nil {
-		return nil, err
-	}
-
-	if bi.xattridx, err = btree.New(xattrstore, vfs.PathCmp, 50); err != nil {
-		return nil, err
-	}
-
-	if bi.ctidx, err = btree.New(ctstore, strings.Compare, 50); err != nil {
-		return nil, err
-	}
-
-	if bi.dirpackidx, err = btree.New(dirpackstore, strings.Compare, 50); err != nil {
 		return nil, err
 	}
 
@@ -829,7 +901,7 @@ func (snap *Builder) prepareSourceContext(source *Source) (*sourceContext, error
 		scanLog:     scanLog,
 	}
 
-	if bi, err := snap.makeBackupIndexes(); err != nil {
+	if bi, err := sourceCtx.makeBackupIndexes(); err != nil {
 		return nil, err
 	} else {
 		sourceCtx.indexes = bi
