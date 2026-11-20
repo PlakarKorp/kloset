@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/PlakarKorp/kloset/btree"
 	"github.com/PlakarKorp/kloset/objects"
@@ -30,6 +31,10 @@ func (rs *RepositoryStore[K, V]) Get(sum objects.MAC) (*btree.Node[K, objects.MA
 	}
 	node := &btree.Node[K, objects.MAC, V]{}
 	err = msgpack.NewDecoder(rd).Decode(node)
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode %x node %x: %w", rs.blobtype, sum, err)
+	}
+
 	return node, nil
 }
 
