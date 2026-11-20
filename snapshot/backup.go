@@ -34,7 +34,7 @@ import (
 )
 
 type sourceIndexes struct {
-	vfsidx     *btree.BTree[string, int, []byte]
+	vfsidx     *btree.BTree[string, int, objects.MAC]
 	summaryidx *btree.BTree[string, int, []byte]
 	erridx     *btree.BTree[string, int, objects.MAC]
 	xattridx   *btree.BTree[string, int, objects.MAC]
@@ -751,7 +751,7 @@ func (snap *Builder) tmpCacheDir() string {
 func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 	bi := &sourceIndexes{}
 
-	vfsstore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "vfs")
+	vfsstore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "vfs")
 	if err != nil {
 		return nil, err
 	}
@@ -1441,7 +1441,7 @@ func (sourceCtx *sourceContext) buildVFSIndex() ([]string, error) {
 
 	directories := make([]string, 0)
 	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
-		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.Payload); err != nil && err != btree.ErrExists {
+		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return nil, err
 		}
 
@@ -1594,8 +1594,8 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 			sourceCtx.builder.appContext.GetLogger().Trace("import", "persisting vfs index took %s", time.Since(t0))
 		}()
 		m, err := persistIndex(snap, sourceCtx.indexes.vfsidx, resources.RT_VFS_BTREE,
-			resources.RT_VFS_NODE, func(data []byte) (objects.MAC, error) {
-				return snap.repository.ComputeMAC(data), nil
+			resources.RT_VFS_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
 			})
 		if err != nil {
 			return err
