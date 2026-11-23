@@ -35,7 +35,7 @@ func decodeDirpackStream(t *testing.T, prefix string, raw []byte) ([]*Entry, err
 	rd := bytes.NewReader(raw)
 	var out []*Entry
 	for rd.Len() > 0 {
-		_, siz, err := readDirPackHdr(rd)
+		_, siz, err := ReadDirPackHdr(rd)
 		if err != nil {
 			return out, err
 		}

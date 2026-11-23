@@ -1,6 +1,7 @@
 package vfs
 
 import (
+	"encoding/binary"
 	"errors"
 	"io"
 	"io/fs"
@@ -511,6 +512,71 @@ func (fsc *Filesystem) getEntryNoFollow(entrypath string) (*Entry, error) {
 	return entry, nil
 }
 
+// Low level routine that gives you an iterator of the frames of a
+// dirpack. Prefer using higher level APIs.
+// XXX: Code lifted from loadDirpackMapByMAC, some braver soul should merge all
+// those codepaths at some point.
+// The iterator aborts on any error, there is no point in going on.
+func (fsc *Filesystem) LoadDirpackMapFrames(parentPath string) (iter.Seq2[[]byte, error], error) {
+	objectMac, found, err := fsc.dirpack.Find(parentPath)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, fs.ErrNotExist
+	}
+
+	buffer, err := fsc.repo.GetBlobBytes(resources.RT_OBJECT, objectMac)
+	if err != nil {
+		return nil, err
+	}
+
+	obj, err := objects.NewObjectFromBytes(buffer)
+	if err != nil {
+		return nil, err
+	}
+
+	var size int64
+	for _, c := range obj.Chunks {
+		size += int64(c.Length)
+	}
+
+	rd := NewObjectReader(fsc.repo, obj, size, 8<<20)
+	return func(yield func([]byte, error) bool) {
+		// This is a bit special, because we want to return the frame as-is, and
+		// decode it as we go.
+		// First read the header (type + size) and then the body, reassemble and
+		// send to the consummer
+		for {
+			ret := make([]byte, 1+4)
+			if _, err := io.ReadFull(rd, ret); err != nil {
+				if errors.Is(err, io.EOF) {
+					break
+				}
+				yield(nil, err)
+				return
+			}
+
+			var siz uint32
+			if _, err := binary.Decode(ret[1:], binary.LittleEndian, &siz); err != nil {
+				yield(nil, err)
+				return
+			}
+
+			rest := make([]byte, siz)
+			if _, err := io.ReadFull(rd, rest); err != nil {
+				yield(nil, err)
+				return
+			}
+
+			ret = append(ret, rest...)
+			if !yield(ret, nil) {
+				return
+			}
+		}
+	}, nil
+}
+
 func (fsc *Filesystem) loadDirpackMap(parentPath string) (map[string]*Entry, error) {
 	objectMac, found, err := fsc.dirpack.Find(parentPath)
 	if err != nil {
@@ -558,7 +624,7 @@ func (fsc *Filesystem) loadDirpackMapByMAC(parentPath string, objectMac objects.
 func (fsc *Filesystem) decodeDirpackMap(rd io.Reader) (map[string]*Entry, error) {
 	cache := make(map[string]*Entry)
 	for {
-		_, siz, err := readDirPackHdr(rd)
+		_, siz, err := ReadDirPackHdr(rd)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				break

@@ -68,6 +68,13 @@ func Load(repo *repository.Repository, Identifier objects.MAC) (*Snapshot, error
 	snapshot.repository = repo
 	snapshot.Header = hdr
 
+	fs, err := snapshot.Filesystem()
+	if err != nil {
+		return nil, err
+	}
+
+	snapshot.filesystem = fs
+
 	repo.Logger().Trace("snapshot", "%x: Load()", snapshot.Header.GetIndexShortID())
 	return snapshot, nil
 }

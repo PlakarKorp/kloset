@@ -286,7 +286,7 @@ func (e *Entry) getdentsVfs(fsc *Filesystem) (iter.Seq2[*Entry, error], error) {
 	}, nil
 }
 
-func readDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
+func ReadDirPackHdr(rd io.Reader) (typ uint8, siz uint32, err error) {
 	endian := binary.LittleEndian
 	if err = binary.Read(rd, endian, &typ); err != nil {
 		return
@@ -339,7 +339,7 @@ func (fsc *Filesystem) dirpackEntries(prefix string, objectMac objects.MAC) (ite
 func dirpackEntriesIter(prefix string, rd io.Reader) iter.Seq2[*Entry, error] {
 	return func(yield func(*Entry, error) bool) {
 		for {
-			_, siz, err := readDirPackHdr(rd)
+			_, siz, err := ReadDirPackHdr(rd)
 			if err != nil {
 				if errors.Is(err, io.EOF) {
 					break

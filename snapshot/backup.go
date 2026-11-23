@@ -1,11 +1,13 @@
 package snapshot
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
+	"iter"
 	"math"
 	"mime"
 	"os"
@@ -776,7 +778,7 @@ func (sc *sourceContext) makeBackupIndexes() (*sourceIndexes, error) {
 	}
 
 	if ps := sc.source.PreviousSnap; ps != nil {
-	vfsstore, err := makeStore(resources.RT_VFS_BTREE, resources.RT_VFS_NODE, "vfs", ps.Header.Sources[0].VFS.Root)
+		vfsstore, err := makeStore(resources.RT_VFS_BTREE, resources.RT_VFS_NODE, "vfs", ps.Header.Sources[0].VFS.Root)
 		if err != nil {
 			return nil, fmt.Errorf("failed to make cow vfs store %w", err)
 		}
@@ -803,7 +805,7 @@ func (sc *sourceContext) makeBackupIndexes() (*sourceIndexes, error) {
 			return nil, fmt.Errorf("failed to make cow dirpack store %w", err)
 		}
 
-		if bi.vfsidx, err = btree.FromStorage(1, vfsstore, vfs.PathCmp, 50); err !=nil {
+		if bi.vfsidx, err = btree.FromStorage(1, vfsstore, vfs.PathCmp, 50); err != nil {
 			return nil, fmt.Errorf("failed to open vfs cow store %w", err)
 		}
 
@@ -1253,6 +1255,14 @@ func (sourceCtx *sourceContext) buildSummaries(builder *Builder, directories []s
 }
 
 func (sourceCtx *sourceContext) buildDirpack(builder *Builder, chunker *chunkers.Chunker, chkId int, pathname string) (objects.MAC, error) {
+	if sourceCtx.source.PreviousSnap != nil {
+		return sourceCtx.buildDirpackMerge(builder, chunker, chkId, pathname)
+	} else {
+		return sourceCtx.buildDirpackNormal(builder, chunker, chkId, pathname)
+	}
+}
+
+func (sourceCtx *sourceContext) buildDirpackNormal(builder *Builder, chunker *chunkers.Chunker, chkId int, pathname string) (objects.MAC, error) {
 	pr, pw := io.Pipe()
 	resCh := make(chan chunkifyResult, 1)
 
@@ -1280,6 +1290,120 @@ func (sourceCtx *sourceContext) buildDirpack(builder *Builder, chunker *chunkers
 
 		default:
 			err := fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+			pw.CloseWithError(err)
+			return objects.NilMac, err
+		}
+	}
+
+	pw.Close()
+	res := <-resCh
+	if res.err != nil {
+		return objects.NilMac, fmt.Errorf("chunkify failed for %s: %w", pathname, res.err)
+	}
+
+	return res.mac, nil
+}
+
+func (sourceCtx *sourceContext) buildDirpackMerge(builder *Builder, chunker *chunkers.Chunker, chkId int, pathname string) (objects.MAC, error) {
+	pr, pw := io.Pipe()
+	resCh := make(chan chunkifyResult, 1)
+
+	go func() {
+		mac, err := builder.chunkifyDirpack(chunker, chkId, pr)
+		resCh <- chunkifyResult{mac: mac, err: err}
+	}()
+
+	prevFrames, err := sourceCtx.source.PreviousSnap.filesystem.LoadDirpackMapFrames(pathname)
+	if err != nil {
+		return objects.NilMac, err
+	}
+	nextFrame, stop := iter.Pull2(prevFrames)
+	defer stop()
+
+	// Sorry not sorry
+	nextDecodedFrame := func() ([]byte, string, error, bool) {
+		f, err, ok := nextFrame()
+		if err != nil  {
+			return nil, "", err, ok
+		}
+
+		if !ok {
+			return nil, "", nil, ok
+		}
+
+		rd := bytes.NewReader(f)
+		_, siz, err := vfs.ReadDirPackHdr(rd)
+		var entry vfs.Entry
+		lrd := io.LimitReader(rd, int64(siz-uint32(len(entry.MAC))))
+		err = msgpack.NewDecoder(lrd).Decode(&entry)
+		if err != nil {
+			return nil, "", err, ok
+		}
+
+		return f, entry.FileInfo.Lname, nil, ok
+	}
+
+	f, lname, err, ok := nextDecodedFrame()
+	if err != nil {
+		return objects.NilMac, err
+	}
+
+	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
+		if err := builder.AppContext().Err(); err != nil {
+			pw.CloseWithError(err)
+			return objects.NilMac, err
+		}
+
+		// Current entry is after those entries, just push them back
+		for ok && path.Join(pathname, lname) < e.Path {
+			if _, err := pw.Write(f); err != nil {
+				pw.CloseWithError(err)
+				return objects.NilMac, err
+			}
+
+			// go to next entry and check again
+			f, lname, err, ok = nextDecodedFrame()
+			if err != nil {
+				pw.CloseWithError(err)
+				return objects.NilMac, err
+			}
+		}
+
+		if ok && path.Join(pathname, lname) < e.Path {
+			err = fmt.Errorf("collision during merge of vfs %s", e.Path)
+			pw.CloseWithError(err)
+			return objects.NilMac, err
+		}
+
+		switch e.Kind {
+		case scanlog.KindFile:
+			if err := writeFrame(builder, pw, TypeVFSFile, e.Payload); err != nil {
+				pw.CloseWithError(err)
+				return objects.NilMac, err
+			}
+		case scanlog.KindDirectory:
+			if err := writeFrame(builder, pw, TypeVFSDirectory, e.Payload); err != nil {
+				pw.CloseWithError(err)
+				return objects.NilMac, err
+			}
+
+		default:
+			err := fmt.Errorf("unexpected entry kind %d for path %q", e.Kind, e.Path)
+			pw.CloseWithError(err)
+			return objects.NilMac, err
+		}
+	}
+
+	// There might still be more entries that sort after us
+	for ok {
+		if _, err := pw.Write(f); err != nil {
+			pw.CloseWithError(err)
+			return objects.NilMac, err
+		}
+
+		// go to next entry and check again
+		f, _, err, ok = nextDecodedFrame()
+		if err != nil {
 			pw.CloseWithError(err)
 			return objects.NilMac, err
 		}
@@ -1368,7 +1492,7 @@ func (sourceCtx *sourceContext) buildDirpacks(builder *Builder, directories []st
 	}
 
 	for idx, directory := range directories {
-		if err := sourceCtx.indexes.dirpackidx.Insert(directory, macs[idx]); err != nil {
+		if err := sourceCtx.indexes.dirpackidx.Update(directory, macs[idx]); err != nil {
 			return err
 		}
 	}
