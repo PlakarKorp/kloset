@@ -20,11 +20,13 @@ func TestListReverse(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/c", mac, []byte("c")))
 
 	var fwd, rev []scanlog.Entry
-	for e := range sl.ListDirectories("/", false) {
-		fwd = append(fwd, e)
+	for e, err := range sl.ListDirectories("/", false) {
+		require.NoError(t, err)
+		fwd = append(fwd, *e)
 	}
-	for e := range sl.ListDirectories("/", true) {
-		rev = append(rev, e)
+	for e, err := range sl.ListDirectories("/", true) {
+		require.NoError(t, err)
+		rev = append(rev, *e)
 	}
 
 	require.Len(t, fwd, 3)
@@ -45,11 +47,13 @@ func TestListFilesReverse(t *testing.T) {
 	require.NoError(t, sl.PutFile("/f2.txt", "text/plain", mac, []byte("2"), nil))
 
 	var fwd, rev []scanlog.Entry
-	for e := range sl.ListFiles(scanlog.KindFile, "/", false) {
-		fwd = append(fwd, e)
+	for e, err := range sl.ListFiles(scanlog.KindFile, "/", false) {
+		require.NoError(t, err)
+		fwd = append(fwd, *e)
 	}
-	for e := range sl.ListFiles(scanlog.KindFile, "/", true) {
-		rev = append(rev, e)
+	for e, err := range sl.ListFiles(scanlog.KindFile, "/", true) {
+		require.NoError(t, err)
+		rev = append(rev, *e)
 	}
 
 	require.Len(t, fwd, 2)
@@ -70,11 +74,13 @@ func TestListDirectPathnamesReverse(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/parent/a/nested", mac, []byte("nested")))
 
 	var fwd, rev []scanlog.Entry
-	for e := range sl.ListDirectPathnames("/parent", false) {
-		fwd = append(fwd, e)
+	for e, err := range sl.ListDirectPathnames("/parent", false) {
+		require.NoError(t, err)
+		fwd = append(fwd, *e)
 	}
-	for e := range sl.ListDirectPathnames("/parent", true) {
-		rev = append(rev, e)
+	for e, err := range sl.ListDirectPathnames("/parent", true) {
+		require.NoError(t, err)
+		rev = append(rev, *e)
 	}
 
 	require.Len(t, fwd, 2)
@@ -120,8 +126,9 @@ func TestListPathnamesIncludesBothKinds(t *testing.T) {
 	require.NoError(t, sl.PutFile("/mixed/file.txt", "", mac, []byte("f"), nil))
 
 	var entries []scanlog.Entry
-	for e := range sl.ListPathnames("/mixed/", false) {
-		entries = append(entries, e)
+	for e, err := range sl.ListPathnames("/mixed/", false) {
+		require.NoError(t, err)
+		entries = append(entries, *e)
 	}
 	require.Len(t, entries, 2)
 }
@@ -136,8 +143,9 @@ func TestListPathnameEntriesHasPayload(t *testing.T) {
 	require.NoError(t, sl.PutFile("/data/file.bin", "application/octet-stream", mac, payload, nil))
 
 	var entries []scanlog.Entry
-	for e := range sl.ListPathnameEntries("/data/", false) {
-		entries = append(entries, e)
+	for e, err := range sl.ListPathnameEntries("/data/", false) {
+		require.NoError(t, err)
+		entries = append(entries, *e)
 	}
 	require.Len(t, entries, 1)
 	require.Equal(t, payload, entries[0].Payload)
@@ -149,8 +157,9 @@ func TestListPathMACsFromEmpty(t *testing.T) {
 	defer sl.Close()
 
 	var entries []scanlog.PathMACEntry
-	for e := range sl.ListPathMACsFrom(scanlog.KindError, "/nonexistent/") {
-		entries = append(entries, e)
+	for e, err := range sl.ListPathMACsFrom(scanlog.KindError, "/nonexistent/") {
+		require.NoError(t, err)
+		entries = append(entries, *e)
 	}
 	require.Empty(t, entries)
 }

@@ -79,7 +79,8 @@ func TestListDirectories(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/gamma", mac, []byte("c")))
 
 	var dirs []string
-	for entry := range sl.ListDirectories("/", false) {
+	for entry, err := range sl.ListDirectories("/", false) {
+		require.NoError(t, err)
 		dirs = append(dirs, entry.Path)
 	}
 	require.GreaterOrEqual(t, len(dirs), 3)
@@ -94,7 +95,8 @@ func TestListFiles(t *testing.T) {
 	require.NoError(t, sl.PutFile("/b.txt", "text/plain", mac, []byte("b"), nil))
 
 	var files []string
-	for entry := range sl.ListFiles(0, "/", false) {
+	for entry, err := range sl.ListFiles(0, "/", false) {
+		require.NoError(t, err)
 		files = append(files, entry.Path)
 	}
 	require.GreaterOrEqual(t, len(files), 2)
@@ -109,7 +111,8 @@ func TestListPathnames(t *testing.T) {
 	require.NoError(t, sl.PutFile("/dir1/file.txt", "text/plain", mac, []byte("f"), nil))
 
 	var paths []string
-	for entry := range sl.ListPathnames("/dir1", false) {
+	for entry, err := range sl.ListPathnames("/dir1", false) {
+		require.NoError(t, err)
 		paths = append(paths, entry.Path)
 	}
 	require.GreaterOrEqual(t, len(paths), 2)
@@ -123,7 +126,8 @@ func TestListPathnameEntries(t *testing.T) {
 	payload := []byte("entry payload")
 	require.NoError(t, sl.PutFile("/myfile.txt", "text/plain", mac, payload, nil))
 
-	for entry := range sl.ListPathnameEntries("/myfile.txt", false) {
+	for entry, err := range sl.ListPathnameEntries("/myfile.txt", false) {
+		require.NoError(t, err)
 		require.Equal(t, "/myfile.txt", entry.Path)
 		require.Equal(t, payload, entry.Payload)
 	}
@@ -140,7 +144,8 @@ func TestListDirectPathnames(t *testing.T) {
 	require.NoError(t, sl.PutDirectory("/parent/child1/grandchild", mac, []byte("grandchild")))
 
 	var names []string
-	for entry := range sl.ListDirectPathnames("/parent", false) {
+	for entry, err := range sl.ListDirectPathnames("/parent", false) {
+		require.NoError(t, err)
 		names = append(names, entry.Path)
 	}
 	// Only direct children: child1 and file.txt
@@ -181,8 +186,9 @@ func TestListPathMACsFrom(t *testing.T) {
 	require.NoError(t, sl.PutPathMAC(scanlog.KindXattr, "/xattr/b", mac2))
 
 	var entries []scanlog.PathMACEntry
-	for e := range sl.ListPathMACsFrom(scanlog.KindXattr, "/xattr/") {
-		entries = append(entries, e)
+	for e, err := range sl.ListPathMACsFrom(scanlog.KindXattr, "/xattr/") {
+		require.NoError(t, err)
+		entries = append(entries, *e)
 	}
 	require.Len(t, entries, 2)
 }
