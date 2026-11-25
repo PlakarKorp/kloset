@@ -1115,7 +1115,11 @@ func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, p
 func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) (*vfs.Summary, error) {
 	currentSummary := &vfs.Summary{}
 
-	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
+	for e, err := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
+		if err != nil {
+			return nil, err
+		}
+
 		switch e.Kind {
 		case scanlog.KindFile:
 			err := sourceCtx.summarizeFile(currentSummary, e.Summary)
@@ -1189,7 +1193,11 @@ func (sourceCtx *sourceContext) buildDirpack(builder *Builder, chunker *chunkers
 		resCh <- chunkifyResult{mac: mac, err: err}
 	}()
 
-	for e := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
+	for e, err := range sourceCtx.scanLog.ListDirectPathnames(pathname, false) {
+		if err != nil {
+			return objects.NilMac, err
+		}
+
 		if err := builder.AppContext().Err(); err != nil {
 			pw.CloseWithError(err)
 			return objects.NilMac, err
@@ -1379,7 +1387,11 @@ func (snap *Builder) relinkNodes(sourceCtx *sourceContext) error {
 
 	var missingMap = make(map[string]struct{})
 
-	for e := range sourceCtx.scanLog.ListPathnames("/", true) {
+	for e, err := range sourceCtx.scanLog.ListPathnames("/", true) {
+		if err != nil {
+			return err
+		}
+
 		missingMap[path.Dir(e.Path)] = struct{}{}
 		delete(missingMap, e.Path)
 	}
@@ -1407,7 +1419,11 @@ func (sourceCtx *sourceContext) buildErrorIndex() error {
 		sourceCtx.builder.appContext.GetLogger().Trace("import", "building error index took %s for %d entries", time.Since(t0), itemsCount)
 	}()
 
-	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindError, "/") {
+	for e, err := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindError, "/") {
+		if err != nil {
+			return err
+		}
+
 		if err := sourceCtx.indexes.erridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
@@ -1423,7 +1439,11 @@ func (sourceCtx *sourceContext) buildXattrIndex() error {
 		sourceCtx.builder.appContext.GetLogger().Trace("import", "building xattr index took %s for %d entries", time.Since(t0), itemsCount)
 	}()
 
-	for e := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindXattr, "/") {
+	for e, err := range sourceCtx.scanLog.ListPathMACsFrom(scanlog.KindXattr, "/") {
+		if err != nil {
+			return err
+		}
+
 		if err := sourceCtx.indexes.xattridx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return err
 		}
@@ -1440,7 +1460,11 @@ func (sourceCtx *sourceContext) buildVFSIndex() ([]string, error) {
 	}()
 
 	directories := make([]string, 0)
-	for e := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
+	for e, err := range sourceCtx.scanLog.ListPathnameEntries("/", true) {
+		if err != nil {
+			return nil, err
+		}
+
 		if err := sourceCtx.indexes.vfsidx.Insert(e.Path, e.MAC); err != nil && err != btree.ErrExists {
 			return nil, err
 		}
