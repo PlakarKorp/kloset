@@ -67,3 +67,52 @@ func TestSourceDedupCommonPrefix(t *testing.T) {
 	require.Len(t, s.Importers(), 2)
 	require.ElementsMatch(t, roots, []string{"/home/bar", "/home/foo"}) // It should be sorted
 }
+
+func TestSourceRejectsRelativeRoot(t *testing.T) {
+	for _, root := range []string{
+		"",
+		".",
+		"..",
+		"home/foo",
+		"home/foo/",
+		"./home/foo",
+		"../home/foo",
+		"C:/Users/foo", // a Windows path the importer forgot to convert to /C:/...
+	} {
+		t.Run(root, func(t *testing.T) {
+			bad := &ptesting.MockImporter{FakeRoot: root}
+
+			s, err := snapshot.NewSource(t.Context(), bad)
+			require.Error(t, err)
+			require.Nil(t, s)
+
+			// One bad importer must fail the whole source, wherever it is.
+			s, err = snapshot.NewSource(t.Context(), &ptesting.MockImporter{FakeRoot: "/home/bar"}, bad)
+			require.Error(t, err)
+			require.Nil(t, s)
+
+			s, err = snapshot.NewSource(t.Context(), bad, &ptesting.MockImporter{FakeRoot: "/home/bar"})
+			require.Error(t, err)
+			require.Nil(t, s)
+		})
+	}
+}
+
+func TestSourceAcceptsAbsoluteRoot(t *testing.T) {
+	for _, tc := range []struct {
+		root string
+		want string
+	}{
+		{"/", "/"},
+		{"/home/foo", "/home/foo"},
+		{"/home/foo/", "/home/foo"},
+		{"/home/foo/../bar", "/home/bar"},
+		{"/C:/Users/foo", "/C:/Users/foo"}, // Windows roots as the fs importer emits them
+	} {
+		t.Run(tc.root, func(t *testing.T) {
+			s, err := snapshot.NewSource(t.Context(), &ptesting.MockImporter{FakeRoot: tc.root})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, s.Root())
+		})
+	}
+}

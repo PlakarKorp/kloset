@@ -50,6 +50,10 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 			return nil, fmt.Errorf("mismatched flags when adding importer %d expected %d", flags, s.flags)
 		}
 
+		if !path.IsAbs(imp.Root()) {
+			return nil, fmt.Errorf("importer %q root needs to be absolute %q", typ, imp.Root())
+		}
+
 		is = append(is, imp)
 	}
 
@@ -58,7 +62,7 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 	}
 
 	slices.SortFunc(is, func(a, b importer.Importer) int {
-		return strings.Compare(a.Root(), b.Root())
+		return strings.Compare(path.Clean(a.Root()), path.Clean(b.Root()))
 	})
 
 	// Dedup common paths and shadowed paths eg:
@@ -66,41 +70,31 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 	paths := []string{}
 	for _, p := range is {
 		foundPrefix := false
-		for _, m := range s.importers {
-			if pathIsWithin(p.Root(), m.Root()) || pathEqual(p.Root(), m.Root()) {
+		curRoot := path.Clean(p.Root())
+		for _, m := range paths {
+			if pathIsWithin(curRoot, m) || curRoot == m {
 				foundPrefix = true
 				break
 			}
 		}
 		if !foundPrefix {
 			s.importers = append(s.importers, p)
-			paths = append(paths, p.Root())
+			paths = append(paths, curRoot)
 		}
 	}
 
 	// Now that everything is dedup'ed find the common root prefix eg:
 	// /etc/bar, /etc/baz would have /etc as the common root.
 	s.root = commonPathPrefixSlice(paths)
-	s.root = path.Clean(s.root)
 
 	return s, nil
 }
 
 func pathIsWithin(pathname string, within string) bool {
-	cleanPath := path.Clean(pathname)
-	cleanWithin := path.Clean(within)
-
-	if cleanWithin == "/" {
+	if within == "/" {
 		return true
 	}
-	return strings.HasPrefix(cleanPath, cleanWithin+"/")
-}
-
-func pathEqual(lhs, rhs string) bool {
-	cleanPath := path.Clean(lhs)
-	cleanWithin := path.Clean(rhs)
-
-	return cleanPath == cleanWithin
+	return strings.HasPrefix(pathname, within+"/")
 }
 
 func (s *Source) GetHeader() header.Source {
