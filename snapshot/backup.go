@@ -35,7 +35,7 @@ import (
 
 type sourceIndexes struct {
 	vfsidx     *btree.BTree[string, int, objects.MAC]
-	summaryidx *btree.BTree[string, int, []byte]
+	summaryidx *btree.BTree[string, int, objects.MAC]
 	erridx     *btree.BTree[string, int, objects.MAC]
 	xattridx   *btree.BTree[string, int, objects.MAC]
 	ctidx      *btree.BTree[string, int, objects.MAC]
@@ -756,7 +756,7 @@ func (snap *Builder) makeBackupIndexes() (*sourceIndexes, error) {
 		return nil, err
 	}
 
-	summarystore, err := caching.NewSQLiteDBStore[string, []byte](snap.tmpCacheDir(), "summary")
+	summarystore, err := caching.NewSQLiteDBStore[string, objects.MAC](snap.tmpCacheDir(), "summary")
 	if err != nil {
 		return nil, err
 	}
@@ -1093,16 +1093,12 @@ func (sourceCtx *sourceContext) summarizeFile(parentSummary *vfs.Summary, serial
 	return nil
 }
 
-func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string) error {
-	val, found, err := sourceCtx.indexes.summaryidx.Find(pathname)
-	if err != nil {
-		return err
-	}
-	if !found {
+func (sourceCtx *sourceContext) summarizeDirectory(parentSummary *vfs.Summary, pathname string, serialized []byte) error {
+	if serialized == nil {
 		return fmt.Errorf("path %q not found in the summary index", pathname)
 	}
 
-	currentSummary, err := vfs.SummaryFromBytes(val)
+	currentSummary, err := vfs.SummaryFromBytes(serialized)
 	if err != nil {
 		return err
 	}
@@ -1127,7 +1123,7 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 				return nil, err
 			}
 		case scanlog.KindDirectory:
-			err := sourceCtx.summarizeDirectory(currentSummary, e.Path)
+			err := sourceCtx.summarizeDirectory(currentSummary, e.Path, e.Summary)
 			if err != nil {
 				return nil, err
 			}
@@ -1149,10 +1145,13 @@ func (sourceCtx *sourceContext) buildSummary(builder *Builder, pathname string) 
 		return nil, err
 	}
 
-	if err := sourceCtx.indexes.summaryidx.Insert(pathname, serializedSummary); err != nil {
+	summaryMAC := builder.repository.ComputeMAC(serializedSummary)
+	if err := sourceCtx.scanLog.PutDirectorySummary(pathname, serializedSummary); err != nil {
 		return nil, err
 	}
-	summaryMAC := builder.repository.ComputeMAC(serializedSummary)
+	if err := sourceCtx.indexes.summaryidx.Insert(pathname, summaryMAC); err != nil {
+		return nil, err
+	}
 	if err := builder.repository.PutBlobIfNotExists(resources.RT_VFS_SUMMARY, summaryMAC, serializedSummary, true); err != nil {
 		return nil, err
 	}
@@ -1703,8 +1702,8 @@ func (snap *Builder) persistVFS(sourceCtx *sourceContext) (*header.VFS, []header
 		}()
 
 		m, err := persistIndex(snap, sourceCtx.indexes.summaryidx,
-			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(data []byte) (objects.MAC, error) {
-				return snap.repository.ComputeMAC(data), nil
+			resources.RT_BTREE_ROOT, resources.RT_BTREE_NODE, func(mac objects.MAC) (objects.MAC, error) {
+				return mac, nil
 			})
 		if err != nil {
 			return err

@@ -159,6 +159,29 @@ func (s *ScanLog) put(kind EntryKind, p string, ctype string, mac objects.MAC, p
 	return err
 }
 
+// PutDirectorySummary adds the summary to the directory entry
+// associated with p.  It is an error to call this *before*
+// PutDirectory.
+func (s *ScanLog) PutDirectorySummary(p string, payload []byte) error {
+	payload = s.db.Encode(payload)
+
+	row := s.db.QueryRow(`
+UPDATE entries SET summary = ?
+ WHERE path = ? AND kind = 1
+RETURNING TRUE
+`,
+		payload, p)
+
+	var found bool
+	if err := row.Scan(&found); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("directory %q not found", p)
+		}
+		return err
+	}
+	return nil
+}
+
 func (s *ScanLog) GetDirectory(p string) ([]byte, error) {
 	return s.get(KindDirectory, p)
 }
