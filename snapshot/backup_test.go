@@ -1,6 +1,8 @@
 package snapshot_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/PlakarKorp/kloset/connectors"
 	"github.com/PlakarKorp/kloset/objects"
+	"github.com/PlakarKorp/kloset/repository"
+	"github.com/PlakarKorp/kloset/snapshot"
 	ptesting "github.com/PlakarKorp/kloset/testing"
 	"github.com/stretchr/testify/require"
 )
@@ -118,4 +122,44 @@ func TestBackupEmptyScan(t *testing.T) {
 
 	summary := snap.Header.GetSource(0).Summary
 	require.Equal(t, summary.Below.Directories, uint64(0))
+}
+
+// failingImporter emits a batch of records, closes the channel as the
+// contract requires, then fails. The workers are still chewing on the
+// records when Import returns, so the backup has to wait for them before
+// reporting the scan counters.
+type failingImporter struct{ *ptesting.MockImporter }
+
+func (failingImporter) Import(ctx context.Context, records chan<- *connectors.Record, results <-chan *connectors.Result) (map[string]string, error) {
+	defer close(records)
+
+	for i := range 256 {
+		f := ptesting.NewMockFile(fmt.Sprintf("f%d", i), 0644, "hello world!\n")
+		select {
+		case records <- f.ScanResult():
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return nil, errors.New("importer gave up")
+}
+
+func TestBackupImporterError(t *testing.T) {
+	repo := ptesting.GenerateRepository(t, nil, nil, nil)
+
+	builder, err := snapshot.Create(repo, repository.DefaultType, "", objects.NilMac,
+		&snapshot.BuilderOptions{})
+	require.NoError(t, err)
+	t.Cleanup(func() { builder.Close() })
+
+	base, err := ptesting.NewMockImporter(repo.AppContext(), &connectors.Options{},
+		"mock", map[string]string{"location": "mock://place"})
+	require.NoError(t, err)
+
+	src, err := snapshot.NewSource(repo.AppContext(),
+		failingImporter{base.(*ptesting.MockImporter)})
+	require.NoError(t, err)
+
+	err = builder.Backup(src)
+	require.ErrorContains(t, err, "importer gave up")
 }
