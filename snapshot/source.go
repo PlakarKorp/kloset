@@ -50,6 +50,10 @@ func NewSource(ctx context.Context, importers ...importer.Importer) (*Source, er
 			return nil, fmt.Errorf("mismatched flags when adding importer %d expected %d", flags, s.flags)
 		}
 
+		if !path.IsAbs(imp.Root()) {
+			return nil, fmt.Errorf("importer %q root needs to be absolute %q", typ, imp.Root())
+		}
+
 		is = append(is, imp)
 	}
 
