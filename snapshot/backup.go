@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"math"
 	"mime"
 	"os"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -257,12 +259,12 @@ func (snap *Builder) warmVFSStage(ctx context.Context, pvfs *vfs.Filesystem, in 
 	}
 }
 
-func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) error {
+func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContext, stats *scanStats) (map[string]string, error) {
 	var ckers []*chunkers.Chunker
 	for range snap.AppContext().MaxConcurrency {
 		cker, err := snap.repository.Chunker(nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		ckers = append(ckers, cker)
@@ -342,7 +344,7 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		}
 	}()
 
-	_, importerErr := imp.Import(ctx, scanned, results)
+	meta, importerErr := imp.Import(ctx, scanned, results)
 	if results != nil {
 		for range results {
 			// drain the results channel so that we unblock the
@@ -350,17 +352,17 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 		}
 	}
 	if importerErr != nil {
-		return importerErr
+		return nil, importerErr
 	}
 
 	if err := <-errch; err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return meta, nil
 }
 
-func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
+func (snap *Builder) importerJob(sourceCtx *sourceContext) (map[string]string, error) {
 	t0 := time.Now()
 	defer func() {
 		sourceCtx.builder.appContext.GetLogger().Trace("import", "importer job took %s", time.Since(t0))
@@ -377,19 +379,24 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) error {
 		})
 	}()
 
+	meta := make(map[string]string)
+
 	for _, imp := range sourceCtx.source.Importers() {
-		if err := snap.importSource(imp, sourceCtx, &stats); err != nil {
-			return err
+		m, err := snap.importSource(imp, sourceCtx, &stats)
+		if err != nil {
+			return nil, err
 		}
+
+		maps.Copy(meta, m)
 	}
 
 	// Flush any left over entries.
 	if err := sourceCtx.vfsEntBatch.Commit(); err != nil {
-		return err
+		return nil, err
 	}
 
 	sourceCtx.vfsEntBatch = nil
-	return nil
+	return meta, nil
 }
 
 func (snap *Builder) Import(source *Source) error {
@@ -423,7 +430,8 @@ func (snap *Builder) Backup(source *Source) error {
 	defer sourceCtx.scanLog.Close()
 
 	/* phase 1: import data/metadata from source, reuse cached or store new, log to scanlog */
-	if err := snap.importerJob(sourceCtx); err != nil {
+	meta, err := snap.importerJob(sourceCtx)
+	if err != nil {
 		snap.repository.PackerManager.Wait()
 		return err
 	}
@@ -447,6 +455,18 @@ func (snap *Builder) Backup(source *Source) error {
 	headerSource.VFS = *vfsHeader
 	headerSource.Summary = *rootSummary
 	headerSource.Indexes = indexes
+
+	headerSource.Context = make([]header.KeyValue, 0, len(meta))
+	for k, v := range meta {
+		headerSource.Context = append(headerSource.Context, header.KeyValue{
+			Key:   k,
+			Value: v,
+		})
+	}
+	slices.SortFunc(headerSource.Context, func(a, b header.KeyValue) int {
+		return strings.Compare(a.Key, b.Key)
+	})
+
 	snap.Header.Sources = append(snap.Header.Sources, headerSource)
 
 	return nil

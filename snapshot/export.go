@@ -273,7 +273,15 @@ func (snap *Snapshot) Export(exp exporter.Exporter, pathname string, opts *Expor
 		}
 	}()
 
-	err = exp.Export(snap.AppContext(), nil, records, results)
+	var (
+		sctx = snap.Header.GetSource(0).Context
+		meta = make(map[string]string, len(sctx))
+	)
+	for i := range sctx {
+		meta[sctx[i].Key] = sctx[i].Value
+	}
+
+	err = exp.Export(snap.AppContext(), meta, records, results)
 
 	wg.Wait() // wait the events reporting before exiting.
 
