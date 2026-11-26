@@ -351,12 +351,15 @@ func (snap *Builder) importSource(imp importer.Importer, sourceCtx *sourceContex
 			// workers.
 		}
 	}
+
+	// Always wait for the workers: they write to stats until they're gone.
+	workerErr := <-errch
+
 	if importerErr != nil {
 		return nil, importerErr
 	}
-
-	if err := <-errch; err != nil {
-		return nil, err
+	if workerErr != nil {
+		return nil, workerErr
 	}
 
 	return meta, nil
@@ -373,9 +376,9 @@ func (snap *Builder) importerJob(sourceCtx *sourceContext) (map[string]string, e
 	snap.emitter.Info("snapshot.import.start", map[string]any{})
 	defer func() {
 		snap.emitter.Info("snapshot.import.done", map[string]any{
-			"nfiles": stats.nfiles,
-			"ndirs":  stats.ndirs,
-			"size":   stats.size,
+			"nfiles": atomic.LoadUint64(&stats.nfiles),
+			"ndirs":  atomic.LoadUint64(&stats.ndirs),
+			"size":   atomic.LoadUint64(&stats.size),
 		})
 	}()
 
