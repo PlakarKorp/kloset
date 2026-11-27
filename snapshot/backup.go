@@ -882,6 +882,12 @@ func (snap *Builder) checkVFSCache(sourceCtx *sourceContext, record *connectors.
 	if !same {
 		return nil, nil
 	}
+
+	same = slices.Equal(entry.ExtendedAttributes, record.ExtendedAttributes)
+	if !same {
+		return nil, nil
+	}
+
 	record.FileInfo = entry.FileInfo
 
 	snap.emitter.PathCached(record.Pathname)
