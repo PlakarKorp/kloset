@@ -283,6 +283,27 @@ func TopoSort(states []objects.MAC, getParent func(stateID objects.MAC) (objects
 	return orderedStates, nil
 }
 
+func (r *Repository) MissingStates() ([]objects.MAC, error) {
+	localStates, err := r.state.GetStates()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list cached states: %w", err)
+	}
+
+	storeStates, err := r.GetStates()
+	if err != nil {
+		return nil, fmt.Errorf("failed to list store states: %w", err)
+	}
+
+	missingStates := make([]objects.MAC, 0)
+	for _, stateID := range storeStates {
+		if _, exists := localStates[stateID]; !exists {
+			missingStates = append(missingStates, stateID)
+		}
+	}
+
+	return missingStates, nil
+}
+
 func (r *Repository) RebuildState() error {
 	t0 := time.Now()
 	defer func() {
