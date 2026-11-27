@@ -1009,6 +1009,10 @@ func (snap *Builder) writeFileEntry(idx int, sourceCtx *sourceContext, meta *con
 		if err != nil {
 			return err
 		}
+
+		if snap.repository.ComputeMAC(serializedFileEntry) != fileEntryMAC {
+			return fmt.Errorf("computed file entry's mac mismatch the cache one for %s", record.Pathname)
+		}
 	} else {
 
 		fileEntry.Chunks = meta.Chunks
